@@ -169,11 +169,21 @@ describe('CodeCell completion provider', () => {
       { lineNumber: 1, column: 8 }
     );
 
-    expect(complete).toHaveBeenCalledWith('kernel-1', 'os.path.', 7);
+    // The request is issued at the START of the current word ('path' → 3),
+    // so the kernel returns all candidates for the context and Monaco
+    // filters the typed prefix client-side.
+    expect(complete).toHaveBeenCalledWith('kernel-1', 'os.path.', 3);
     expect(result.suggestions.map((s) => s.label)).toEqual(['join', 'exists']);
     expect(result.suggestions[0].insertText).toBe('join');
     expect(result.suggestions[0].kind).toBe(1);
     expect(result.suggestions[1].kind).toBe(7);
+
+    // A repeat trigger for the same word context is a cache hit.
+    await completionProvider!.provideCompletionItems(
+      makeModel('os.path.'),
+      { lineNumber: 1, column: 8 }
+    );
+    expect(complete).toHaveBeenCalledTimes(1);
   });
 
   it('adds pdv_tree fallback for pdv* prefix completions', async () => {

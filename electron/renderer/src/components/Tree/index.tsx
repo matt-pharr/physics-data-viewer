@@ -1,25 +1,39 @@
 /**
  * Tree panel — browsable view of `pdv_tree` descriptors.
  *
- * Fetches root/child nodes via `treeService`, preserves expansion/selection
- * state in localStorage, and exposes context-menu actions back to `App`.
+ * Server state (children listings) lives in React Query — one query per
+ * expanded path (`['tree', kernelId, path]`), invalidated by push events via
+ * `queries/invalidation.ts`. This component owns only UI state: which paths
+ * are expanded, the selection (persisted per project in localStorage), and
+ * the context menu. A low-frequency safety-net poll revalidates visible
+ * listings through the same cache to catch plain-dict mutations that emit no
+ * push; it stays quiet while pushes are flowing.
  */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { List, type ListImperativeAPI, type RowComponentProps } from 'react-window';
-import { treeService, type TreeNodeData } from '../../services/tree';
+import type { TreeNodeData } from '../../services/tree';
 import { TreeNodeRow } from './TreeNodeRow';
 import { ContextMenu } from './ContextMenu';
-import { childrenDiffer, flattenTree, findNode, mergeChildren, removeNodeImmut, updateNodeImmut } from './tree-utils';
-import type { TreeChangeInfo } from '../../types';
+import { flattenFromCache, collapseSubtree, type TreeRow } from './tree-utils';
+import {
+  useTreeChildrenQueries,
+  pollTreeOnce,
+  TREE_POLL_INTERVAL_MS,
+  TREE_PUSH_SUPPRESS_MS,
+} from '../../queries/tree';
+import { invalidateTree, msSinceTreePush, parentTreePath } from '../../queries/invalidation';
 import type { Shortcuts } from '../../shortcuts';
 import { matchesShortcut } from '../../shortcuts';
 
 const ROW_HEIGHT = 32;
 
+/** How long a pending fetch must run before its row shows a spinner. */
+const LOADING_SPINNER_DELAY_MS = 1000;
+
 /** Props passed to VirtualRow via react-window's rowProps. */
 interface VirtualRowProps {
-  flatNodes: Array<TreeNodeData & { depth: number }>;
+  flatNodes: TreeRow[];
   selectedPath: string | null;
   onExpand: (node: TreeNodeData) => void;
   onDoubleClick: (node: TreeNodeData) => void;
@@ -53,14 +67,6 @@ const VirtualRow = React.memo(VirtualRowImpl) as unknown as typeof VirtualRowImp
 interface TreeProps {
   kernelId: string | null;
   disabled?: boolean;
-  refreshToken?: number;
-  pendingChanges?: TreeChangeInfo[];
-  /**
-   * Called with the exact change batch that was consumed so the owner can
-   * remove those entries (and only those) from its queue — changes pushed
-   * between render and effect commit must survive.
-   */
-  onChangesConsumed?: (consumed: TreeChangeInfo[]) => void;
   onAction?: (action: string, node: TreeNodeData) => void;
   shortcuts: Shortcuts;
   /**
@@ -86,13 +92,64 @@ function readStoredSelection(storageKey: string): string | null {
   }
 }
 
+/**
+ * Cache-friendly map of parent path → children, rebuilt only when a query's
+ * data identity actually changes (structural sharing keeps identities stable
+ * across no-op refetches, so no-op polls rebuild nothing).
+ */
+function useChildrenByPath(
+  paths: readonly string[],
+  datas: readonly (TreeNodeData[] | undefined)[],
+): ReadonlyMap<string, TreeNodeData[]> {
+  const ref = useRef<{
+    paths: readonly string[];
+    datas: readonly (TreeNodeData[] | undefined)[];
+    map: Map<string, TreeNodeData[]>;
+  } | null>(null);
+  const cached = ref.current;
+  const unchanged =
+    cached !== null &&
+    cached.paths.length === paths.length &&
+    cached.paths.every((p, i) => p === paths[i]) &&
+    cached.datas.every((d, i) => d === datas[i]);
+  if (!unchanged) {
+    const map = new Map<string, TreeNodeData[]>();
+    paths.forEach((p, i) => {
+      const data = datas[i];
+      if (data) map.set(p, data);
+    });
+    ref.current = { paths, datas, map };
+  }
+  return ref.current!.map;
+}
+
+/**
+ * Paths whose fetch has been pending longer than `delayMs`, for spinner
+ * display without flashing on fast fetches.
+ */
+function useDeferredLoadingPaths(pendingPaths: string[], delayMs: number): ReadonlySet<string> {
+  const [deferred, setDeferred] = useState<ReadonlySet<string>>(() => new Set());
+  // NUL never appears in tree paths, so the joined key is collision-free
+  // even when node keys contain spaces.
+  const key = pendingPaths.join('\u0000');
+  useEffect(() => {
+    // Drop entries that are no longer pending right away…
+    setDeferred((prev) => {
+      const next = new Set([...prev].filter((p) => pendingPaths.includes(p)));
+      return next.size === prev.size ? prev : next;
+    });
+    if (pendingPaths.length === 0) return;
+    // …and promote the still-pending set only after the delay.
+    const timer = setTimeout(() => setDeferred(new Set(pendingPaths)), delayMs);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- key encodes pendingPaths
+  }, [key, delayMs]);
+  return deferred;
+}
+
 /** Tree browser component for node navigation and node actions. */
-export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshToken = 0, pendingChanges, onChangesConsumed, onAction, shortcuts, projectKey }) => {
-  const [nodes, setNodes] = useState<TreeNodeData[]>([]);
-  const nodesRef = useRef(nodes);
-  nodesRef.current = nodes;
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | undefined>();
+export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, onAction, shortcuts, projectKey }) => {
+  const [expandedPaths, setExpandedPaths] = useState<ReadonlySet<string>>(() => new Set());
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   // Selection persistence is scoped per project so switching projects
   // doesn't inherit (or clobber) another project's selection.
@@ -101,78 +158,49 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshT
     readStoredSelection(selectionStorageKey),
   );
 
-  const expandedPathsRef = useRef<Set<string>>(new Set());
+  const expandedPathsRef = useRef(expandedPaths);
+  expandedPathsRef.current = expandedPaths;
   const listRef = useRef<ListImperativeAPI>(null);
 
-  const loadRoot = useCallback(async () => {
-    // Show the loading placeholder only when there is nothing on screen
-    // yet; refreshes of a populated tree swap content in place.
-    setLoading(nodesRef.current.length === 0);
-    setError(undefined);
-    if (!kernelId || disabled) {
-      setNodes([]);
-      setLoading(false);
-      setError(undefined);
-      return;
-    }
-    try {
-      const rootNodes = await treeService.getRootNodes(kernelId);
+  // One mounted query per visible level: root first, then expanded paths in
+  // a stable order. Invalidation refetches them all in parallel.
+  const paths = useMemo(
+    () => ['', ...Array.from(expandedPaths).sort()],
+    [expandedPaths],
+  );
+  const results = useTreeChildrenQueries(kernelId, paths, !disabled);
 
-      // Preserve the set of previously expanded paths so the tree doesn't
-      // collapse on every refresh. Paths that no longer exist in the new tree
-      // are pruned after re-expansion.
-      const previouslyExpanded = expandedPathsRef.current;
-      const newExpanded = new Set(['']);
+  const datas = results.map((r) => r.data);
+  const childrenByPath = useChildrenByPath(paths, datas);
 
-      // Re-expand previously open nodes by depth (parents before children)
-      // so each level's children are available for the next level.
-      const sortedPaths = Array.from(previouslyExpanded)
-        .filter((p) => p !== '')
-        .sort((a, b) => a.split('.').length - b.split('.').length);
+  const pendingPaths = paths.filter((_p, i) => results[i].data === undefined && !results[i].error);
+  const loadingPaths = useDeferredLoadingPaths(pendingPaths, LOADING_SPINNER_DELAY_MS);
 
-      // Build a lookup from path → node for the freshly-fetched root children.
-      // The service returns fresh objects on every call, so tagging expansion
-      // state onto them here mutates nothing shared with other callers.
-      const nodeMap = new Map<string, TreeNodeData>();
-      for (const n of rootNodes) nodeMap.set(n.path, n);
+  const rootResult = results[0];
+  const loading = !disabled && kernelId !== null && rootResult.data === undefined && !rootResult.error;
+  const error = rootResult.error ? 'Failed to load tree' : undefined;
 
-      for (const expandPath of sortedPaths) {
-        const target = nodeMap.get(expandPath);
-        if (!target || !target.hasChildren) continue;
-        try {
-          const children = await treeService.getChildren(target, kernelId);
-          target.isExpanded = true;
-          target.children = children;
-          newExpanded.add(expandPath);
-          for (const child of children) nodeMap.set(child.path, child);
-        } catch {
-          // Node may have been removed — skip silently.
-        }
+  // Reconcile expansion with reality: collapse paths that vanished from
+  // their parent's (loaded) listing or whose own listing failed to load
+  // (node removed mid-expansion). Cheap set surgery, no fetches.
+  const erroredKey = paths.filter((p, i) => p !== '' && results[i].error).join('\u0000');
+  useEffect(() => {
+    if (expandedPaths.size === 0) return;
+    let next: ReadonlySet<string> | null = null;
+    const current = (): ReadonlySet<string> => next ?? expandedPaths;
+    for (const p of expandedPaths) {
+      const parent = parentTreePath(p);
+      const parentListing = childrenByPath.get(parent);
+      const parentVisible = parent === '' || expandedPaths.has(parent);
+      if (parentVisible && parentListing && !parentListing.some((n) => n.path === p)) {
+        next = collapseSubtree(current(), p);
       }
-
-      expandedPathsRef.current = newExpanded;
-
-      // Wrap in a synthetic root node so there is always a right-clickable
-      // container even when the tree is empty.
-      const syntheticRoot: TreeNodeData = {
-        id: '__root__',
-        key: 'pdv_tree',
-        path: '',
-        type: 'root',
-        preview: '',
-        hasChildren: true,
-        parentPath: null,
-        isExpanded: true,
-        children: rootNodes,
-      };
-      setNodes([syntheticRoot]);
-    } catch (err) {
-      console.error('[Tree] Failed to load root nodes', err);
-      setError('Failed to load tree');
-    } finally {
-      setLoading(false);
     }
-  }, [kernelId, disabled]);
+    for (const p of erroredKey ? erroredKey.split('\u0000') : []) {
+      if (current().has(p)) next = collapseSubtree(current(), p);
+    }
+    if (next) setExpandedPaths(next);
+  }, [childrenByPath, expandedPaths, erroredKey]);
 
   // Persist selection per project; when the project (storage key) changes,
   // load that project's stored selection instead of persisting the old one.
@@ -194,56 +222,23 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshT
     }
   }, [selectedPath, selectionStorageKey]);
 
-  useEffect(() => {
-    void loadRoot();
-  }, [loadRoot, refreshToken]);
-
   // Safety-net poll. Push notifications cover all PDVTree mutations, but
   // plain-dict mutations under the tree (e.g. `pdv_tree['data']['x'] = 1`
-  // when `data` is a plain dict) emit nothing. Once a second, fetch the
-  // root and every currently-expanded subtree, structurally compare the
-  // children, and patch just the drifted paths in place. Most ticks detect
-  // no change and are effectively free thanks to the kernel's dedicated
-  // read-only query thread (pdv.query_server). The next tick is scheduled
-  // only after the previous walk finishes, so slow walks never overlap.
+  // when `data` is a plain dict) emit nothing. Every tick revalidates the
+  // root and every expanded listing through the shared cache — in parallel,
+  // so a tick costs one round trip of wall-clock. Ticks are skipped while
+  // pushes are flowing (the push pipeline is proven live) and fetches that
+  // return unchanged data notify nothing (structural sharing + narrowed
+  // notifyOnChangeProps), so idle ticks cause zero re-renders. The next
+  // tick is scheduled only after the previous pass finishes.
   useEffect(() => {
     if (!kernelId || disabled) return;
     let cancelled = false;
     let timer: number | undefined;
 
     const pollOnce = async () => {
-      // Snapshot the paths to check at tick start so concurrent expansion
-      // changes during the poll don't matter.
-      const pathsToCheck = ['', ...expandedPathsRef.current];
-
-      for (const path of pathsToCheck) {
-        if (cancelled) return;
-        let fresh: TreeNodeData[];
-        try {
-          fresh =
-            path === ''
-              ? await treeService.getRootNodes(kernelId)
-              : await treeService.listByPath(kernelId, path);
-        } catch {
-          // Path may have been removed, or the kernel may be transiently
-          // unavailable — skip without disturbing the UI.
-          continue;
-        }
-        if (cancelled) return;
-
-        const currentNode =
-          path === '' ? nodesRef.current[0] : findNode(nodesRef.current, path);
-        const current = currentNode?.children ?? [];
-
-        if (childrenDiffer(current, fresh)) {
-          // Patch only the drifted path, preserving expansion state of
-          // surviving children — no full-depth refetch, no loading flash.
-          const merged = mergeChildren(fresh, current);
-          setNodes((prev) =>
-            updateNodeImmut(prev, path, (n) => ({ ...n, children: merged })),
-          );
-        }
-      }
+      if (msSinceTreePush() < TREE_PUSH_SUPPRESS_MS) return;
+      await pollTreeOnce(kernelId, expandedPathsRef.current);
     };
 
     const scheduleNext = () => {
@@ -251,7 +246,7 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshT
         void pollOnce().finally(() => {
           if (!cancelled) scheduleNext();
         });
-      }, 1000);
+      }, TREE_POLL_INTERVAL_MS);
     };
     scheduleNext();
     return () => {
@@ -260,118 +255,18 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshT
     };
   }, [kernelId, disabled]);
 
-  // Incremental tree update from push notifications — avoids full reload.
-  // Processes a queue of changes so rapid successive updates are not lost.
-  useEffect(() => {
-    if (!pendingChanges || pendingChanges.length === 0 || !kernelId || disabled) return;
-    // Consume this snapshot of the queue in one pass. Report exactly what
-    // was consumed so the owner removes only these entries — a change
-    // pushed between render and this effect must stay queued.
-    const changes = pendingChanges;
-    onChangesConsumed?.(changes);
-
-    // Collect all removals and parent paths to refresh across the batch.
-    const removals: string[] = [];
-    const parentsToRefresh = new Set<string>();
-
-    for (const { changed_paths, change_type } of changes) {
-      if (change_type === 'removed') {
-        removals.push(...changed_paths);
+  const handleExpand = useCallback((node: TreeNodeData) => {
+    if (!kernelId || disabled || !node.hasChildren) return;
+    setExpandedPaths((prev) => {
+      if (prev.has(node.path)) {
+        // Collapse: clear this path and all descendant expansions. Cached
+        // listings are retained, so re-expanding renders instantly.
+        return collapseSubtree(prev, node.path);
       }
-      for (const changedPath of changed_paths) {
-        const dotIdx = changedPath.lastIndexOf('.');
-        const parentPath = dotIdx > 0 ? changedPath.substring(0, dotIdx) : '';
-        // For batch, added, or updated: re-fetch the parent.
-        if (change_type !== 'removed') {
-          parentsToRefresh.add(parentPath);
-        }
-      }
-    }
-
-    // Apply removals synchronously.
-    if (removals.length > 0) {
-      setNodes((prev) => {
-        let updated = prev;
-        for (const path of removals) {
-          updated = removeNodeImmut(updated, path);
-        }
-        return updated;
-      });
-    }
-
-    // Re-fetch parents of added/updated paths (only if expanded).
-    if (parentsToRefresh.size > 0) {
-      const refreshParents = async () => {
-        for (const parentPath of parentsToRefresh) {
-          if (parentPath !== '' && !expandedPathsRef.current.has(parentPath)) continue;
-
-          // Read current nodes via ref to avoid stale closure.
-          const parentNode = parentPath === '' ? null : findNode(nodesRef.current, parentPath);
-          let freshChildren: TreeNodeData[];
-          if (parentPath === '') {
-            freshChildren = await treeService.getRootNodes(kernelId);
-          } else if (parentNode) {
-            freshChildren = await treeService.getChildren(parentNode, kernelId);
-          } else {
-            continue;
-          }
-
-          // Merge fresh children with existing ones to preserve expansion
-          // state. Fresh nodes from the API have isExpanded=false and no
-          // children; existing expanded nodes carry both.
-          const existingParent = parentPath === ''
-            ? nodesRef.current[0]
-            : findNode(nodesRef.current, parentPath);
-          const mergedChildren = mergeChildren(freshChildren, existingParent?.children);
-
-          if (parentPath === '') {
-            setNodes((prev) => updateNodeImmut(prev, '', (n) => ({ ...n, children: mergedChildren })));
-          } else {
-            setNodes((prev) => updateNodeImmut(prev, parentPath, (n) => ({ ...n, children: mergedChildren, isExpanded: true })));
-          }
-        }
-      };
-      void refreshParents();
-    }
-  }, [pendingChanges, kernelId, disabled, onChangesConsumed]);
-
-  const handleExpand = useCallback(async (node: TreeNodeData) => {
-    if (!kernelId || disabled) return;
-    if (node.isExpanded) {
-      // Collapse: discard children and clear all descendant expanded paths.
-      setNodes((prev) => updateNodeImmut(prev, node.path, (n) => ({ ...n, isExpanded: false, children: undefined })));
-      const prefix = node.path ? node.path + '.' : '';
-      for (const p of Array.from(expandedPathsRef.current)) {
-        if (p === node.path || (prefix && p.startsWith(prefix))) {
-          expandedPathsRef.current.delete(p);
-        }
-      }
-      return;
-    }
-
-    expandedPathsRef.current.add(node.path);
-    // Show spinner only if the fetch takes longer than 1s to avoid flashing.
-    const loadingTimer = setTimeout(() => {
-      setNodes((prev) => updateNodeImmut(prev, node.path, (n) => ({ ...n, isLoading: true })));
-    }, 1000);
-    try {
-      const children = await treeService.getChildren(node, kernelId);
-      clearTimeout(loadingTimer);
-      expandedPathsRef.current.add(node.path);
-      setNodes((prev) =>
-        updateNodeImmut(prev, node.path, (n) => ({
-          ...n,
-          isExpanded: true,
-          isLoading: false,
-          children,
-        })),
-      );
-    } catch (err) {
-      clearTimeout(loadingTimer);
-      console.error('[Tree] Failed to load children for', node.key, err);
-      setError(`Failed to load children for ${node.key}`);
-      setNodes((prev) => updateNodeImmut(prev, node.path, (n) => ({ ...n, isLoading: false })));
-    }
+      const next = new Set(prev);
+      next.add(node.path);
+      return next;
+    });
   }, [kernelId, disabled]);
 
   const handleDoubleClick = useCallback((node: TreeNodeData) => {
@@ -407,13 +302,16 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshT
     if (disabled) return;
     setContextMenu(null);
     if (action === 'refresh') {
-      void loadRoot();
+      if (kernelId) invalidateTree(kernelId);
       return;
     }
     onAction?.(action, node);
   };
 
-  const flatNodes = useMemo(() => flattenTree(nodes), [nodes]);
+  const flatNodes = useMemo(
+    () => flattenFromCache(childrenByPath, expandedPaths, loadingPaths),
+    [childrenByPath, expandedPaths, loadingPaths],
+  );
 
   const rowProps = useMemo<VirtualRowProps>(() => ({
     flatNodes,
@@ -472,16 +370,19 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshT
     if (event.key === 'ArrowRight' && selectedNode && !disabled) {
       event.preventDefault();
       if (selectedNode.hasChildren && !selectedNode.isExpanded) {
-        await handleExpand(selectedNode);
-      } else if (selectedNode.isExpanded && selectedNode.children && selectedNode.children.length > 0) {
-        setSelectedPath(selectedNode.children[0].path);
+        handleExpand(selectedNode);
+      } else if (selectedNode.isExpanded) {
+        const children = childrenByPath.get(selectedNode.path);
+        if (children && children.length > 0) {
+          setSelectedPath(children[0].path);
+        }
       }
       return;
     }
     if (event.key === 'ArrowLeft' && selectedNode && !disabled) {
       event.preventDefault();
       if (selectedNode.isExpanded && selectedNode.hasChildren) {
-        await handleExpand(selectedNode);
+        handleExpand(selectedNode);
       } else if (selectedNode.parentPath !== null) {
         // Step up to parent. parentPath of '' means the synthetic root row.
         setSelectedPath(selectedNode.parentPath);
@@ -558,4 +459,3 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshT
     </div>
   );
 };
-

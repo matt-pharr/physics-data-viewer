@@ -690,6 +690,15 @@ def bootstrap(ip=None):
     if ip is not None:
         comms_mod.register_comm_target(ip)
 
+    # Post-execute structural fingerprint: catches plain-dict mutations that
+    # emit no change notification, bumping the tree version (served by
+    # pdv.tree.version) and pinging the renderer on silent drift.
+    if ip is not None and hasattr(ip, "events"):
+        try:
+            ip.events.register("post_execute", PDVTree._post_execute_check)
+        except Exception:  # noqa: BLE001 — never let bootstrap fail on this
+            pass
+
     # Configure a non-blocking interactive matplotlib backend so that
     # plt.show() opens native windows rather than falling back to the
     # ipykernel default (inline/Agg), which would silently swallow plots.

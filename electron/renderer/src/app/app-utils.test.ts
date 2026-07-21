@@ -4,12 +4,14 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  appendLogEntry,
   mergeConfigUpdate,
   normalizeLoadedCodeCells,
   normalizeRecentProjects,
 } from "./app-utils";
-import { MAX_RECENT_PROJECTS } from "./constants";
+import { MAX_IMAGE_LOG_ENTRIES, MAX_LOG_ENTRIES, MAX_RECENT_PROJECTS } from "./constants";
 import type { Config } from "../types/pdv";
+import type { LogEntry } from "../types";
 
 describe("normalizeLoadedCodeCells", () => {
   it("returns a single empty tab when input is invalid (null / non-object / empty)", () => {
@@ -146,5 +148,48 @@ describe("mergeConfigUpdate", () => {
     } as unknown as Config;
     const merged = mergeConfigUpdate(base, { theme: 'dark' });
     expect(merged.launchers?.agent?.command).toBe('claude');
+  });
+});
+
+describe("appendLogEntry", () => {
+  const entry = (id: number, withImage = false): LogEntry => ({
+    id: `e${id}`,
+    timestamp: id,
+    code: "",
+    ...(withImage ? { images: [{ mime: "image/png", data: "AAA" }] } : {}),
+  });
+
+  it("appends and enforces the total-entry cap", () => {
+    let logs: LogEntry[] = [];
+    for (let i = 0; i < MAX_LOG_ENTRIES + 5; i++) {
+      logs = appendLogEntry(logs, entry(i));
+    }
+    expect(logs).toHaveLength(MAX_LOG_ENTRIES);
+    expect(logs[0].id).toBe("e5");
+  });
+
+  it("strips images from entries older than the image window, keeping a count", () => {
+    let logs: LogEntry[] = [];
+    for (let i = 0; i < MAX_IMAGE_LOG_ENTRIES + 3; i++) {
+      logs = appendLogEntry(logs, entry(i, true));
+    }
+    // The three oldest entries fell out of the image window.
+    for (let i = 0; i < 3; i++) {
+      expect(logs[i].images).toBeUndefined();
+      expect(logs[i].imagesDropped).toBe(1);
+    }
+    // Everything inside the window keeps its image.
+    expect(logs[3].images).toHaveLength(1);
+    expect(logs.at(-1)?.images).toHaveLength(1);
+  });
+
+  it("preserves identity of untouched entries", () => {
+    let logs: LogEntry[] = [];
+    for (let i = 0; i < 10; i++) {
+      logs = appendLogEntry(logs, entry(i, true));
+    }
+    const before = logs[4];
+    const next = appendLogEntry(logs, entry(99));
+    expect(next[4]).toBe(before);
   });
 });

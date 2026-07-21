@@ -1,7 +1,13 @@
 import { useEffect, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
-import type { CellTab, LogEntry, TreeChangeInfo } from '../types';
+import type { CellTab, LogEntry } from '../types';
 import type { ExecuteOutputChunk, ProgressPayload } from '../types/pdv';
-import { MAX_LOG_ENTRIES } from './constants';
+import { appendLogEntry } from './app-utils';
+import {
+  applyTreeChange,
+  invalidateCompletions,
+  invalidateNamespace,
+  invalidateTree,
+} from '../queries/invalidation';
 
 /**
  * How long buffered output chunks may sit before being applied to the log
@@ -39,8 +45,6 @@ interface UseKernelSubscriptionsOptions {
   setActiveCellTab: Dispatch<SetStateAction<number>>;
   /** Appends streamed execution output (stdout, stderr, images) to console logs. */
   setLogs: Dispatch<SetStateAction<LogEntry[]>>;
-  /** Bumps the token to trigger Tree panel full refetch (project load, reload, etc.). */
-  setTreeRefreshToken: Dispatch<SetStateAction<number>>;
   /** Bumps the token to trigger ModulesPanel refetch on tree changes. */
   setModulesRefreshToken: Dispatch<SetStateAction<number>>;
   /** Controls the project-reloading overlay shown during kernel restart with active project. */
@@ -49,8 +53,6 @@ interface UseKernelSubscriptionsOptions {
   setProgress: Dispatch<SetStateAction<ProgressPayload | null>>;
   /** Called when a kernel crash is detected via the push channel. */
   onKernelCrash: (kernelId: string) => void;
-  /** Called on incremental tree changes so the Tree can update selectively. */
-  onTreeChanged: (info: TreeChangeInfo) => void;
   /** Setter for the latest kernel-process RSS in bytes (null when unknown). */
   setKernelMemoryRss: Dispatch<SetStateAction<number | null>>;
 }
@@ -61,12 +63,10 @@ export function useKernelSubscriptions({
   setCellTabs,
   setActiveCellTab,
   setLogs,
-  setTreeRefreshToken,
   setModulesRefreshToken,
   setProjectReloading,
   setProgress,
   onKernelCrash,
-  onTreeChanged,
   setKernelMemoryRss,
 }: UseKernelSubscriptionsOptions): void {
   useEffect(() => {
@@ -107,18 +107,12 @@ export function useKernelSubscriptions({
     const offBegin = window.pdv.kernels.onExecuteBegin((payload) => {
       setLogs((prev) => {
         if (prev.some((l) => l.id === payload.executionId)) return prev;
-        const next: LogEntry[] = [
-          ...prev,
-          {
-            id: payload.executionId,
-            timestamp: payload.timestamp,
-            code: payload.code,
-            origin: payload.origin,
-          },
-        ];
-        return next.length > MAX_LOG_ENTRIES
-          ? next.slice(next.length - MAX_LOG_ENTRIES)
-          : next;
+        return appendLogEntry(prev, {
+          id: payload.executionId,
+          timestamp: payload.timestamp,
+          code: payload.code,
+          origin: payload.origin,
+        });
       });
     });
     const offFinish = window.pdv.kernels.onExecuteFinish((payload) => {
@@ -134,12 +128,20 @@ export function useKernelSubscriptions({
             : l,
         ),
       );
+      // Agent-driven runs mutate kernel state just like renderer runs do,
+      // but never pass through executeImmediate's finally block — refresh
+      // the same caches here.
+      if (currentKernelId) {
+        invalidateTree(currentKernelId);
+        invalidateNamespace(currentKernelId);
+        invalidateCompletions(currentKernelId);
+      }
     });
     return () => {
       offBegin();
       offFinish();
     };
-  }, [setLogs]);
+  }, [setLogs, currentKernelId]);
 
   useEffect(() => {
     if (!currentKernelId) {
@@ -147,17 +149,12 @@ export function useKernelSubscriptions({
     }
 
     const unsubscribeTree = window.pdv.tree.onChanged((payload) => {
-      // "unknown" comes from non-root PDVTree mutations (intermediate
-      // sub-trees, scratch trees) where the local path can't be mapped to
-      // the renderer's absolute view. Trigger a full refresh-with-expansion
-      // instead of trying to reconcile changed_paths.
-      if (payload.change_type === "unknown") {
-        setTreeRefreshToken((prev) => prev + 1);
-        setModulesRefreshToken((prev) => prev + 1);
-        return;
-      }
-      // Notify Tree for selective (incremental) update instead of a full reload.
-      onTreeChanged({
+      // Targeted cache surgery: removals patch the parent listing in place
+      // (0 round trips); adds/updates invalidate only the changed parents;
+      // "unknown" (non-root PDVTree mutations whose local path can't be
+      // mapped to the renderer's absolute view) invalidates every listing,
+      // refetching visible levels in parallel.
+      applyTreeChange(currentKernelId, {
         changed_paths: payload.changed_paths,
         change_type: payload.change_type,
       });
@@ -180,7 +177,7 @@ export function useKernelSubscriptions({
         setCellTabs(loaded.tabs);
         setActiveCellTab(loaded.activeTabId);
       }
-      setTreeRefreshToken((prev) => prev + 1);
+      invalidateTree(currentKernelId);
     });
 
     const unsubscribeKernelCrashed = window.pdv.kernels.onKernelCrashed((payload) => {
@@ -201,13 +198,13 @@ export function useKernelSubscriptions({
         setProjectReloading(true);
       } else if (payload.status === 'ready') {
         setProjectReloading(false);
-        setTreeRefreshToken((prev) => prev + 1);
+        invalidateTree(currentKernelId);
         setModulesRefreshToken((prev) => prev + 1);
       }
     });
 
     const unsubscribeReconnected = window.pdv.kernels.onReconnected(() => {
-      setTreeRefreshToken((prev) => prev + 1);
+      invalidateTree(currentKernelId);
       setModulesRefreshToken((prev) => prev + 1);
     });
 
@@ -236,8 +233,6 @@ export function useKernelSubscriptions({
     setModulesRefreshToken,
     setProgress,
     setProjectReloading,
-    setTreeRefreshToken,
-    onTreeChanged,
     setKernelMemoryRss,
   ]);
 }

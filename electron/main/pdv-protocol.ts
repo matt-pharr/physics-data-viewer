@@ -152,6 +152,17 @@ export const PDVMessageType = {
   /** Kernel → app. Returns node value. */
   TREE_GET_RESPONSE: "pdv.tree.get.response",
   /**
+   * App → kernel. Request the tree's monotonic version counter — bumped on
+   * every PDVTree mutation and by the post-execute structural fingerprint
+   * (which catches plain-dict mutations that emit no change push). Served by
+   * the read-only query server, so it answers mid-execution. The renderer's
+   * safety-net poll costs one round trip regardless of tree size by asking
+   * for this instead of re-listing every expanded level.
+   */
+  TREE_VERSION: "pdv.tree.version",
+  /** Kernel → app. Returns `{ version: number }`. */
+  TREE_VERSION_RESPONSE: "pdv.tree.version.response",
+  /**
    * App → kernel. Resolve a file-backed tree node to its absolute path.
    *
    * Used internally by main-process handlers (e.g.
@@ -408,6 +419,12 @@ export interface PDVProjectSaveResponsePayload {
 export interface PDVTreeListPayload {
   /** Dot-separated path to list, or "" / null for root. */
   path?: string | null;
+}
+
+/** Payload for pdv.tree.version.response (kernel → app). */
+export interface PDVTreeVersionPayload {
+  /** Monotonic mutation counter for the kernel's tree. */
+  version: number;
 }
 
 /** Payload for pdv.tree.get (app → kernel). */

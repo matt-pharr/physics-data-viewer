@@ -93,6 +93,7 @@ export const IPC = {
   tree: {
     list: "tree:list",
     get: "tree:get",
+    getVersion: "tree:getVersion",
     createScript: "tree:createScript",
     createNote: "tree:createNote",
     addFile: "tree:addFile",
@@ -1959,6 +1960,15 @@ export interface PDVApi {
      */
     get(kernelId: string, path: string): Promise<Record<string, unknown>>;
     /**
+     * Fetch the kernel's monotonic tree-version counter (query socket only —
+     * one cheap round trip regardless of tree size).
+     *
+     * @param kernelId - Target kernel ID.
+     * @returns The current version, or null when the kernel predates the
+     *   version channel (callers fall back to listing-based polling).
+     */
+    getVersion(kernelId: string): Promise<number | null>;
+    /**
      * Create and register a new script node.
      *
      * @param kernelId - Target kernel ID.
@@ -2993,6 +3003,12 @@ export interface PDVApi {
     supportedJuliaVersions: readonly string[];
     /** Fallback preselected Julia version when no juliaup default applies. */
     defaultJuliaVersion: string;
+    /**
+     * E2E-only diagnostics: snapshot of per-channel invoke counts (empty
+     * outside `PDV_E2E=1`). Read by the round-trip-budget spec to assert
+     * the renderer's latency discipline.
+     */
+    getInvokeCounts(): Record<string, number>;
   };
 
   /** External-app launchers driven by the action bar. */

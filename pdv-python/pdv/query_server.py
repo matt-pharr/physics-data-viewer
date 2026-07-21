@@ -28,6 +28,7 @@ _ALLOWED_TYPES: frozenset[str] = frozenset(
     {
         "pdv.tree.list",
         "pdv.tree.get",
+        "pdv.tree.version",
         "pdv.tree.resolve_file",
         "pdv.tree.resolve_path",
         "pdv.help",

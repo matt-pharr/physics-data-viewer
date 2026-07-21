@@ -7,6 +7,14 @@
 
 import React from 'react';
 import type { ProgressPayload, UpdateStatus } from '../../types/pdv';
+import { useStore } from '../../store';
+
+/** Status-bar labels per remote connection state ('local' renders nothing). */
+const CONNECTION_LABELS = {
+  'remote-connected': { text: 'SSH', className: 'status-item' },
+  'remote-reconnecting': { text: 'Reconnecting…', className: 'status-item status-warning' },
+  'remote-lost': { text: 'Connection lost', className: 'status-item status-warning' },
+} as const;
 
 interface StatusBarProps {
   isExecuting: boolean;
@@ -115,6 +123,7 @@ export const StatusBar: React.FC<StatusBarProps> = ({
         </div>
       )}
       <div className="status-left">
+        <ConnectionSegment />
         <span className="status-item">{currentProjectDir ?? 'Unsaved Project'}</span>
         {showUpdateBadge && updateStatus && (
           <span
@@ -226,4 +235,17 @@ export const StatusBar: React.FC<StatusBarProps> = ({
       </div>
     </footer>
   );
+};
+
+/**
+ * Remote-session indicator (roadmap Phase 3). Subscribes to the store's
+ * connection state and renders nothing for local sessions, so today's UI is
+ * unchanged while the surface the SSH state machine will drive already
+ * exists.
+ */
+const ConnectionSegment: React.FC = () => {
+  const connectionState = useStore((s) => s.connectionState);
+  if (connectionState === 'local') return null;
+  const { text, className } = CONNECTION_LABELS[connectionState];
+  return <span className={className}>{text}</span>;
 };

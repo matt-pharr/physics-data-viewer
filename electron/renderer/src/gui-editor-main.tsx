@@ -7,7 +7,9 @@
 
 import React from 'react';
 import ReactDOM from 'react-dom/client';
+import { QueryClientProvider } from '@tanstack/react-query';
 import { GuiEditorRoot } from './gui-editor/GuiEditorRoot';
+import { queryClient } from './queries/client';
 import './styles/index.css';
 import './styles/gui-editor.css';
 
@@ -19,6 +21,8 @@ if (!rootElement) {
 
 ReactDOM.createRoot(rootElement).render(
   <React.StrictMode>
-    <GuiEditorRoot />
+    <QueryClientProvider client={queryClient}>
+      <GuiEditorRoot />
+    </QueryClientProvider>
   </React.StrictMode>
 );

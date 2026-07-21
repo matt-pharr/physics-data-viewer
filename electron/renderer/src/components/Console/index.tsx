@@ -2,16 +2,18 @@
  * Console panel for execution history and streamed output rendering.
  *
  * Displays code, stdout/stderr, rich display images, and execution metadata
- * emitted from kernel executions coordinated by `App`.
+ * emitted from kernel executions coordinated by `App`. Subscribes to the
+ * store's console slice directly, so streamed-output flushes re-render this
+ * panel only — not the whole app.
  */
 
 import React, { useCallback, useLayoutEffect, useMemo, useRef } from 'react';
 import type { LogEntry } from '../../types';
+import { useStore } from '../../store';
 import { ansiToHtml } from './ansi';
 
 /** Props for the execution console panel. */
 interface ConsoleProps {
-  logs: LogEntry[];
   onClear: () => void;
   /**
    * Run `pdv.install("<name>")` for a missing module. Provided only for uv
@@ -54,7 +56,8 @@ function missingModuleName(log: LogEntry): { name: string; installer: string } |
 const PIN_THRESHOLD_PX = 4;
 
 /** Execution console component. */
-export const Console: React.FC<ConsoleProps> = ({ logs, onClear, onInstallPackage }) => {
+export const Console: React.FC<ConsoleProps> = ({ onClear, onInstallPackage }) => {
+  const logs = useStore((s) => s.logs);
   const contentRef = useRef<HTMLDivElement>(null);
   // True when the viewport is at (or within PIN_THRESHOLD_PX of) the
   // bottom. Initialized true so the first batch of output scrolls into
@@ -207,6 +210,11 @@ const LogEntryView: React.FC<{
               alt={`Plot ${index}.${idx + 1}`}
             />
           ))}
+        </div>
+      )}
+      {!hasImages && (log.imagesDropped ?? 0) > 0 && (
+        <div className="log-images-expired">
+          [{log.imagesDropped === 1 ? 'image expired' : `${log.imagesDropped} images expired`} — re-run to regenerate]
         </div>
       )}
     </div>

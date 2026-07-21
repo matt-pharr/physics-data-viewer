@@ -463,6 +463,31 @@ const _GLOBAL_PENDING = Ref{Bool}(false)
 const _GLOBAL_TIMER = Ref{Union{Nothing,Timer}}(nothing)
 const _GLOBAL_LOCK = ReentrantLock()
 
+# Monotonic mutation counter served by `pdv.tree.version` (query server).
+# The renderer's safety-net poll compares this instead of re-listing every
+# expanded level — one cheap round trip per tick. Bumped by every mutation
+# notification and by the post-execute structural fingerprint (which catches
+# plain-Dict mutations that emit nothing). Mirrors pdv-python's
+# PDVTree._tree_version one-to-one.
+const _TREE_VERSION = Ref{Int}(0)
+const _VERSION_LOCK = ReentrantLock()
+# Post-execute fingerprint state: last fingerprint of the root tree, and
+# whether any mutation notification fired since the last check (drift that
+# was already precisely notified doesn't fire a redundant coarse ping).
+const _LAST_FINGERPRINT = Ref{Union{Nothing,UInt64}}(nothing)
+const _CHANGED_SINCE_FINGERPRINT = Ref{Bool}(false)
+
+"""Increment the tree-version counter (thread-safe)."""
+function _bump_tree_version()
+    lock(_VERSION_LOCK) do
+        _TREE_VERSION[] += 1
+    end
+    nothing
+end
+
+"""Return the current tree-version counter (thread-safe)."""
+get_tree_version() = lock(() -> _TREE_VERSION[], _VERSION_LOCK)
+
 """
     attach_comm!(tree, send_fn)
 
@@ -501,6 +526,8 @@ function detach_comm!(tree::AbstractPDVTree)
 end
 
 function _emit_changed(tree::AbstractPDVTree, path::String, change_type::String)
+    _bump_tree_version()
+    _CHANGED_SINCE_FINGERPRINT[] = true
     if _ROOT_TREE[] === tree
         tree.send_fn === nothing && return
         lock(tree.debounce_lock) do
@@ -549,6 +576,84 @@ function _flush_global()
     end
     # Nested-PDVTree mutations reach the snapshot through this path too.
     _ROOT_TREE[] !== nothing && rebuild_query_cache!(_ROOT_TREE[])
+    nothing
+end
+
+"""
+    _structure_fingerprint(tree) -> UInt64
+
+Cheap structural fingerprint of the renderer-visible tree: keys, value type
+names, scalar values (whose previews show the value), and shape/length for
+sized containers (whose previews show structure, not contents). Never
+touches array contents, so the walk stays fast on large data. Bounded by a
+node budget and depth cap. Keys are sorted so Julia's Dict iteration order
+(which can change across rehashes) never affects the result. Mirrors
+pdv-python's `PDVTree._structure_fingerprint`.
+"""
+function _structure_fingerprint(tree)::UInt64
+    h = Ref(hash(UInt64(0)))
+    budget = Ref(100_000)
+    root = tree isa AbstractPDVTree ? tree.data : tree
+    _fingerprint_walk!(h, budget, root, 0)
+    return h[]
+end
+
+function _fingerprint_walk!(h::Ref{UInt64}, budget::Ref{Int}, node::AbstractDict, depth::Int)
+    depth > 32 && return nothing
+    for key in sort!(collect(keys(node)); by=string)
+        budget[] <= 0 && return nothing
+        budget[] -= 1
+        value = get(node, key, nothing)
+        h[] = hash(key, h[])
+        inner = value isa AbstractPDVTree ? value.data : value
+        if inner isa AbstractDict
+            h[] = hash("{", h[])
+            _fingerprint_walk!(h, budget, inner, depth + 1)
+            h[] = hash("}", h[])
+            continue
+        end
+        h[] = hash(string(typeof(value)), h[])
+        if value === nothing || value isa Bool || value isa Real || value isa AbstractString
+            h[] = hash(value, h[])
+        elseif value isa AbstractArray
+            h[] = hash(size(value), h[])
+        else
+            try
+                h[] = hash(length(value), h[])
+            catch
+            end
+        end
+    end
+    nothing
+end
+
+"""
+    _post_execute_version_check() -> Nothing
+
+Detect silent tree mutations after each execution (IJulia postexecute
+hook). Plain-Dict mutations under the tree emit no change notification;
+comparing a structural fingerprint before/after execution catches them. On
+silent drift, the version counter is bumped and a coarse
+`change_type: "unknown"` ping is emitted so the renderer refreshes
+immediately. Drift that was already precisely notified only records the new
+fingerprint. Mirrors pdv-python's `PDVTree._post_execute_check`.
+"""
+function _post_execute_version_check()
+    tree = _ROOT_TREE[]
+    tree === nothing && return nothing
+    fingerprint = try
+        _structure_fingerprint(tree)
+    catch
+        return nothing  # user objects can break anything; never propagate
+    end
+    already_notified = _CHANGED_SINCE_FINGERPRINT[]
+    _CHANGED_SINCE_FINGERPRINT[] = false
+    fingerprint == _LAST_FINGERPRINT[] && return nothing
+    first_check = _LAST_FINGERPRINT[] === nothing
+    _LAST_FINGERPRINT[] = fingerprint
+    (already_notified || first_check) && return nothing
+    _bump_tree_version()
+    _emit_global_ping()
     nothing
 end
 

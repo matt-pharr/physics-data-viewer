@@ -8,11 +8,25 @@
  *
  * Providers are registered globally (Monaco providers are page-singletons)
  * but read current kernel/tab state through refs passed at registration time.
+ *
+ * Round-trip discipline: every kernel call here happens while the user
+ * types, so results are cached through React Query — tree-path completions
+ * share the Tree panel's cache (a level already visible in the Tree costs 0
+ * round trips), kernel completions are keyed on the code up to the current
+ * word (so typing within a word never re-queries), and hovers are keyed on
+ * code+position with a short delay so drive-by mouse movement fires nothing.
+ * Execution-finish invalidates the completion/hover caches (namespace
+ * changed → candidates changed) via `queries/invalidation.ts`.
  */
 
 import type * as monaco from 'monaco-editor';
 import type React from 'react';
-import { treeService } from '../../services/tree';
+import { queryClient, STALE_TIMES } from '../../queries/client';
+import { keys, stableHash } from '../../queries/keys';
+import { fetchTreeChildren } from '../../queries/tree';
+
+/** How long the mouse must rest before a hover inspect request fires. */
+const HOVER_DELAY_MS = 200;
 
 // Registration guards — Monaco providers are page-level singletons.
 let completionProviderRegistered = false;
@@ -87,7 +101,9 @@ async function getTreePathSuggestions(
   const keyPrefix = typedParts[typedParts.length - 1] ?? '';
   const parentSegments = [...context.ancestorSegments, ...extraParentSegments];
   const parentPath = parentSegments.join('.');
-  const nodes = await treeService.listByPath(kernelId, parentPath);
+  // Shares the Tree panel's query cache: a level the Tree already shows (or
+  // that was completed moments ago) resolves without a kernel round trip.
+  const nodes = await fetchTreeChildren(kernelId, parentPath, STALE_TIMES.treeCompletion);
   return nodes
     .filter((node) => node.key.startsWith(keyPrefix))
     .map((node) => ({
@@ -188,10 +204,24 @@ export function registerKernelCompletionProvider(
       try {
         const prefix = buildContextPrefix();
         const prefixedCode = prefix + code;
-        const prefixedOffset = prefix.length + offset;
-        const result = await window.pdv.kernels.complete(kernelId, prefixedCode, prefixedOffset);
         const textBeforeCursor = code.slice(0, offset);
         const namePrefix = textBeforeCursor.match(/[A-Za-z_][A-Za-z0-9_]*$/)?.[0] ?? '';
+        // Complete at the START of the current word, not the cursor: the
+        // kernel then returns every candidate for the context, Monaco
+        // filters them client-side as the user types, and the cache key is
+        // stable for the whole word — one round trip per context instead of
+        // one per keystroke.
+        const wordStartOffset = offset - namePrefix.length;
+        const prefixedWordStart = prefix.length + wordStartOffset;
+        const result = await queryClient.fetchQuery({
+          queryKey: keys.completion(
+            kernelId,
+            stableHash(prefixedCode.slice(0, prefixedWordStart)),
+          ),
+          queryFn: () =>
+            window.pdv.kernels.complete(kernelId, prefixedCode, prefixedWordStart),
+          staleTime: STALE_TIMES.complete,
+        });
         const mergedMatches = [...result.matches];
         // ipykernel completion can omit protected PDV locals from top-level name
         // completion; ensure the two built-ins are always discoverable.
@@ -202,10 +232,15 @@ export function registerKernelCompletionProvider(
             }
           }
         }
-        const adjustedStart = Math.max(0, result.cursor_start - prefix.length);
-        const adjustedEnd = Math.max(0, result.cursor_end - prefix.length);
+        // Replace from where the kernel says the completion starts (usually
+        // the word start) through the cursor, so accepting a suggestion
+        // swallows the prefix the user already typed.
+        const adjustedStart = Math.min(
+          Math.max(0, result.cursor_start - prefix.length),
+          wordStartOffset,
+        );
         const startPosition = model.getPositionAt(adjustedStart);
-        const endPosition = model.getPositionAt(adjustedEnd);
+        const endPosition = model.getPositionAt(offset);
         const range = new monacoInstance.Range(
           startPosition.lineNumber,
           startPosition.column,
@@ -266,15 +301,28 @@ export function registerKernelHoverProvider(
   hoverProviderRegistered = true;
 
   monacoInstance.languages.registerHoverProvider('python', {
-    async provideHover(model, position) {
+    async provideHover(model, position, token) {
       const kernelId = activeKernelIdRef?.current ?? null;
       if (!kernelId) return null;
+
+      // Let the mouse rest before firing: drive-by movement across symbols
+      // cancels here and costs zero round trips.
+      await new Promise((resolve) => setTimeout(resolve, HOVER_DELAY_MS));
+      if (token.isCancellationRequested) return null;
 
       try {
         const code = model.getValue();
         const prefix = buildContextPrefix();
         const offset = prefix.length + model.getOffsetAt(position);
-        const result = await window.pdv.kernels.inspect(kernelId, prefix + code, offset);
+        const prefixedCode = prefix + code;
+        const result = await queryClient.fetchQuery({
+          queryKey: keys.inspectHover(
+            kernelId,
+            stableHash(`${offset} ${prefixedCode}`),
+          ),
+          queryFn: () => window.pdv.kernels.inspect(kernelId, prefixedCode, offset),
+          staleTime: STALE_TIMES.inspectHover,
+        });
         const rawDoc = result.data?.['text/plain'];
         if (!result.found || typeof rawDoc !== 'string' || !rawDoc.trim()) {
           return null;

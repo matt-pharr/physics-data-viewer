@@ -59,6 +59,7 @@ function buildBase() {
     tree: {
       list: stub<PDVApi["tree"]["list"]>(async () => []),
       get: stub<PDVApi["tree"]["get"]>(async () => ({})),
+      getVersion: stub<PDVApi["tree"]["getVersion"]>(async () => null),
       createScript: stub<PDVApi["tree"]["createScript"]>(async () => ({ success: true })),
       createNote: stub<PDVApi["tree"]["createNote"]>(async () => ({ success: true })),
       createGui: stub<PDVApi["tree"]["createGui"]>(async () => ({ success: true })),
@@ -232,6 +233,7 @@ function buildBase() {
       defaultPythonVersion: "3.13",
       supportedJuliaVersions: ["1.10", "1.11", "1.12"],
       defaultJuliaVersion: "1.11",
+      getInvokeCounts: () => ({}),
     },
     launchers: {
       openAgent: stub<PDVApi["launchers"]["openAgent"]>(async () => ({ success: true })),

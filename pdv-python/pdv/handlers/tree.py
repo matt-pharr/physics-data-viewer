@@ -814,8 +814,37 @@ def handle_tree_duplicate(msg: dict) -> None:
     )
 
 
+def handle_tree_version(msg: dict) -> None:
+    """Handle the ``pdv.tree.version`` message.
+
+    Returns the tree's monotonic mutation counter. Served through the
+    read-only query server so the renderer's safety-net poll costs one
+    cheap round trip regardless of tree size, even mid-execution.
+
+    Response payload
+    ----------------
+    .. code-block:: json
+
+        { "version": 42 }
+
+    Parameters
+    ----------
+    msg : dict
+        Parsed PDV message envelope.
+    """
+    from pdv.comms import send_message  # noqa: PLC0415
+    from pdv.tree import PDVTree  # noqa: PLC0415
+
+    send_message(
+        "pdv.tree.version.response",
+        {"version": PDVTree.get_tree_version()},
+        in_reply_to=msg.get("msg_id"),
+    )
+
+
 register("pdv.tree.list", handle_tree_list)
 register("pdv.tree.get", handle_tree_get)
+register("pdv.tree.version", handle_tree_version)
 register("pdv.tree.resolve_file", handle_tree_resolve_file)
 register("pdv.tree.delete", handle_tree_delete)
 register("pdv.tree.create_node", handle_tree_create_node)

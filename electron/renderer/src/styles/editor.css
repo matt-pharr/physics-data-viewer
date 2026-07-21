@@ -326,3 +326,9 @@
   border-radius: 4px;
   background-color: var(--bg-primary);
 }
+
+.log-images-expired {
+  color: var(--text-secondary);
+  font-style: italic;
+  margin: 4px 0;
+}

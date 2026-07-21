@@ -79,7 +79,7 @@ Renderer (React) ──window.pdv──► Preload ──ipcRenderer──► Ma
 
 6. **`kernels.start()` encapsulates the full handshake.** The `pdv.ready → pdv.init → pdv.init.response` sequence is entirely inside the main process's `kernels.start()` handler. The renderer only `await`s it.
 
-7. **Push subscriptions are owned by `App`, keyed on `currentKernelId`.** One `useEffect` in `app/index.tsx` subscribes to `tree.onChanged` and `project.onLoaded`, and tears them down on cleanup. Child components receive refresh tokens as props; they do not subscribe directly.
+7. **Push subscriptions are owned by `App`'s `useKernelSubscriptions`, keyed on `currentKernelId`; they write to the shared stores, not to props.** Handlers translate pushes into React Query invalidations (`renderer/src/queries/invalidation.ts`) and Zustand store updates (`renderer/src/store/`). Components never subscribe to `window.pdv` push channels directly and never receive refresh tokens; server state is read via query hooks in `renderer/src/queries/`, shared UI state via `useStore` selectors. Shared state goes in the store; local component state stays `useState`. No new refresh tokens or ad-hoc polling — the latency budget is: common interactions ≤1 round trip, idle traffic O(1) per tick.
 
 8. **Scripts follow a fixed structure.** Every PDV script defines `run(pdv_tree: dict, **user_params) -> dict`. The `pdv_tree` argument is always injected by `PDVScript.run()` and is never supplied by the user — it is present in the signature so language servers don't flag tree references as errors.
 
@@ -165,3 +165,4 @@ When reviewing a pull request (including via `/review`), check every item below 
 - [ ] **JSDoc coverage** — New or modified exports in `electron/main/` have JSDoc with `@param`, `@returns`, `@throws`. No unguarded `any` types introduced.
 - [ ] **Documentation updated** — If the PR changes architecture, adds new IPC channels, modifies the comm protocol, introduces new tree node types, or alters any behavior described in `ARCHITECTURE.md` or `PLANNED_FEATURES.md`, those documents have been updated to match.
 - [ ] **Dependency sweep passed** — If the PR touches `pdv-python/` (source or `pyproject.toml`), `pdv-python/scripts/sweep-deps.sh` was run locally and exited green. Result is recorded in the PR description's "Test plan".
+- [ ] **Round-trip discipline** — No new refresh tokens or ad-hoc polling in the renderer; server state goes through `renderer/src/queries/` (React Query) with push-driven invalidation, shared UI state through `renderer/src/store/`. Common interactions cost ≤1 round trip; idle traffic is O(1) per tick.

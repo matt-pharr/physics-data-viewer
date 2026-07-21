@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
+import { invalidateNamespace } from '../queries/invalidation';
 import type { CellTab, Config, LogEntry, MenuActionPayload } from '../types';
 import type { ProgressPayload } from '../types/pdv';
 import { normalizeRecentProjects } from './app-utils';
@@ -26,8 +27,8 @@ interface UseProjectWorkflowOptions {
   setActiveCellTab: Dispatch<SetStateAction<number>>;
   /** Bumps to trigger ModulesPanel refetch after project load. */
   setModulesRefreshToken: Dispatch<SetStateAction<number>>;
-  /** Bumps to trigger NamespaceView refetch after project load. */
-  setNamespaceRefreshToken: Dispatch<SetStateAction<number>>;
+  /** Active kernel id — used to invalidate namespace queries after load. */
+  currentKernelId: string | null;
   /** Clears or updates save/load progress state. */
   setProgress: Dispatch<SetStateAction<ProgressPayload | null>>;
   /** Sets error message if save/load fails. */
@@ -64,7 +65,7 @@ export function useProjectWorkflow(options: UseProjectWorkflowOptions) {
     setCellTabs,
     setActiveCellTab,
     setModulesRefreshToken,
-    setNamespaceRefreshToken,
+    currentKernelId,
     setProgress,
     setLastError,
     setLogs,
@@ -223,7 +224,7 @@ export function useProjectWorkflow(options: UseProjectWorkflowOptions) {
       setCurrentProjectName(result.projectName ?? null);
       setModulesRefreshToken((prev) => prev + 1);
       await rememberRecentProject(saveDir);
-      setNamespaceRefreshToken((prev) => prev + 1);
+      if (currentKernelId) invalidateNamespace(currentKernelId);
       setLastChecksum(result.checksum ? result.checksum.slice(0, 6) : null);
       setChecksumMismatch(result.checksumValid === false);
       setSavedPdvVersion(result.savedPdvVersion ?? null);
@@ -324,7 +325,7 @@ export function useProjectWorkflow(options: UseProjectWorkflowOptions) {
     setLastError,
     setLogs,
     setModulesRefreshToken,
-    setNamespaceRefreshToken,
+    currentKernelId,
   ]);
 
   useEffect(() => {

@@ -238,6 +238,23 @@ export function registerTreeNamespaceScriptIpcHandlers(
     return response.payload;
   });
 
+  handleIpc(IPC.tree.getVersion, async (_event, kernelId: string) => {
+    if (!kernelManager.getKernel(kernelId) || !queryRouter.isAttached()) {
+      return null;
+    }
+    // Query socket only, no comm fallback: a kernel that predates the
+    // version channel rejects it instantly there (query.not_allowed), while
+    // a comm fallback would hang until timeout. Callers treat null as
+    // "unsupported" and poll by listing instead.
+    try {
+      const response = await queryRouter.request(PDVMessageType.TREE_VERSION, {});
+      const version = (response.payload as { version?: unknown }).version;
+      return typeof version === "number" ? version : null;
+    } catch {
+      return null;
+    }
+  });
+
   handleIpc(
     IPC.tree.createScript,
     async (
