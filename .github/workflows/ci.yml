@@ -462,6 +462,21 @@ jobs:
           path: electron/e2e/.fixtures-cache/matplotlib
           key: mpl-fontcache-${{ runner.os }}-py3.11-${{ hashFiles('pdv-python/pyproject.toml') }}
 
+      # Cache uv's package cache (launch.ts pins UV_CACHE_DIR here) so the
+      # uv-project specs don't re-download their default dependencies every
+      # run. Keyed on the files that determine what those specs install —
+      # the defaultPackages list (config.ts) and the supported Python
+      # versions (python-versions.ts) — with a prefix fallback so a key
+      # change still restores the previous cache and only downloads the
+      # delta.
+      - name: Cache uv package cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: electron/e2e/.fixtures-cache/uv
+          key: uv-cache-${{ runner.os }}-${{ hashFiles('electron/main/config.ts', 'electron/main/python-versions.ts') }}
+          restore-keys: |
+            uv-cache-${{ runner.os }}-
+
       - name: Run Playwright E2E tests
         working-directory: electron
         env:

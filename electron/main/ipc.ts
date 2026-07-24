@@ -510,6 +510,30 @@ export const BROADCAST_PUSH_CHANNELS: readonly string[] = [
   IPC.push.treeChanged,
 ];
 
+/**
+ * Shell → server invoke channels that are internal to the two processes:
+ * they are registered in the server's invoke registry (by `server/wire.ts`)
+ * and called by shell code over the transport, but are NEVER exposed to the
+ * preload/renderer and therefore live outside the `IPC` object and the
+ * shell/server partition above.
+ *
+ * - `launcherContext` — active kernel/project context for the shell's
+ *   launcher handlers (`launchers.*`, `script.edit`).
+ * - `resolveTreeFile` — resolve a tree path to its backing file's absolute
+ *   path via the kernel (used by `script.edit`).
+ * - `systemResumed` — forwarded from the shell's `powerMonitor` resume
+ *   event so the wake handler runs next to the kernel connection.
+ * - `resetSessionState` — light session reset on renderer load/reload
+ *   (clears in-session closures, keeps per-kernel state on disk). The full
+ *   reset rides the reserved `pdv.rpc.sessionReset` channel instead.
+ */
+export const INTERNAL_CHANNELS = {
+  launcherContext: "pdv.internal.launcherContext",
+  resolveTreeFile: "pdv.internal.resolveTreeFile",
+  systemResumed: "pdv.internal.systemResumed",
+  resetSessionState: "pdv.internal.resetSessionState",
+} as const;
+
 // Re-export for preload and renderer use.
 export type { ExecuteOutputChunk };
 

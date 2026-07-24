@@ -18,7 +18,7 @@ electron/                ← Electron app (TypeScript)
     main/                ← Node.js main process (kernel management, IPC, filesystem)
         ipc.ts           ← SINGLE SOURCE OF TRUTH for all IPC channel names and types,
                            plus the SHELL_CHANNELS / SERVER_CHANNELS partition
-        index.ts         ← shell-side IPC wiring (shell registrars + server mirror)
+        index.ts         ← shell-side IPC wiring (shell registrars + server bridge)
         kernel-manager.ts
         comm-router.ts
         pdv-protocol.ts  ← PDV comm protocol types and constants
@@ -27,7 +27,10 @@ electron/                ← Electron app (TypeScript)
         environment-detector.ts
         project-manager.ts
         server/          ← Electron-free pdv-server core: wire.ts (session assembly),
-                           invoke-registry.ts, server-main.ts (stdio CLI entry)
+                           invoke-registry.ts, server-main.ts (stdio CLI entry),
+                           shell-confirm.ts (reverse-RPC confirm broker)
+        shell/           ← server-supervisor.ts (spawns/supervises the pdv-server child),
+                           server-bridge.ts (SERVER_CHANNELS forwarding + push fan-out)
         transport/       ← JSON-lines stdio RPC (protocol, line-codec, rpc-client/server)
     preload.ts           ← exposes window.pdv API to renderer via contextBridge
     renderer/src/        ← React frontend
@@ -56,16 +59,20 @@ pdv-julia/               ← Julia kernel package (PDVKernel.jl; ARCHITECTURE.md
 
 ---
 
-## Three-process architecture
+## Process architecture
 
 ```
-Renderer (React) ──window.pdv──► Preload ──ipcRenderer──► Main (Node.js) ──ZeroMQ──► Kernel (Python)
+Renderer (React) ──window.pdv──► Preload ──ipcRenderer──► Shell (Electron main)
+                                                              │ stdio RPC (JSON lines)
+                                                              ▼
+                                                          pdv-server (plain Node) ──ZeroMQ──► Kernel (Python/Julia)
 ```
 
 - **Renderer** never accesses Node.js or the filesystem directly. All communication goes through `window.pdv.*`.
 - **`window.pdv`** is defined in `preload.ts` using Electron's `contextBridge`. It is the only bridge between renderer and main.
-- **Main process** owns ZeroMQ sockets, kernel lifecycle, filesystem, and config. All IPC channel names are constants in `ipc.ts`.
-- **Kernel** runs `ipykernel` + `pdv-python` (Python sessions) or `IJulia` + `pdv-julia`/PDVKernel.jl (Julia sessions). Both communicate with the main process via a custom Jupyter comm channel (`pdv.kernel`) layered on top of ZeroMQ; the protocol is language-agnostic.
+- **Shell (Electron main)** owns windows, menus, native dialogs, the updater, and local launchers. It spawns the pdv-server child (`main/shell/server-supervisor.ts`) and forwards every `SERVER_CHANNELS` invoke to it over a newline-delimited JSON stdio transport (`main/shell/server-bridge.ts`, `main/transport/`).
+- **pdv-server** (the Electron binary re-run as plain Node via `ELECTRON_RUN_AS_NODE=1`, entry `main/server/server-main.ts`) owns ZeroMQ sockets, kernel lifecycle, session filesystem work, config, and the MCP server. Local mode and future remote mode share this one code path — remote only swaps the transport.
+- **Kernel** runs `ipykernel` + `pdv-python` (Python sessions) or `IJulia` + `pdv-julia`/PDVKernel.jl (Julia sessions). Both communicate with the pdv-server via a custom Jupyter comm channel (`pdv.kernel`) layered on top of ZeroMQ; the protocol is language-agnostic.
 
 ---
 

@@ -339,6 +339,15 @@ function parseMessage(
 }
 
 async function loadZmq(): Promise<typeof import("zeromq")> {
+  // In the packaged extracted pdv-server, zeromq's native prebuild lives
+  // outside the server bundle (asar-unpacked); the supervisor points at it
+  // via PDV_ZEROMQ_PATH. Everywhere else the normal resolution applies.
+  const overridePath = process.env.PDV_ZEROMQ_PATH;
+  if (overridePath) {
+    const { createRequire } = await import("module");
+    const requireFrom = createRequire(__filename);
+    return requireFrom(overridePath) as typeof import("zeromq");
+  }
   return import("zeromq");
 }
 
@@ -494,14 +503,16 @@ export class KernelManager extends EventEmitter {
       stdio: ["ignore", "pipe", "pipe"],
     });
 
-    // Mirror the kernel's process stdio to the app's, and re-emit it as
-    // `kernel:processOutput` events: Pkg writes precompile progress to the
-    // process stderr during IJulia's own boot, and the activity-based boot
-    // deadline + EnvSyncModal streaming both key off these events
-    // (ARCHITECTURE.md §10.8).
+    // Mirror the kernel's process stdio to this process's stderr, and
+    // re-emit it as `kernel:processOutput` events: Pkg writes precompile
+    // progress to the process stderr during IJulia's own boot, and the
+    // activity-based boot deadline + EnvSyncModal streaming both key off
+    // these events (ARCHITECTURE.md §10.8). Both mirrors MUST go to
+    // stderr: in the extracted pdv-server, stdout is the RPC protocol
+    // channel, and a raw kernel line written there can corrupt a frame.
     kernelProcess.stdout?.on("data", (d: Buffer) => {
       const text = d.toString();
-      process.stdout.write(`[kernel:${kernelId.slice(0, 8)}] ${text}`);
+      process.stderr.write(`[kernel:${kernelId.slice(0, 8)}] ${text}`);
       this.emit("kernel:processOutput", kernelId, "stdout", text);
     });
     kernelProcess.stderr?.on("data", (d: Buffer) => {

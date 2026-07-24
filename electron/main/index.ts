@@ -3,58 +3,43 @@
  *
  * Registers the shell-owned invoke channels (`SHELL_CHANNELS` in `ipc.ts`:
  * window chrome, menus, native pickers, updater, themes, launchers, child
- * windows), wires the pdv-server core via `server/wire.ts` with
- * window-bound push/confirm closures, and mirrors every server-registered
- * channel onto `ipcMain` so the renderer's `window.pdv` API is served from
- * one process in single-process mode.
+ * windows) and wires the per-window server bridge
+ * (`shell/server-bridge.ts`), which forwards every `SERVER_CHANNELS`
+ * invoke to the pdv-server child process and fans its pushes out to the
+ * renderer windows.
  *
- * This module does NOT own server session state (kernel/project/module
- * closures live in `server/wire.ts`), handler logic for server channels,
- * or channel-name constants (`ipc.ts`).
+ * This module does NOT own server session state or handler logic for
+ * server channels (those live in the pdv-server process — see
+ * `server/wire.ts`), spawn the server (`shell/server-supervisor.ts`,
+ * owned by `bootstrap.ts`), or define channel names (`ipc.ts`).
  *
  * See Also
  * --------
- * ARCHITECTURE.md §11.1, §11.2, §11.3
- * server/wire.ts — pdv-server core assembly
+ * ARCHITECTURE.md §11.1, §11.2, §11.4
+ * shell/server-bridge.ts — server-channel forwarding and push fan-out
  */
 
-import { BrowserWindow, app, dialog } from "electron";
+import { BrowserWindow } from "electron";
 import * as path from "path";
 
 import type { UpdateCheckStamp } from "./auto-updater";
-import type { CommRouter } from "./comm-router";
-import { ConfigStore } from "./config";
 import { GuiEditorWindowManager } from "./gui-editor-window-manager";
 import { GuiViewerWindowManager } from "./gui-viewer-window-manager";
 import {
-  BROADCAST_PUSH_CHANNELS,
+  INTERNAL_CHANNELS,
   IPC,
   type McpStatus,
   type PDVConfig,
 } from "./ipc";
 import { registerAppStateIpcHandlers } from "./ipc-register-app-state";
+import type { LauncherContext } from "./ipc-register-launchers";
 import { registerGuiEditorIpcHandlers } from "./ipc-register-gui-editor";
 import { registerLaunchersIpcHandlers } from "./ipc-register-launchers";
 import { registerModuleWindowIpcHandlers } from "./ipc-register-module-windows";
-import { handleIpcRaw, removeAllIpcHandlers } from "./ipc-registry";
-import type { KernelManager } from "./kernel-manager";
+import { removeAllIpcHandlers } from "./ipc-registry";
 import { ModuleWindowManager } from "./module-window-manager";
-import { setAppVersion } from "./pdv-protocol";
-import type { ProjectManager } from "./project-manager";
-import type { QueryRouter } from "./query-router";
-import type { ConfirmOptions } from "./server/confirm";
-import {
-  dispatchInvoke,
-  listRegisteredInvokeChannels,
-  type InvokeContext,
-  type PushSender,
-} from "./server/invoke-registry";
-import { unwireServer, wireServer } from "./server/wire";
-
-// ---------------------------------------------------------------------------
-// Unified version — set once before any handler uses getAppVersion()
-// ---------------------------------------------------------------------------
-setAppVersion(app.getVersion());
+import { registerServerBridge } from "./shell/server-bridge";
+import type { ServerHandle } from "./shell/server-supervisor";
 
 // ---------------------------------------------------------------------------
 // Public registration API
@@ -62,29 +47,26 @@ setAppVersion(app.getVersion());
 
 /**
  * Register every IPC channel the renderer's `window.pdv` API consumes:
- * shell channels directly on `ipcMain`, server channels via
- * `server/wire.ts` mirrored onto `ipcMain`.
+ * shell channels directly on `ipcMain`, server channels forwarded to the
+ * pdv-server process via the bridge.
+ *
+ * Starts from a clean server session (`pdv.rpc.sessionReset`) — a no-op on
+ * a freshly started server, and exactly the old unwire + re-wire reset on
+ * macOS window re-creation.
  *
  * @param win - Main browser window used for push forwarding.
- * @param kernelManager - Kernel manager instance.
- * @param commRouter - Comm router bound to the active kernel.
- * @param queryRouter - Query router bound to the active kernel.
- * @param projectManager - Project manager dependency.
- * @param configStore - Config persistence dependency.
- * @param pdvDir - `~/.PDV` root for themes/state/module-store paths.
+ * @param server - Handle to the supervised pdv-server process.
+ * @param pdvDir - `~/.PDV` root for themes/state paths.
  * @param setAllowClose - Flips the close-guard flag in `app.ts`.
- * @returns The wire's `resetSessionState`, called on renderer reloads.
+ * @returns The light session-reset callback, called on renderer reloads.
+ * @throws {Error} When the server is not running (session reset fails).
  */
-export function registerIpcHandlers(
+export async function registerIpcHandlers(
   win: BrowserWindow,
-  kernelManager: KernelManager,
-  commRouter: CommRouter,
-  queryRouter: QueryRouter,
-  projectManager: ProjectManager,
-  configStore: ConfigStore,
+  server: ServerHandle,
   pdvDir: string,
   setAllowClose: (allow: boolean) => void
-): () => void {
+): Promise<() => void> {
   unregisterIpcHandlers();
 
   // Derive per-purpose sub-directories within ~/.PDV
@@ -96,66 +78,25 @@ export function registerIpcHandlers(
   const guiEditorWindowManager = new GuiEditorWindowManager(preloadPath);
   const guiViewerWindowManager = new GuiViewerWindowManager(preloadPath);
 
-  // Renderer-push sender shared by the whole server core: the one place
-  // pushes meet the BrowserWindow. The destroyed-window guard lives here so
-  // handler code never needs it, and broadcast channels fan out to child
-  // windows here so the server emits each push exactly once.
-  const push: PushSender = (channel, payload) => {
-    if (!win.isDestroyed()) win.webContents.send(channel, payload);
-    if (BROADCAST_PUSH_CHANNELS.includes(channel)) {
-      moduleWindowManager.broadcastToAll(channel, payload);
-      guiEditorWindowManager.broadcastToAll(channel, payload);
-      guiViewerWindowManager.broadcastToAll(channel, payload);
-    }
-  };
-
-  // Native-confirmation closure injected into server-destined code that
-  // needs a blocking user decision (module-export overwrite, MCP tree
-  // deletion). See server/confirm.ts for the extracted-server plan.
-  const confirm = async (options: ConfirmOptions): Promise<number> => {
-    const result = win.isDestroyed()
-      ? await dialog.showMessageBox(options)
-      : await dialog.showMessageBox(win, options);
-    return result.response;
-  };
-
-  // Assemble the pdv-server core. Every server channel lands in the
-  // Electron-free invoke registry; the mirror loop below is the only point
-  // where those handlers meet Electron.
-  const wire = wireServer({
-    push,
-    confirm,
-    pdvDir,
-    kernelManager,
-    commRouter,
-    queryRouter,
-    projectManager,
-    configStore,
-    closeChildWindows: () => {
-      moduleWindowManager.closeAll();
-      guiEditorWindowManager.closeAll();
-      guiViewerWindowManager.closeAll();
-    },
-    startMcp: true,
+  registerServerBridge({
+    server,
+    win,
+    childWindowManagers: [
+      moduleWindowManager,
+      guiEditorWindowManager,
+      guiViewerWindowManager,
+    ],
   });
 
-  // Mirror every server-registered channel onto ipcMain. dispatchInvoke
-  // owns the error logging and normalization, so the unwrapped ipcMain
-  // registration is used here — wrapping again via handleIpc would
-  // double-log every failure.
-  const invokeCtx: InvokeContext = { push };
-  for (const channel of listRegisteredInvokeChannels()) {
-    handleIpcRaw(channel, (_event, ...args) =>
-      dispatchInvoke(channel, invokeCtx, args)
-    );
-  }
+  // Reset server session state before the renderer loads, so stale state
+  // from a previous window cannot leak into the new one (parity with the
+  // pre-extraction full re-wire on every registration).
+  await server.sessionReset();
 
-  // Shell-side async access to server state. In single-process mode this
-  // dispatches into the in-process registry; once the server is extracted
-  // these calls ride the transport instead. Shell code must not touch the
-  // ConfigStore directly — it lives with the server.
+  // Shell-side async access to server state over the transport. Shell code
+  // must not touch the ConfigStore directly — it lives with the server.
   const serverInvoke = (channel: string, ...args: unknown[]): Promise<unknown> =>
-    dispatchInvoke(channel, invokeCtx, args);
+    server.invoke(channel, args);
   const updateCheckStamp: UpdateCheckStamp = {
     get: async () =>
       ((await serverInvoke(IPC.config.get)) as PDVConfig).lastUpdateCheck,
@@ -183,24 +124,38 @@ export function registerIpcHandlers(
   });
 
   registerLaunchersIpcHandlers({
-    getLauncherContext: async () => wire.getLauncherContext(),
+    getLauncherContext: async () =>
+      (await serverInvoke(INTERNAL_CHANNELS.launcherContext)) as LauncherContext,
     getConfig: async () => (await serverInvoke(IPC.config.get)) as PDVConfig,
-    getMcpStatus: async (): Promise<McpStatus | null> => wire.getMcpStatus(),
-    resolveTreeFile: (treePath) => wire.resolveTreeFile(treePath),
+    getMcpStatus: async () =>
+      (await serverInvoke(IPC.mcp.getStatus)) as McpStatus,
+    resolveTreeFile: async (treePath) =>
+      (await serverInvoke(
+        INTERNAL_CHANNELS.resolveTreeFile,
+        treePath
+      )) as string | null,
   });
 
-  return wire.resetSessionState;
+  // Light session reset on renderer load/reload: clears in-session server
+  // state (active project/kernel closures, child windows) but keeps
+  // per-kernel state on disk.
+  return () => {
+    void serverInvoke(INTERNAL_CHANNELS.resetSessionState).catch(
+      (err: unknown) => {
+        console.error("[pdv] renderer-reload session reset failed:", err);
+      }
+    );
+  };
 }
 
 /**
- * Unregister every IPC handler and subscription registered by
- * {@link registerIpcHandlers}: the shell's `ipcMain` handlers (including
- * the server mirror) and the server core's registry, listeners, and
- * per-kernel state.
+ * Unregister every ipcMain handler registered by
+ * {@link registerIpcHandlers}: the shell channels and the server-bridge
+ * forwarders. Server-side state is NOT touched here — the next
+ * registration resets it via `pdv.rpc.sessionReset`.
  *
  * @returns Nothing.
  */
 export function unregisterIpcHandlers(): void {
   removeAllIpcHandlers();
-  unwireServer();
 }

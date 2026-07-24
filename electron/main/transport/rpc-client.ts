@@ -98,7 +98,6 @@ function reviveError(wire: RpcError): Error {
 export class RpcClient {
   private readonly writer: LineWriter;
   private readonly detachDecoder: () => void;
-  private readonly readable: Readable;
   private readonly opts: RpcClientOptions;
   private readonly pending = new Map<string, PendingInvoke>();
   private nextId = 0;
@@ -120,7 +119,6 @@ export class RpcClient {
    * @param opts - Callbacks and tuning; see {@link RpcClientOptions}.
    */
   constructor(readable: Readable, writable: Writable, opts: RpcClientOptions) {
-    this.readable = readable;
     this.opts = opts;
     this.writer = new LineWriter(writable);
     const decoder = new LineDecoder({

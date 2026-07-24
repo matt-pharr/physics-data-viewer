@@ -25,6 +25,7 @@ export const SERVER_DESTINED_FILES: readonly string[] = [
   "server/invoke-registry.ts",
   "server/confirm.ts",
   "server/server-paths.ts",
+  "server/shell-confirm.ts",
   "server/wire.ts",
   "server/server-main.ts",
   // Stdio RPC transport

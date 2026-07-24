@@ -31,6 +31,7 @@ import { ConfigStore, DEFAULT_AUTOSAVE_INTERVAL_S } from "../config";
 import { EnvironmentDetector } from "../environment-detector";
 import { HandlerInvokeTracker } from "../handler-invoke-tracker";
 import {
+  INTERNAL_CHANNELS,
   IPC,
   NamespaceInspectTarget,
   ModuleHealthWarning,
@@ -77,6 +78,7 @@ import {
   allocateAndRegisterScript,
 } from "../tree-create";
 import { uvSync } from "../uv-runner";
+import { handleSystemResume } from "../wake-handler";
 import type { ConfirmFn } from "./confirm";
 import {
   handleInvoke,
@@ -947,7 +949,7 @@ export function wireServer(ctx: ServerContext): WireHandle {
     return await commRouter.request(type, payload);
   };
 
-  return {
+  const handle: WireHandle = {
     resetSessionState,
     sessionReset: (): void => {
       resetSessionState();
@@ -971,6 +973,24 @@ export function wireServer(ctx: ServerContext): WireHandle {
       return typeof filePath === "string" && filePath.length > 0 ? filePath : null;
     },
   };
+
+  // Internal shell → server channels (`INTERNAL_CHANNELS` in ipc.ts):
+  // session-state accessors the shell needs but the renderer never sees.
+  // Registered here so they ride the transport like every server channel.
+  handleInvoke(INTERNAL_CHANNELS.launcherContext, () =>
+    handle.getLauncherContext()
+  );
+  handleInvoke(INTERNAL_CHANNELS.resolveTreeFile, (_ctx, treePath: string) =>
+    handle.resolveTreeFile(treePath)
+  );
+  handleInvoke(INTERNAL_CHANNELS.systemResumed, (ctx) =>
+    handleSystemResume(kernelManager, ctx.push)
+  );
+  handleInvoke(INTERNAL_CHANNELS.resetSessionState, () => {
+    handle.resetSessionState();
+  });
+
+  return handle;
 }
 
 /**

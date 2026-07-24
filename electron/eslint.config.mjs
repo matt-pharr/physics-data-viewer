@@ -4,7 +4,9 @@ import reactHooks from "eslint-plugin-react-hooks";
 
 export default tseslint.config(
   {
-    ignores: ["dist/**", "node_modules/**", "renderer/dist/**"],
+    // __fixtures__ hold child-process protocol stubs spawned by tests —
+    // plain-Node CJS scripts, not app code.
+    ignores: ["dist/**", "node_modules/**", "renderer/dist/**", "main/**/__fixtures__/**"],
   },
   eslint.configs.recommended,
   ...tseslint.configs.recommended,

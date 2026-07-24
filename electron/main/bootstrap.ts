@@ -1,23 +1,19 @@
 /**
- * bootstrap.ts — Runtime entrypoint for the Electron main process.
+ * bootstrap.ts — Runtime entrypoint for the Electron main process (shell).
  *
  * Startup sequence (in order):
  * 1. Enable remote debugging if `NODE_ENV=development` (CDP port 9222).
  * 2. Request single-instance lock; quit immediately if denied.
  * 3. Wire app lifecycle events (`ready`, `activate`, `second-instance`).
- * 4. On `ready`: lazy-create `KernelManager` and `ConfigStore`, then open
- *    the main `BrowserWindow` via {@link createWindow} (whose IPC wiring
- *    assembles the pdv-server core, including the MCP server — see
- *    server/wire.ts).
+ * 4. On `ready`: start the pdv-server child process via
+ *    {@link ServerSupervisor} (spawn + hello handshake), then open the
+ *    main `BrowserWindow` via {@link createWindow}, whose IPC wiring
+ *    bridges every server channel over the stdio transport.
  * 5. On `second-instance`: focus existing window or open a new one.
  *
- * Singletons (module-level):
- * - `commRouter`      — created once at import time; shared across windows.
- * - `projectManager`  — created once at import time; uses `commRouter`.
- * - `kernelManager`   — lazy-created on first window open so kernel infra
- *                        is not allocated during unit tests or quick exits.
- * - `configStore`     — lazy-created on first window open; reads/writes
- *                        `~/.PDV/preferences.json`.
+ * The shell constructs no session managers: KernelManager, CommRouter,
+ * ProjectManager, ConfigStore, and the MCP server all live in the
+ * pdv-server process (`server/server-main.ts`).
  *
  * The `openingWindow` promise acts as a mutex: concurrent calls to
  * `openMainWindow()` (e.g. rapid `second-instance` events) coalesce into
@@ -26,6 +22,7 @@
  * See Also
  * --------
  * app.ts — BrowserWindow lifecycle and renderer loading
+ * shell/server-supervisor.ts — pdv-server process lifecycle
  * index.ts — IPC handler registration (called from {@link createWindow})
  */
 
@@ -43,60 +40,29 @@
   }
 })();
 
-import { app, BrowserWindow, powerMonitor } from "electron";
+import { app, BrowserWindow, dialog, powerMonitor } from "electron";
 import * as os from "os";
 import * as path from "path";
-import * as fs from "fs";
 
 import { createWindow, wireAppEvents } from "./app";
-import { getWiredCellRpc, getWiredMcpServer } from "./server/wire";
-import { CommRouter } from "./comm-router";
-import { QueryRouter } from "./query-router";
-import { ConfigStore } from "./config";
-import { KernelManager } from "./kernel-manager";
-import { ProjectManager } from "./project-manager";
-import type { PushSender } from "./server/invoke-registry";
-import { initServerPaths } from "./server/server-paths";
-import { handleSystemResume } from "./wake-handler";
+import { INTERNAL_CHANNELS } from "./ipc";
+import { ServerSupervisor } from "./shell/server-supervisor";
 
 // Under PDV_E2E, redirect Electron's userData (where the renderer's
-// localStorage and ConfigStore-backed preferences live) to a path under the
-// test's temp HOME. On macOS, app.getPath('appData') is derived from
-// NSHomeDirectory() / getpwuid(), NOT $HOME, so overriding HOME in the
-// launcher alone leaks userData into the developer's real PDV install. Each
-// E2E launch gets its own temp HOME (mkdtemp in launch.ts), so this gives
-// us per-test localStorage isolation.
+// localStorage and the server's ConfigStore-backed preferences live) to a
+// path under the test's temp HOME. On macOS, app.getPath('appData') is
+// derived from NSHomeDirectory() / getpwuid(), NOT $HOME, so overriding
+// HOME in the launcher alone leaks userData into the developer's real PDV
+// install. Each E2E launch gets its own temp HOME (mkdtemp in launch.ts),
+// so this gives us per-test localStorage isolation. Must run before the
+// supervisor is created — it passes userData to the server process.
 if (process.env.PDV_E2E === "1" && process.env.HOME) {
   app.setPath("userData", path.join(process.env.HOME, ".pdv-e2e-userdata"));
 }
 
-// Inject the Electron-derived filesystem roots into the server-destined
-// code (server/server-paths.ts) — after the E2E userData redirect above so
-// tests see the redirected location. In the extracted pdv-server process
-// these come from PDV_USER_DATA_DIR / PDV_RESOURCES_ROOT instead.
-initServerPaths({
-  userDataDir: app.getPath("userData"),
-  resourcesRoot: process.resourcesPath ?? null,
-});
-
-let kernelManager: KernelManager | null = null;
+let serverSupervisor: ServerSupervisor | null = null;
 let mainWindow: BrowserWindow | null = null;
 let openingWindow: Promise<void> | null = null;
-let configStore: ConfigStore | null = null;
-
-const commRouter = new CommRouter();
-const queryRouter = new QueryRouter();
-const projectManager = new ProjectManager(commRouter);
-
-/**
- * Renderer-push sender bound to the current main window; a no-op while no
- * window is open. Injected into code that outlives any single window (the
- * wake handler).
- */
-const pushToMainWindow: PushSender = (channel, payload) => {
-  const win = mainWindow;
-  if (win && !win.isDestroyed()) win.webContents.send(channel, payload);
-};
 
 async function openMainWindow(): Promise<void> {
   if (mainWindow && !mainWindow.isDestroyed()) {
@@ -107,23 +73,11 @@ async function openMainWindow(): Promise<void> {
     return;
   }
   openingWindow = (async () => {
-    if (!kernelManager) {
-      kernelManager = new KernelManager();
+    const server = serverSupervisor;
+    if (!server) {
+      throw new Error("pdv-server is not running");
     }
-    if (!configStore) {
-      const pdvDir = path.join(os.homedir(), ".PDV");
-      fs.mkdirSync(pdvDir, { recursive: true });
-      configStore = new ConfigStore(pdvDir);
-    }
-    const km = kernelManager;
-    const cfg = configStore;
-    const win = await createWindow(
-      km,
-      commRouter,
-      queryRouter,
-      projectManager,
-      cfg,
-    );
+    const win = await createWindow(server);
     mainWindow = win;
     win.on("closed", () => {
       if (mainWindow === win) {
@@ -148,7 +102,7 @@ const hasSingleInstanceLock = app.requestSingleInstanceLock();
 if (!hasSingleInstanceLock) {
   app.quit();
 } else {
-  wireAppEvents(() => kernelManager, getWiredMcpServer, getWiredCellRpc);
+  wireAppEvents(() => serverSupervisor);
   app.on("second-instance", () => {
     if (mainWindow && !mainWindow.isDestroyed()) {
       if (mainWindow.isMinimized()) {
@@ -162,17 +116,41 @@ if (!hasSingleInstanceLock) {
     });
   });
 
-  app.whenReady().then(() => {
+  app.whenReady().then(async () => {
     if (process.env.NODE_ENV === "development" && !process.env.VITE_DEV_SERVER_URL) {
       process.env.VITE_DEV_SERVER_URL = "http://localhost:5173";
     }
 
-    powerMonitor.on("resume", () => {
-      void handleSystemResume(kernelManager, pushToMainWindow).catch(
-        (err) => {
-          console.error("[PDV] Wake handler error:", err);
-        }
+    // Start the pdv-server before any window: the window's initial
+    // background color and IPC bridge both need it.
+    const supervisor = new ServerSupervisor({
+      version: app.getVersion(),
+      userDataDir: app.getPath("userData"),
+      pdvDir: path.join(os.homedir(), ".PDV"),
+      resourcesRoot: process.resourcesPath ?? null,
+      getWindow: () => mainWindow,
+    });
+    try {
+      await supervisor.start();
+    } catch (error) {
+      console.error("[PDV] Failed to start pdv-server:", error);
+      dialog.showErrorBox(
+        "PDV failed to start",
+        `The PDV backend process could not be started.\n\n${
+          error instanceof Error ? error.message : String(error)
+        }`
       );
+      app.exit(1);
+      return;
+    }
+    serverSupervisor = supervisor;
+
+    // System wake recovery runs next to the kernel connection — forward
+    // the resume event to the server.
+    powerMonitor.on("resume", () => {
+      void supervisor.invoke(INTERNAL_CHANNELS.systemResumed).catch((err) => {
+        console.error("[PDV] Wake handler error:", err);
+      });
     });
 
     void openMainWindow().catch((error) => {

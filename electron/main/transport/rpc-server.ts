@@ -13,6 +13,7 @@
  *  - `pdv.rpc.ping` — answered inline with `{ts, seq}`.
  *  - `pdv.rpc.shutdown` — acked, then the injected `onShutdown` runs.
  *  - `pdv.rpc.sessionReset` — the injected `onSessionReset` runs, then acks.
+ *  - `pdv.rpc.confirmResponse` — handed to the injected `onConfirmResponse`.
  *
  * Error contract: whatever the dispatcher throws (already logged and
  * normalized to an `Error` by `dispatchInvoke`) is serialized as
@@ -64,6 +65,12 @@ export interface RpcServerOptions {
   onShutdown?: () => void | Promise<void>;
   /** Runs (and is awaited) before a `pdv.rpc.sessionReset` invoke acks. */
   onSessionReset?: () => void | Promise<void>;
+  /**
+   * Receives the first argument of a `pdv.rpc.confirmResponse` invoke —
+   * the shell's answer to a `confirmRequest` push (see
+   * `server/shell-confirm.ts`).
+   */
+  onConfirmResponse?: (payload: unknown) => void;
   /** Override the decoder's max-line guard (tests). */
   maxLineBytes?: number;
 }
@@ -198,6 +205,10 @@ export class RpcServer {
       }
       case RPC_CHANNELS.sessionReset: {
         await this.opts.onSessionReset?.();
+        return undefined;
+      }
+      case RPC_CHANNELS.confirmResponse: {
+        this.opts.onConfirmResponse?.(args[0]);
         return undefined;
       }
       default: {

@@ -18,6 +18,12 @@ const ELECTRON_ROOT = path.resolve(__dirname, "..", "..");
 // fresh temp HOME forces matplotlib to rebuild its font cache (~15-20s), which
 // pushes pdv.bootstrap past the 15s readyTimeoutMs in kernel-session.ts.
 const MPL_CACHE_DIR = path.join(ELECTRON_ROOT, "e2e", ".fixtures-cache", "matplotlib");
+// Persistent uv package cache shared across E2E runs. uv derives its default
+// cache dir from $HOME, so the per-launch temp HOME would otherwise start
+// every app instance cold and re-download all uv-project dependencies —
+// slow everywhere, and flaky on poor networks. Only the download cache is
+// shared; HOME isolation (preferences, venvs, project state) is unaffected.
+const UV_CACHE_DIR = path.join(ELECTRON_ROOT, "e2e", ".fixtures-cache", "uv");
 
 export interface LaunchOptions {
   /** Override Python interpreter path. Defaults to `process.env.PYTHON_PATH`. */
@@ -91,6 +97,7 @@ export async function launchPDV(opts: LaunchOptions = {}): Promise<LaunchedApp> 
   const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "pdv-e2e-home-"));
   await seedPreferences(homeDir, pythonPath, opts.preferences);
   await fs.mkdir(MPL_CACHE_DIR, { recursive: true });
+  await fs.mkdir(UV_CACHE_DIR, { recursive: true });
   if (opts.onBeforeLaunch) {
     await opts.onBeforeLaunch(homeDir);
   }
@@ -119,8 +126,10 @@ export async function launchPDV(opts: LaunchOptions = {}): Promise<LaunchedApp> 
       // object can't accidentally override them. PDV_E2E gates the orphan-
       // cleanup skip and the script.edit short-circuit; MPLCONFIGDIR points
       // matplotlib at the persistent font cache so we don't rebuild it
-      // (~15s) every spec.
+      // (~15s) every spec; UV_CACHE_DIR points uv at a persistent package
+      // cache the temp HOME would otherwise leave cold.
       MPLCONFIGDIR: MPL_CACHE_DIR,
+      UV_CACHE_DIR,
       PDV_E2E: "1",
     },
   });

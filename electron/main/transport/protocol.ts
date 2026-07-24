@@ -92,7 +92,39 @@ export const RPC_CHANNELS = {
   confirmRequest: "pdv.rpc.confirmRequest",
   /** Reverse-RPC native-confirm reply invoke (shell → server). */
   confirmResponse: "pdv.rpc.confirmResponse",
+  /**
+   * Push asking the shell to close child windows (module windows, GUI
+   * editor/viewer). Emitted by server-side session/project resets.
+   */
+  closeChildWindows: "pdv.rpc.closeChildWindows",
 } as const;
+
+/** Payload of a {@link RPC_CHANNELS.confirmRequest} push. */
+export interface RpcConfirmRequest {
+  /** Broker-generated id correlating the confirmResponse invoke. */
+  requestId: string;
+  /**
+   * Dialog options — structurally `server/confirm.ts`'s `ConfirmOptions`,
+   * carried as plain JSON.
+   */
+  options: {
+    type?: "none" | "info" | "error" | "question" | "warning";
+    title?: string;
+    message: string;
+    detail?: string;
+    buttons: string[];
+    defaultId?: number;
+    cancelId?: number;
+  };
+}
+
+/** Payload of a {@link RPC_CHANNELS.confirmResponse} invoke (first arg). */
+export interface RpcConfirmResponse {
+  /** The correlating {@link RpcConfirmRequest} id. */
+  requestId: string;
+  /** Index of the button the user clicked. */
+  response: number;
+}
 
 /** Payload of the {@link RPC_CHANNELS.hello} push. */
 export interface RpcHello {

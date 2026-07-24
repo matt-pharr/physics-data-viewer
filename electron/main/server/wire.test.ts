@@ -71,7 +71,7 @@ vi.mock("../module-manifest-writer", () => ({
 }));
 
 import type { PDVConfig } from "../config";
-import { IPC, SERVER_CHANNELS, type McpStatus } from "../ipc";
+import { INTERNAL_CHANNELS, IPC, SERVER_CHANNELS, type McpStatus } from "../ipc";
 import type { KernelManager } from "../kernel-manager";
 import { setAppVersion } from "../pdv-protocol";
 import type { ProjectManager } from "../project-manager";
@@ -160,14 +160,20 @@ afterEach(() => {
 });
 
 describe("wireServer registry contents", () => {
-  it("registers exactly SERVER_CHANNELS — no more, no less", () => {
+  it("registers exactly SERVER_CHANNELS + INTERNAL_CHANNELS — no more, no less", () => {
     makeHarness();
     const registered = new Set(listRegisteredInvokeChannels());
-    const expected = new Set(SERVER_CHANNELS);
+    const expected = new Set([
+      ...SERVER_CHANNELS,
+      ...Object.values(INTERNAL_CHANNELS),
+    ]);
     const missing = [...expected].filter((c) => !registered.has(c));
     const extra = [...registered].filter((c) => !expected.has(c));
-    expect(missing, "SERVER_CHANNELS not registered by wireServer").toEqual([]);
-    expect(extra, "registered channels not in SERVER_CHANNELS").toEqual([]);
+    expect(missing, "expected channels not registered by wireServer").toEqual([]);
+    expect(
+      extra,
+      "registered channels not in SERVER_CHANNELS/INTERNAL_CHANNELS"
+    ).toEqual([]);
   });
 
   it("unwireServer empties the registry so a re-wire cannot double-register", () => {
@@ -193,6 +199,52 @@ describe("wireServer registry contents", () => {
         { requestId: "nope", ok: true, result: { tabs: [], activeTabId: null } },
       ]),
     ).resolves.toBeUndefined();
+  });
+
+  it("serves the launcher context over pdv.internal.launcherContext", async () => {
+    const h = makeHarness();
+    await expect(
+      dispatchInvoke(INTERNAL_CHANNELS.launcherContext, h.ctx, []),
+    ).resolves.toEqual({ kernelId: null, workingDir: null, projectDir: null });
+    await startKernel(h);
+    const context = (await dispatchInvoke(
+      INTERNAL_CHANNELS.launcherContext,
+      h.ctx,
+      [],
+    )) as { kernelId: string | null; workingDir: string | null };
+    expect(context.kernelId).toBeTruthy();
+    expect(context.workingDir).toBe(h.workingDir);
+  });
+
+  it("serves the light reset over pdv.internal.resetSessionState", async () => {
+    const h = makeHarness();
+    await startKernel(h);
+    await dispatchInvoke(INTERNAL_CHANNELS.resetSessionState, h.ctx, []);
+    expect(h.wire.getLauncherContext()).toEqual({
+      kernelId: null,
+      workingDir: null,
+      projectDir: null,
+    });
+    // Light reset: kernel state on disk survives (renderer-reload parity).
+    expect(fsSync.existsSync(h.workingDir)).toBe(true);
+  });
+
+  it("runs the wake handler on pdv.internal.systemResumed and pushes kernelReconnected", async () => {
+    const h = makeHarness();
+    const km = h.kernelManager as unknown as {
+      list: ReturnType<typeof vi.fn>;
+      ping: ReturnType<typeof vi.fn>;
+    };
+    km.list.mockReturnValue([
+      { id: "kernel-1", name: "python3", language: "python", status: "idle" },
+    ]);
+    km.ping.mockResolvedValue(undefined);
+    await dispatchInvoke(INTERNAL_CHANNELS.systemResumed, h.ctx, []);
+    expect(km.ping).toHaveBeenCalledWith("kernel-1", 10_000);
+    expect(h.pushes).toContainEqual({
+      channel: IPC.push.kernelReconnected,
+      payload: { kernelId: "kernel-1" },
+    });
   });
 });
 

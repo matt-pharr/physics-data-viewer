@@ -254,6 +254,19 @@ describe("RpcClient ⇄ RpcServer", () => {
     expect(resetDone).toBe(true);
   });
 
+  it("hands confirmResponse invokes to onConfirmResponse and acks", async () => {
+    const delivered: unknown[] = [];
+    const { client } = createPair({
+      onConfirmResponse: (payload) => delivered.push(payload),
+    });
+    await expect(
+      client.invoke(RPC_CHANNELS.confirmResponse, [
+        { requestId: "7", response: 1 },
+      ])
+    ).resolves.toBeUndefined();
+    expect(delivered).toEqual([{ requestId: "7", response: 1 }]);
+  });
+
   it("routes reserved pushes to onReservedPush, never onPush", async () => {
     const { client, server, pushes, reserved } = createPair();
     await client.waitForHello(1000);

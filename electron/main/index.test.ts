@@ -12,6 +12,9 @@ import os from "os";
 import path from "path";
 
 import { registerIpcHandlers, unregisterIpcHandlers } from "./index";
+import { dispatchInvoke, type PushSender } from "./server/invoke-registry";
+import { unwireServer, wireServer } from "./server/wire";
+import type { BridgeHandlers, ServerHandle } from "./shell/server-supervisor";
 import {
   IPC,
   type NamespaceVariable,
@@ -265,7 +268,7 @@ function makeMessage(payload: Record<string, unknown>): PDVMessage {
   };
 }
 
-function setup() {
+async function setup() {
   const webContentsSend = vi.fn();
   const win = {
     webContents: { send: webContentsSend },
@@ -384,16 +387,39 @@ function setup() {
 
   const queryRouter = new QueryRouter();
   const setAllowClose = vi.fn<(allow: boolean) => void>();
-  registerIpcHandlers(
-    win,
+
+  // In-process stand-in for the pdv-server: a real wire assembled from the
+  // mocks above, reached through a fake ServerHandle whose invoke() is
+  // dispatchInvoke — the same dispatcher the stdio transport uses. The
+  // real server bridge registers the forwarders, so every test drives the
+  // exact renderer-facing path minus the process boundary.
+  let bridge: BridgeHandlers | null = null;
+  const serverPush: PushSender = (channel, payload) => {
+    bridge?.onPush(channel, payload);
+  };
+  const wire = wireServer({
+    push: serverPush,
+    confirm: async (options) => (bridge ? bridge.confirm(options) : 0),
+    pdvDir: os.tmpdir(),
     kernelManager,
     commRouter,
     queryRouter,
     projectManager,
     configStore,
-    os.tmpdir(),
-    setAllowClose,
-  );
+    closeChildWindows: () => bridge?.closeChildWindows(),
+  });
+  const server: ServerHandle = {
+    invoke: (channel, args = []) =>
+      dispatchInvoke(channel, { push: serverPush }, args),
+    sessionReset: async () => wire.sessionReset(),
+    setBridgeHandlers: (handlers) => {
+      bridge = handlers;
+    },
+    clearBridgeHandlers: () => {
+      bridge = null;
+    },
+  };
+  await registerIpcHandlers(win, server, os.tmpdir(), setAllowClose);
 
   return {
     webContentsSend,
@@ -410,11 +436,14 @@ describe("Step 5 IPC handlers", () => {
     mocks.handlers.clear();
     vi.clearAllMocks();
     unregisterIpcHandlers();
+    // The shell no longer unwires the server; the in-process wire used by
+    // this harness is torn down explicitly between tests.
+    unwireServer();
     delete process.env.EDITOR;
   });
 
   it("kernels:start returns a KernelInfo with expected shape", async () => {
-    const { kernelManager } = setup();
+    const { kernelManager } = await setup();
     const start = getHandler(IPC.kernels.start);
 
     const result = (await start(
@@ -432,7 +461,7 @@ describe("Step 5 IPC handlers", () => {
   });
 
   it("tree:list sends pdv.tree.list and returns response nodes", async () => {
-    const { commRouter } = setup();
+    const { commRouter } = await setup();
     const nodes: TreeNode[] = [
       {
         path: "x",
@@ -458,7 +487,7 @@ describe("Step 5 IPC handlers", () => {
   });
 
   it("tree:list returns [] when the kernel is not running", async () => {
-    const { kernelManager, commRouter } = setup();
+    const { kernelManager, commRouter } = await setup();
     (kernelManager.getKernel as unknown as ReturnType<typeof vi.fn>).mockReturnValue(
       undefined
     );
@@ -471,7 +500,7 @@ describe("Step 5 IPC handlers", () => {
   });
 
   it("tree:get sends pdv.tree.get and returns payload", async () => {
-    const { commRouter } = setup();
+    const { commRouter } = await setup();
     const payload = { value: 42 };
     (commRouter.request as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(
       makeMessage(payload)
@@ -487,7 +516,7 @@ describe("Step 5 IPC handlers", () => {
   });
 
   it("namespace:query sends pdv.namespace.query and returns variables", async () => {
-    const { commRouter } = setup();
+    const { commRouter } = await setup();
     const variables: NamespaceVariable[] = [{
       name: "x",
       kind: "scalar",
@@ -519,7 +548,7 @@ describe("Step 5 IPC handlers", () => {
   });
 
   it("namespace:inspect sends pdv.namespace.inspect and returns child rows", async () => {
-    const { commRouter } = setup();
+    const { commRouter } = await setup();
     const payload = {
       children: [{
         name: "[0]",
@@ -564,7 +593,7 @@ describe("Step 5 IPC handlers", () => {
   });
 
   it("script:edit spawns the configured external editor process", async () => {
-    const { configStore, commRouter } = setup();
+    const { configStore, commRouter } = await setup();
     (configStore.getAll as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
       showPrivateVariables: false,
       showModuleVariables: false,
@@ -590,7 +619,7 @@ describe("Step 5 IPC handlers", () => {
 
   if (process.platform === "darwin") {
     it("script:edit defaults to Terminal.app on macOS when no launcher preset is set (back-compat)", async () => {
-      const { configStore, commRouter } = setup();
+      const { configStore, commRouter } = await setup();
       (configStore.getAll as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
         showPrivateVariables: false,
         showModuleVariables: false,
@@ -623,7 +652,7 @@ describe("Step 5 IPC handlers", () => {
     });
 
     it("script:edit honours launchers.terminal.preset='iterm2' on macOS", async () => {
-      const { configStore, commRouter } = setup();
+      const { configStore, commRouter } = await setup();
       (configStore.getAll as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
         showPrivateVariables: false,
         showModuleVariables: false,
@@ -652,7 +681,7 @@ describe("Step 5 IPC handlers", () => {
 
   if (process.platform === "linux") {
     it("script:edit honours launchers.terminal.preset='x-terminal-emulator' on Linux", async () => {
-      const { configStore, commRouter } = setup();
+      const { configStore, commRouter } = await setup();
       (configStore.getAll as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
         showPrivateVariables: false,
         showModuleVariables: false,
@@ -680,7 +709,7 @@ describe("Step 5 IPC handlers", () => {
   it("script:edit honours launchers.terminal.preset='none' as an explicit opt-out", async () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
-      const { configStore, commRouter } = setup();
+      const { configStore, commRouter } = await setup();
       (configStore.getAll as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
         showPrivateVariables: false,
         showModuleVariables: false,
@@ -711,7 +740,7 @@ describe("Step 5 IPC handlers", () => {
   });
 
   it("script:edit honours an explicit launchers.editor.isTuiEditor=false override", async () => {
-    const { configStore, commRouter } = setup();
+    const { configStore, commRouter } = await setup();
     (configStore.getAll as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
       showPrivateVariables: false,
       showModuleVariables: false,
@@ -734,7 +763,7 @@ describe("Step 5 IPC handlers", () => {
   });
 
   it("config:get returns current config object", async () => {
-    const { configStore } = setup();
+    const { configStore } = await setup();
     (configStore.getAll as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
       showPrivateVariables: true,
       showModuleVariables: false,
@@ -756,7 +785,7 @@ describe("Step 5 IPC handlers", () => {
   });
 
   it("config:set merges partial updates and returns merged config", async () => {
-    const { configStore } = setup();
+    const { configStore } = await setup();
     const configState: PDVConfig = {
       showPrivateVariables: false,
       showModuleVariables: false,
@@ -790,8 +819,8 @@ describe("Step 5 IPC handlers", () => {
     });
   });
 
-  it("forwards pdv.tree.changed pushes to renderer via webContents.send", () => {
-    const { commRouter, webContentsSend } = setup();
+  it("forwards pdv.tree.changed pushes to renderer via webContents.send", async () => {
+    const { commRouter, webContentsSend } = await setup();
 
     const onPushCalls = (commRouter.onPush as unknown as ReturnType<typeof vi.fn>)
       .mock.calls;
@@ -814,8 +843,8 @@ describe("Step 5 IPC handlers", () => {
     });
   });
 
-  it("forwards pdv.project.loaded pushes to renderer via webContents.send", () => {
-    const { commRouter, webContentsSend } = setup();
+  it("forwards pdv.project.loaded pushes to renderer via webContents.send", async () => {
+    const { commRouter, webContentsSend } = await setup();
 
     const onPushCalls = (commRouter.onPush as unknown as ReturnType<typeof vi.fn>)
       .mock.calls;
@@ -837,7 +866,7 @@ describe("Step 5 IPC handlers", () => {
   });
 
   it("kernels:stop awaits shutdown and returns true", async () => {
-    const { kernelManager } = setup();
+    const { kernelManager } = await setup();
     const stop = getHandler(IPC.kernels.stop);
     const result = await stop({}, "kernel-1");
     expect(kernelManager.stop).toHaveBeenCalledWith("kernel-1");
@@ -845,7 +874,7 @@ describe("Step 5 IPC handlers", () => {
   });
 
   it("script:run fires pdv.module.reload_libs preflight for module-owned scripts", async () => {
-    const { kernelManager, commRouter } = setup();
+    const { kernelManager, commRouter } = await setup();
     (commRouter.request as unknown as ReturnType<typeof vi.fn>).mockClear();
     (commRouter.request as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
       payload: { reloaded: [], errors: {} },
@@ -867,7 +896,7 @@ describe("Step 5 IPC handlers", () => {
   });
 
   it("script:run skips reload_libs preflight for non-nested scripts", async () => {
-    const { commRouter } = setup();
+    const { commRouter } = await setup();
     (commRouter.request as unknown as ReturnType<typeof vi.fn>).mockClear();
     (commRouter.request as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
       payload: { result: null },
@@ -887,7 +916,7 @@ describe("Step 5 IPC handlers", () => {
   });
 
   it("script:run swallows reload_libs errors and still runs the script", async () => {
-    const { kernelManager, commRouter } = setup();
+    const { kernelManager, commRouter } = await setup();
     (commRouter.request as unknown as ReturnType<typeof vi.fn>).mockClear();
     (commRouter.request as unknown as ReturnType<typeof vi.fn>).mockImplementation(
       async (type: string) => {
@@ -911,7 +940,7 @@ describe("Step 5 IPC handlers", () => {
   });
 
   it("kernels:execute delegates to KernelManager.execute", async () => {
-    const { kernelManager } = setup();
+    const { kernelManager } = await setup();
     const execute = getHandler(IPC.kernels.execute);
     const result = await execute({}, "kernel-1", { code: "1+1" });
     expect(kernelManager.execute).toHaveBeenCalledWith("kernel-1", { code: "1+1" }, expect.any(Function));
@@ -919,7 +948,7 @@ describe("Step 5 IPC handlers", () => {
   });
 
   it("kernels:interrupt delegates to KernelManager.interrupt and returns true", async () => {
-    const { kernelManager } = setup();
+    const { kernelManager } = await setup();
     const interrupt = getHandler(IPC.kernels.interrupt);
     const result = await interrupt({}, "kernel-1");
     expect(kernelManager.interrupt).toHaveBeenCalledWith("kernel-1");
@@ -927,7 +956,7 @@ describe("Step 5 IPC handlers", () => {
   });
 
   it("kernels:restart falls back to stop+start when restart() is absent", async () => {
-    const { kernelManager } = setup();
+    const { kernelManager } = await setup();
     const restart = getHandler(IPC.kernels.restart);
     const result = (await restart({}, "kernel-1")) as {
       kernel: KernelInfo;
@@ -940,7 +969,7 @@ describe("Step 5 IPC handlers", () => {
   });
 
   it("kernels:complete delegates to KernelManager.complete", async () => {
-    const { kernelManager } = setup();
+    const { kernelManager } = await setup();
     const complete = getHandler(IPC.kernels.complete);
     const result = (await complete({}, "kernel-1", "import ", 7)) as {
       matches: string[];
@@ -956,7 +985,7 @@ describe("Step 5 IPC handlers", () => {
   });
 
   it("kernels:inspect delegates to KernelManager.inspect", async () => {
-    const { kernelManager } = setup();
+    const { kernelManager } = await setup();
     const inspect = getHandler(IPC.kernels.inspect);
     const result = (await inspect({}, "kernel-1", "x", 0)) as {
       found: boolean;
@@ -967,7 +996,7 @@ describe("Step 5 IPC handlers", () => {
   });
 
   it("kernels:validate returns valid when pdv is installed", async () => {
-    const { kernelManager: _ } = setup();
+    const { kernelManager: _ } = await setup();
     vi.spyOn(EnvironmentDetector, "checkPDVInstalled").mockResolvedValueOnce({
       installed: true,
       version: "1.0.0",
@@ -981,7 +1010,7 @@ describe("Step 5 IPC handlers", () => {
   });
 
   it("kernels:validate returns invalid for empty path", async () => {
-    const { kernelManager: _ } = setup();
+    const { kernelManager: _ } = await setup();
     const validate = getHandler(IPC.kernels.validate);
     const result = (await validate({}, "  ", "python")) as {
       valid: boolean;
@@ -992,7 +1021,7 @@ describe("Step 5 IPC handlers", () => {
   });
 
   it("kernels:validate returns invalid when pdv is missing", async () => {
-    const { kernelManager: _ } = setup();
+    const { kernelManager: _ } = await setup();
     vi.spyOn(EnvironmentDetector, "checkPDVInstalled").mockResolvedValueOnce({
       installed: false,
       version: null,
@@ -1010,7 +1039,7 @@ describe("Step 5 IPC handlers", () => {
   });
 
   it("tree:createScript sends correct payload to kernel and returns scriptPath", async () => {
-    const { commRouter } = setup();
+    const { commRouter } = await setup();
     (commRouter.request as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(
       makeMessage({})
     );
@@ -1036,7 +1065,7 @@ describe("Step 5 IPC handlers", () => {
   });
 
   it("tree:createScript inside a module subtree sets source_rel_path + module_id", async () => {
-    const { commRouter } = setup();
+    const { commRouter } = await setup();
     const start = getHandler(IPC.kernels.start);
     await start({}, { language: "python" });
     // Register a pending in-session module so the handler's
@@ -1070,7 +1099,7 @@ describe("Step 5 IPC handlers", () => {
   });
 
   it("tree:createLib writes a .py lib inside a module and registers with source_rel_path", async () => {
-    const { commRouter } = setup();
+    const { commRouter } = await setup();
     const start = getHandler(IPC.kernels.start);
     await start({}, { language: "python" });
     await (getHandler(IPC.modules.createEmpty) as unknown as (
@@ -1110,7 +1139,7 @@ describe("Step 5 IPC handlers", () => {
   });
 
   it("tree:createLib creates standalone libs outside modules without module_id", async () => {
-    const { commRouter } = setup();
+    const { commRouter } = await setup();
     const start = getHandler(IPC.kernels.start);
     await start({}, { language: "python" });
     (commRouter.request as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(
@@ -1142,7 +1171,7 @@ describe("Step 5 IPC handlers", () => {
   });
 
   it("tree:createNote sends correct payload to kernel and returns notePath", async () => {
-    const { commRouter } = setup();
+    const { commRouter } = await setup();
     (commRouter.request as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(
       makeMessage({})
     );
@@ -1167,7 +1196,7 @@ describe("Step 5 IPC handlers", () => {
   });
 
   it("files:pickExecutable returns selected file path", async () => {
-    setup();
+    await setup();
     mocks.dialogShowOpenDialog.mockResolvedValueOnce({
       canceled: false,
       filePaths: ["/usr/bin/python3"],
@@ -1178,7 +1207,7 @@ describe("Step 5 IPC handlers", () => {
   });
 
   it("files:pickDirectory returns null on cancel", async () => {
-    setup();
+    await setup();
     mocks.dialogShowOpenDialog.mockResolvedValueOnce({
       canceled: true,
       filePaths: [],
@@ -1189,7 +1218,7 @@ describe("Step 5 IPC handlers", () => {
   });
 
   it("files:pickFile returns selected file path", async () => {
-    setup();
+    await setup();
     mocks.dialogShowOpenDialog.mockResolvedValueOnce({
       canceled: false,
       filePaths: ["/tmp/config.toml"],
@@ -1200,7 +1229,7 @@ describe("Step 5 IPC handlers", () => {
   });
 
   it("project:save delegates to ProjectManager.save", async () => {
-    const { projectManager } = setup();
+    const { projectManager } = await setup();
     const save = getHandler(IPC.project.save);
     const cells = { tabs: [], activeTabId: 1 };
     const result = await save({}, "/tmp/project", cells);
@@ -1216,7 +1245,7 @@ describe("Step 5 IPC handlers", () => {
   });
 
   it("project:save mirrors module-owned files into saveDir/modules/<id>/<source_rel_path>", async () => {
-    const { projectManager } = setup();
+    const { projectManager } = await setup();
     (projectManager.save as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
       checksum: "abc123",
       nodeCount: 1,
@@ -1272,7 +1301,7 @@ describe("Step 5 IPC handlers", () => {
   });
 
   it("project:save writes pdv-module.json + module-index.json per module", async () => {
-    const { projectManager } = setup();
+    const { projectManager } = await setup();
     (projectManager.save as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
       checksum: "abc",
       nodeCount: 5,
@@ -1328,7 +1357,7 @@ describe("Step 5 IPC handlers", () => {
   });
 
   it("project:save swallows ENOENT from missing working-dir files during sync", async () => {
-    const { projectManager } = setup();
+    const { projectManager } = await setup();
     (projectManager.save as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
       checksum: "abc123",
       nodeCount: 1,
@@ -1361,7 +1390,7 @@ describe("Step 5 IPC handlers", () => {
   });
 
   it("project:load delegates to ProjectManager.load", async () => {
-    const { projectManager } = setup();
+    const { projectManager } = await setup();
     (projectManager.load as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
       codeCells: [{ id: "box1" }],
       postLoadChecksum: null,
@@ -1380,7 +1409,7 @@ describe("Step 5 IPC handlers", () => {
   });
 
   it("themes:get returns empty list initially, themes:save persists", async () => {
-    setup();
+    await setup();
     const get = getHandler(IPC.themes.get);
     expect(await get({})).toEqual([]);
 
@@ -1392,7 +1421,7 @@ describe("Step 5 IPC handlers", () => {
   });
 
   it("menu:getModel returns the Linux-integrated top-level menus", async () => {
-    setup();
+    await setup();
     const getModel = getHandler(IPC.menu.getModel);
 
     const result = await getModel({});
@@ -1407,7 +1436,7 @@ describe("Step 5 IPC handlers", () => {
   });
 
   it("chrome:getInfo returns platform-specific title-bar metadata", async () => {
-    const { kernelManager } = setup();
+    const { kernelManager } = await setup();
     expect(kernelManager).toBeDefined();
     const getInfo = getHandler(IPC.chrome.getInfo);
 
@@ -1433,13 +1462,13 @@ describe("Step 5 IPC handlers", () => {
     // kernel's working directory rather than a global ~/.PDV/state file.
     // With no kernel started in this test harness, load must return null
     // (no file to read) and the handler must not throw.
-    setup();
+    await setup();
     const load = getHandler(IPC.codeCells.load);
     expect(await load({})).toBeNull();
   });
 
   it("modules:listInstalled delegates to ModuleManager.listInstalled", async () => {
-    setup();
+    await setup();
     const listInstalled = getHandler(IPC.modules.listInstalled);
     const result = await listInstalled({});
     expect(result).toEqual([]);
@@ -1447,7 +1476,7 @@ describe("Step 5 IPC handlers", () => {
   });
 
   it("modules:install delegates to ModuleManager.install", async () => {
-    setup();
+    await setup();
     const install = getHandler(IPC.modules.install);
     const request = {
       source: {
@@ -1467,7 +1496,7 @@ describe("Step 5 IPC handlers", () => {
   });
 
   it("modules:importToProject returns conflict when alias already exists", async () => {
-    setup();
+    await setup();
     const projectLoad = getHandler(IPC.project.load);
     await projectLoad({}, "/tmp/project");
 
@@ -1507,7 +1536,7 @@ describe("Step 5 IPC handlers", () => {
   });
 
   it("modules:importToProject persists manifest on successful import", async () => {
-    const { commRouter, webContentsSend } = setup();
+    const { commRouter, webContentsSend } = await setup();
     (mocks.moduleManagerEvaluateHealth as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce([
       { code: "dependency_unverified", message: "Dependency requirement not auto-validated: numpy >=1.26" },
     ]);
@@ -1613,7 +1642,7 @@ describe("Step 5 IPC handlers", () => {
   });
 
   it("modules:createEmpty seeds workdir + calls MODULE_CREATE_EMPTY comm", async () => {
-    const { commRouter } = setup();
+    const { commRouter } = await setup();
     const start = getHandler(IPC.kernels.start);
     await start({}, { language: "python" });
     // No active project dir — exercise the in-memory pending-imports branch.
@@ -1668,7 +1697,7 @@ describe("Step 5 IPC handlers", () => {
   });
 
   it("modules:createEmpty returns conflict when the alias already exists", async () => {
-    setup();
+    await setup();
     const start = getHandler(IPC.kernels.start);
     await start({}, { language: "python" });
     const projectLoad = getHandler(IPC.project.load);
@@ -1699,7 +1728,7 @@ describe("Step 5 IPC handlers", () => {
   });
 
   it("modules:exportFromProject copies saveDir/modules/<id> to the global store", async () => {
-    setup();
+    await setup();
     const start = getHandler(IPC.kernels.start);
     await start({}, { language: "python" });
     const projectLoad = getHandler(IPC.project.load);
@@ -1755,7 +1784,7 @@ describe("Step 5 IPC handlers", () => {
   });
 
   it("modules:exportFromProject prompts to overwrite when global store already has the module", async () => {
-    setup();
+    await setup();
     const start = getHandler(IPC.kernels.start);
     await start({}, { language: "python" });
     const projectLoad = getHandler(IPC.project.load);
@@ -1791,7 +1820,7 @@ describe("Step 5 IPC handlers", () => {
   });
 
   it("modules:exportFromProject returns cancelled when the user declines overwrite", async () => {
-    setup();
+    await setup();
     const start = getHandler(IPC.kernels.start);
     await start({}, { language: "python" });
     const projectLoad = getHandler(IPC.project.load);
@@ -1825,7 +1854,7 @@ describe("Step 5 IPC handlers", () => {
   });
 
   it("modules:exportFromProject rejects when no project directory is active", async () => {
-    setup();
+    await setup();
     const start = getHandler(IPC.kernels.start);
     await start({}, { language: "python" });
     // Intentionally skip project:load so activeProjectDir stays null.
@@ -1842,7 +1871,7 @@ describe("Step 5 IPC handlers", () => {
   });
 
   it("modules:updateMetadata forwards to MODULE_UPDATE comm", async () => {
-    const { commRouter } = setup();
+    const { commRouter } = await setup();
     const start = getHandler(IPC.kernels.start);
     await start({}, { language: "python" });
     (commRouter.request as unknown as ReturnType<typeof vi.fn>).mockClear();
@@ -1872,7 +1901,7 @@ describe("Step 5 IPC handlers", () => {
   });
 
   it("modules:listImported returns project imports with installed names", async () => {
-    setup();
+    await setup();
     const start = getHandler(IPC.kernels.start);
     await start({}, { language: "python" });
     const projectLoad = getHandler(IPC.project.load);
@@ -1939,7 +1968,7 @@ describe("Step 5 IPC handlers", () => {
   });
 
   it("modules:listImported includes action tab metadata when provided", async () => {
-    setup();
+    await setup();
     const start = getHandler(IPC.kernels.start);
     await start({}, { language: "python" });
     // listImported calls resolveActionScripts — provide the tab metadata.
@@ -1984,7 +2013,7 @@ describe("Step 5 IPC handlers", () => {
   });
 
   it("modules:listImported surfaces missing-script warnings without throwing", async () => {
-    setup();
+    await setup();
     const start = getHandler(IPC.kernels.start);
     await start({}, { language: "python" });
     // evaluateHealth is called during refreshProjectModuleHealth (load).
@@ -2030,7 +2059,7 @@ describe("Step 5 IPC handlers", () => {
   });
 
   it("modules:saveSettings persists module settings for imported alias", async () => {
-    setup();
+    await setup();
     const projectLoad = getHandler(IPC.project.load);
     await projectLoad({}, "/tmp/project");
     const manifestJson = JSON.stringify({
@@ -2073,7 +2102,7 @@ describe("Step 5 IPC handlers", () => {
   });
 
   it("serializes manifest writes for concurrent import and settings updates", async () => {
-    setup();
+    await setup();
     let manifestState = {
       schema_version: "1.1",
       saved_at: "2026-01-01T00:00:00.000Z",
@@ -2151,7 +2180,7 @@ describe("Step 5 IPC handlers", () => {
   });
 
   it("modules:runAction returns execution code for imported module action", async () => {
-    setup();
+    await setup();
     mocks.fsReadFile.mockResolvedValue(
       JSON.stringify({
         schema_version: "1.1",
@@ -2189,7 +2218,7 @@ describe("Step 5 IPC handlers", () => {
   });
 
   it("modules:runAction quotes unsafe string input values", async () => {
-    setup();
+    await setup();
     mocks.fsReadFile.mockResolvedValue(
       JSON.stringify({
         schema_version: "1.1",
@@ -2227,7 +2256,7 @@ describe("Step 5 IPC handlers", () => {
   });
 
   it("kernels:start fails fast when selected runtime lacks pdv", async () => {
-    const { kernelManager } = setup();
+    const { kernelManager } = await setup();
     vi.spyOn(EnvironmentDetector, "checkPDVInstalled").mockResolvedValueOnce({
       installed: false,
       version: null,
@@ -2242,7 +2271,7 @@ describe("Step 5 IPC handlers", () => {
   });
 
   it("project:load no longer calls bindActiveProjectModules", async () => {
-    setup();
+    await setup();
     const start = getHandler(IPC.kernels.start);
     await start({}, { language: "python" });
 
@@ -2279,7 +2308,7 @@ describe("Step 5 IPC handlers", () => {
   // -------------------------------------------------------------------------
 
   it("autosave:clear delegates to ProjectManager.clearAutosave with the given dir", async () => {
-    const { projectManager } = setup();
+    const { projectManager } = await setup();
     const clear = getHandler(IPC.autosave.clear);
 
     await clear({}, "/tmp/some-project");
@@ -2296,7 +2325,7 @@ describe("Step 5 IPC handlers", () => {
   });
 
   it("autosave:check returns exists=false when tree-index.json is absent", async () => {
-    setup();
+    await setup();
     const check = getHandler(IPC.autosave.check);
 
     // fsStat default mock throws ENOENT, so the static checkForAutosave
@@ -2306,7 +2335,7 @@ describe("Step 5 IPC handlers", () => {
   });
 
   it("autosave:scanWorkingDirs returns [] for an empty workingDirBase", async () => {
-    setup();
+    await setup();
     const scan = getHandler(IPC.autosave.scanWorkingDirs);
     // fsReaddir defaults to [] — no subdirectories under the base.
     const result = await scan({});
@@ -2314,7 +2343,7 @@ describe("Step 5 IPC handlers", () => {
   });
 
   it("autosave:scanWorkingDirs surfaces orphans whose .autosave/tree-index.json exists", async () => {
-    setup();
+    await setup();
     const scan = getHandler(IPC.autosave.scanWorkingDirs);
 
     // Two subdirectories at the base; only `pdv-A` has a valid tree-index.
@@ -2339,7 +2368,7 @@ describe("Step 5 IPC handlers", () => {
   });
 
   it("autosave:deleteOrphan removes the orphan dir recursively", async () => {
-    setup();
+    await setup();
     const deleteOrphan = getHandler(IPC.autosave.deleteOrphan);
 
     await deleteOrphan({}, "/tmp/orphan-session");
@@ -2351,14 +2380,14 @@ describe("Step 5 IPC handlers", () => {
   });
 
   it("autosave:recoverUnsaved throws when no kernel is active", async () => {
-    setup();
+    await setup();
     const recover = getHandler(IPC.autosave.recoverUnsaved);
     // No kernels.start has been awaited, so activeKernelId is null.
     await expect(recover({}, "/tmp/orphan")).rejects.toThrow(/no active kernel/i);
   });
 
   it("autosave:run returns { saved: false } and warns when there is no working dir", async () => {
-    setup();
+    await setup();
     const run = getHandler(IPC.autosave.run);
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
@@ -2373,7 +2402,7 @@ describe("Step 5 IPC handlers", () => {
   });
 
   it("autosave:run acquires the shared save lock", async () => {
-    const { projectManager } = setup();
+    const { projectManager } = await setup();
     const start = getHandler(IPC.kernels.start);
     await start({}, { language: "python" });
 
@@ -2384,7 +2413,7 @@ describe("Step 5 IPC handlers", () => {
   });
 
   it("project:save acquires the shared save lock", async () => {
-    const { projectManager } = setup();
+    const { projectManager } = await setup();
     const start = getHandler(IPC.kernels.start);
     await start({}, { language: "python" });
 
@@ -2395,7 +2424,7 @@ describe("Step 5 IPC handlers", () => {
   });
 
   it("autosave:deleteOrphan refuses to remove the active session's working dir", async () => {
-    const { kernelManager } = setup();
+    const { kernelManager } = await setup();
     const start = getHandler(IPC.kernels.start);
     const kernel = (await start({}, { language: "python" })) as KernelInfo;
     void kernelManager; // satisfy lint
@@ -2414,7 +2443,7 @@ describe("Step 5 IPC handlers", () => {
   });
 
   it("autosave:scanWorkingDirs filters out the active session's working dir", async () => {
-    const { configStore } = setup();
+    const { configStore } = await setup();
     // Pin workingDirBase to /tmp so it matches the mock createWorkingDir
     // result ("/tmp/pdv-test"); without this they live in different roots
     // and the filter has nothing to filter.
@@ -2446,9 +2475,10 @@ describe("Step 5 IPC handlers", () => {
     expect(dirs).toContain("/tmp/pdv-stale");
   });
 
-  it("unregisterIpcHandlers detaches the kernel:executionState listener", () => {
-    const { kernelManager } = setup();
-    // setup() calls registerIpcHandlers which attaches the listener.
+  it("unwireServer detaches the kernel:executionState listener", async () => {
+    const { kernelManager } = await setup();
+    // setup()'s wireServer attaches the listener; teardown of the server
+    // core (not the shell's unregisterIpcHandlers) must detach it.
     const onMock = kernelManager.on as unknown as ReturnType<typeof vi.fn>;
     const onCalls = onMock.mock.calls.filter(
       (c: unknown[]) => c[0] === "kernel:executionState",
@@ -2456,7 +2486,7 @@ describe("Step 5 IPC handlers", () => {
     expect(onCalls.length).toBe(1);
     const attachedListener = onCalls[0][1];
 
-    unregisterIpcHandlers();
+    unwireServer();
 
     const removeMock = kernelManager.removeListener as unknown as ReturnType<typeof vi.fn>;
     expect(removeMock).toHaveBeenCalledWith(

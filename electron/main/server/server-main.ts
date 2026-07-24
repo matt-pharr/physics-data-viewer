@@ -45,8 +45,9 @@ import { KernelManager } from "../kernel-manager";
 import { ProjectManager } from "../project-manager";
 import { QueryRouter } from "../query-router";
 import { setAppVersion } from "../pdv-protocol";
+import { RPC_CHANNELS } from "../transport/protocol";
 import { RpcServer } from "../transport/rpc-server";
-import type { ConfirmOptions } from "./confirm";
+import { ShellConfirmBroker } from "./shell-confirm";
 import { getWiredCellRpc, getWiredMcpServer, unwireServer, wireServer, type WireHandle } from "./wire";
 
 /**
@@ -84,13 +85,18 @@ export function serverMain(): void {
   const configStore = new ConfigStore(pdvDir);
 
   let wire: WireHandle | null = null;
+  let confirmBroker: ShellConfirmBroker | null = null;
   const rpcServer = new RpcServer(process.stdin, process.stdout, {
     version,
     onSessionReset: () => {
       wire?.sessionReset();
     },
+    onConfirmResponse: (payload) => {
+      confirmBroker?.deliver(payload);
+    },
     onShutdown: async () => {
       console.log("[pdv-server] shutdown requested");
+      confirmBroker?.cancelAll();
       try {
         await kernelManager.shutdownAll();
       } catch (error) {
@@ -109,22 +115,22 @@ export function serverMain(): void {
     },
   });
 
+  confirmBroker = new ShellConfirmBroker(rpcServer.push);
   wire = wireServer({
     push: rpcServer.push,
-    // Native confirms need the shell; until the reverse-RPC confirm lands,
-    // answer with the safe cancel choice so nothing destructive proceeds.
-    confirm: async (options: ConfirmOptions): Promise<number> => {
-      console.warn(
-        "[pdv-server] confirm requested but no shell confirm is wired — cancelling"
-      );
-      return options.cancelId ?? 0;
-    },
+    // Native confirms need the shell: reverse RPC via the broker
+    // (confirmRequest push → shell dialog → confirmResponse invoke).
+    confirm: confirmBroker.confirm,
     pdvDir,
     kernelManager,
     commRouter,
     queryRouter,
     projectManager,
     configStore,
+    // Child windows live in the shell; ask it to close them.
+    closeChildWindows: () => {
+      rpcServer.push(RPC_CHANNELS.closeChildWindows, undefined);
+    },
     startMcp: true,
   });
 
@@ -132,6 +138,7 @@ export function serverMain(): void {
   // stdin closes — exit rather than lingering as an orphan.
   process.stdin.on("end", () => {
     console.log("[pdv-server] stdin closed; shutting down");
+    confirmBroker?.cancelAll();
     void kernelManager
       .shutdownAll()
       .catch((error) => {
