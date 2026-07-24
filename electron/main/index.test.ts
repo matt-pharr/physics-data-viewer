@@ -11,7 +11,7 @@ import type { BrowserWindow } from "electron";
 import os from "os";
 import path from "path";
 
-import { registerIpcHandlers, registerCommPushForwarding, unregisterIpcHandlers } from "./index";
+import { registerIpcHandlers, unregisterIpcHandlers } from "./index";
 import {
   IPC,
   type NamespaceVariable,
@@ -374,6 +374,9 @@ function setup() {
   };
   const configStore = {
     getAll: vi.fn(() => ({ ...configState })),
+    get: vi.fn(
+      (key: string) => (configState as unknown as Record<string, unknown>)[key],
+    ),
     set: vi.fn((key: string, value: unknown) => {
       (configState as unknown as Record<string, unknown>)[key] = value;
     }),
@@ -789,11 +792,6 @@ describe("Step 5 IPC handlers", () => {
 
   it("forwards pdv.tree.changed pushes to renderer via webContents.send", () => {
     const { commRouter, webContentsSend } = setup();
-    registerCommPushForwarding(
-      { webContents: { send: webContentsSend } } as unknown as BrowserWindow,
-      commRouter,
-      { cacheKernelSaveResults: vi.fn() } as unknown as ProjectManager,
-    );
 
     const onPushCalls = (commRouter.onPush as unknown as ReturnType<typeof vi.fn>)
       .mock.calls;

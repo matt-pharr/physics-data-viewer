@@ -42,16 +42,20 @@ interface SetupOverrides {
   config?: Partial<PDVConfig>;
   activeKernelId?: string | null;
   workingDirs?: [string, string][];
+  resolveTreeFile?: (treePath: string) => Promise<string | null>;
 }
 
 function setup(overrides: SetupOverrides = {}): void {
   const activeKernelId =
     "activeKernelId" in overrides ? (overrides.activeKernelId ?? null) : "k1";
+  const workingDirs = new Map(overrides.workingDirs ?? [["k1", "/tmp/wd"]]);
   registerLaunchersIpcHandlers({
-    kernelWorkingDirs: new Map(overrides.workingDirs ?? [["k1", "/tmp/wd"]]),
-    getActiveKernelId: () => activeKernelId,
-    getActiveProjectDir: () => null,
-    getConfig: () =>
+    getLauncherContext: async () => ({
+      kernelId: activeKernelId,
+      workingDir: activeKernelId ? (workingDirs.get(activeKernelId) ?? null) : null,
+      projectDir: null,
+    }),
+    getConfig: async () =>
       ({
         showPrivateVariables: false,
         showModuleVariables: false,
@@ -59,7 +63,8 @@ function setup(overrides: SetupOverrides = {}): void {
         autoRefreshNamespace: false,
         ...overrides.config,
       }) as PDVConfig,
-    getMcpStatus: () => null,
+    getMcpStatus: async () => null,
+    resolveTreeFile: overrides.resolveTreeFile ?? (async () => null),
   });
 }
 
@@ -121,5 +126,33 @@ describe("launchers.openWorkingDir", () => {
       error: expect.stringContaining("No working directory"),
     });
     expect(childProcessMocks.spawn).not.toHaveBeenCalled();
+  });
+});
+
+describe("script:edit", () => {
+  it("returns success:false when the kernel cannot resolve a file path", async () => {
+    setup({ resolveTreeFile: async () => null });
+    const result = (await getHandler(IPC.script.edit)({}, "k1", "missing.script")) as {
+      success: boolean;
+      error?: string;
+    };
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/Could not resolve/);
+  });
+
+  it("spawns the editor process with resolved path and detached child handles", async () => {
+    setup({
+      config: { launchers: { editor: { fileCommand: "code {}" } } },
+      resolveTreeFile: async () => "/tmp/wd/scripts/demo.py",
+    });
+    const result = (await getHandler(IPC.script.edit)({}, "k1", "scripts.demo")) as {
+      success: boolean;
+    };
+    expect(result.success).toBe(true);
+    expect(childProcessMocks.spawn).toHaveBeenCalledWith(
+      "code",
+      ["/tmp/wd/scripts/demo.py"],
+      expect.objectContaining({ detached: true, stdio: "ignore" }),
+    );
   });
 });

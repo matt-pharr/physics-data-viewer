@@ -2,66 +2,35 @@
  * ipc-register-gui-editor.ts — Register GUI editor window IPC handlers.
  *
  * Responsibilities:
- * - Register `window.pdv.guiEditor.*` IPC channels.
- * - Delegate to GuiEditorWindowManager for window lifecycle.
- * - Read/write gui.json manifest files for PDVGui tree nodes.
+ * - Register the shell-side `window.pdv.guiEditor.*` window channels
+ *   (`open`, `openViewer`, `context`).
+ * - Delegate to GuiEditorWindowManager / GuiViewerWindowManager for window
+ *   lifecycle.
  *
  * Non-responsibilities:
+ * - GUI manifest file I/O (`guiEditor.read`/`guiEditor.save` are server
+ *   channels; see `ipc-register-gui-files.ts`).
  * - Window creation/management logic (see gui-editor-window-manager.ts).
- * - GUI manifest validation or editing logic.
  */
 
 import { handleIpc } from "./ipc-registry";
-import * as fs from "fs/promises";
-import { atomicWriteFile } from "./atomic-write";
 
 import {
   IPC,
   type GuiEditorOpenRequest,
   type GuiEditorOpenResult,
   type GuiEditorContext,
-  type GuiEditorReadResult,
-  type GuiEditorSaveRequest,
-  type GuiEditorSaveResult,
 } from "./ipc";
-import { PDVMessageType } from "./pdv-protocol";
 import type { GuiEditorWindowManager } from "./gui-editor-window-manager";
 import type { GuiViewerWindowManager } from "./gui-viewer-window-manager";
-import type { CommRouter } from "./comm-router";
 
 interface RegisterGuiEditorIpcHandlersOptions {
   guiEditorWindowManager: GuiEditorWindowManager;
   guiViewerWindowManager: GuiViewerWindowManager;
-  commRouter: CommRouter;
 }
 
 /**
- * Resolve the absolute filesystem path for a PDVGui node's backing file.
- *
- * Uses the kernel's `pdv.tree.resolve_file` comm to map a tree path to a
- * real filesystem path.
- *
- * @param commRouter - Active comm router.
- * @param treePath - Dot-delimited tree path of the PDVGui node.
- * @returns Absolute path to the .gui.json file.
- * @throws {Error} When the comm resolution fails.
- */
-async function resolveGuiFilePath(
-  commRouter: CommRouter,
-  treePath: string
-): Promise<string> {
-  const response = await commRouter.request(PDVMessageType.TREE_RESOLVE_FILE, {
-    path: treePath,
-  });
-  const filePath = response.payload?.file_path;
-  if (typeof filePath !== "string" || !filePath) {
-    throw new Error(`Failed to resolve file path for tree node: ${treePath}`);
-  }
-  return filePath;
-}
-
-/**
- * Register GUI editor IPC handlers under `IPC.guiEditor.*`.
+ * Register GUI editor window IPC handlers under `IPC.guiEditor.*`.
  *
  * @param options - Dependencies.
  * @returns Nothing.
@@ -69,7 +38,7 @@ async function resolveGuiFilePath(
 export function registerGuiEditorIpcHandlers(
   options: RegisterGuiEditorIpcHandlersOptions
 ): void {
-  const { guiEditorWindowManager, guiViewerWindowManager, commRouter } = options;
+  const { guiEditorWindowManager, guiViewerWindowManager } = options;
 
   handleIpc(
     IPC.guiEditor.open,
@@ -112,41 +81,6 @@ export function registerGuiEditorIpcHandlers(
     async (event): Promise<GuiEditorContext | null> => {
       return guiEditorWindowManager.getContextForSender(event.sender.id)
         ?? guiViewerWindowManager.getContextForSender(event.sender.id);
-    }
-  );
-
-  handleIpc(
-    IPC.guiEditor.read,
-    async (_event, treePath: string): Promise<GuiEditorReadResult> => {
-      try {
-        const filePath = await resolveGuiFilePath(commRouter, treePath);
-        const raw = await fs.readFile(filePath, "utf-8");
-        const manifest = JSON.parse(raw);
-        return { success: true, manifest };
-      } catch (error) {
-        return {
-          success: false,
-          error: error instanceof Error ? error.message : String(error),
-        };
-      }
-    }
-  );
-
-  handleIpc(
-    IPC.guiEditor.save,
-    async (_event, request: GuiEditorSaveRequest): Promise<GuiEditorSaveResult> => {
-      try {
-        const filePath = await resolveGuiFilePath(commRouter, request.treePath);
-        const json = JSON.stringify(request.manifest, null, 2) + "\n";
-        // Atomic: a crash mid-save must not tear the .gui.json manifest.
-        await atomicWriteFile(filePath, json);
-        return { success: true };
-      } catch (error) {
-        return {
-          success: false,
-          error: error instanceof Error ? error.message : String(error),
-        };
-      }
     }
   );
 }

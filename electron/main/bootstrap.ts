@@ -6,7 +6,9 @@
  * 2. Request single-instance lock; quit immediately if denied.
  * 3. Wire app lifecycle events (`ready`, `activate`, `second-instance`).
  * 4. On `ready`: lazy-create `KernelManager` and `ConfigStore`, then open
- *    the main `BrowserWindow` via {@link createWindow}.
+ *    the main `BrowserWindow` via {@link createWindow} (whose IPC wiring
+ *    assembles the pdv-server core, including the MCP server — see
+ *    server/wire.ts).
  * 5. On `second-instance`: focus existing window or open a new one.
  *
  * Singletons (module-level):
@@ -41,21 +43,18 @@
   }
 })();
 
-import { app, BrowserWindow, dialog, powerMonitor } from "electron";
+import { app, BrowserWindow, powerMonitor } from "electron";
 import * as os from "os";
 import * as path from "path";
 import * as fs from "fs";
 
 import { createWindow, wireAppEvents } from "./app";
-import { getMcpServerHooks, setMcpServerInstance } from "./index";
-import { CellRpcClient } from "./mcp/cell-rpc";
-import { PdvMcpServer } from "./mcp/mcp-server";
+import { getWiredCellRpc, getWiredMcpServer } from "./server/wire";
 import { CommRouter } from "./comm-router";
 import { QueryRouter } from "./query-router";
 import { ConfigStore } from "./config";
 import { KernelManager } from "./kernel-manager";
 import { ProjectManager } from "./project-manager";
-import type { ConfirmOptions } from "./server/confirm";
 import type { PushSender } from "./server/invoke-registry";
 import { initServerPaths } from "./server/server-paths";
 import { handleSystemResume } from "./wake-handler";
@@ -84,8 +83,6 @@ let kernelManager: KernelManager | null = null;
 let mainWindow: BrowserWindow | null = null;
 let openingWindow: Promise<void> | null = null;
 let configStore: ConfigStore | null = null;
-let mcpServer: PdvMcpServer | null = null;
-let cellRpc: CellRpcClient | null = null;
 
 const commRouter = new CommRouter();
 const queryRouter = new QueryRouter();
@@ -94,27 +91,11 @@ const projectManager = new ProjectManager(commRouter);
 /**
  * Renderer-push sender bound to the current main window; a no-op while no
  * window is open. Injected into code that outlives any single window (the
- * wake handler, the MCP server).
+ * wake handler).
  */
 const pushToMainWindow: PushSender = (channel, payload) => {
   const win = mainWindow;
   if (win && !win.isDestroyed()) win.webContents.send(channel, payload);
-};
-
-/**
- * Native-confirmation closure injected into the MCP server (agent-requested
- * tree deletions). Parents the dialog to the main window when one is open.
- *
- * @param options - Dialog options (see server/confirm.ts).
- * @returns Index of the clicked button.
- */
-const confirmViaDialog = async (options: ConfirmOptions): Promise<number> => {
-  const win = mainWindow;
-  const result =
-    win && !win.isDestroyed()
-      ? await dialog.showMessageBox(win, options)
-      : await dialog.showMessageBox(options);
-  return result.response;
 };
 
 async function openMainWindow(): Promise<void> {
@@ -149,37 +130,6 @@ async function openMainWindow(): Promise<void> {
         mainWindow = null;
       }
     });
-    // Start the AI-agent MCP server once the window's IPC handlers (and thus
-    // the lifecycle hooks) have been registered. See ARCHITECTURE.md §15.
-    if (!mcpServer) {
-      const hooks = getMcpServerHooks();
-      if (hooks) {
-        if (!cellRpc) {
-          cellRpc = new CellRpcClient(() => mainWindow);
-          cellRpc.start();
-        }
-        mcpServer = new PdvMcpServer({
-          kernelManager: km,
-          commRouter,
-          queryRouter,
-          projectManager,
-          configStore: cfg,
-          hooks,
-          appVersion: app.getVersion(),
-          cellRpc,
-          push: pushToMainWindow,
-          confirm: confirmViaDialog,
-        });
-        try {
-          await mcpServer.start();
-          // Publish the live server so the agent-launcher IPC handler can
-          // read its status (port + token) at button-click time.
-          setMcpServerInstance(mcpServer);
-        } catch (error) {
-          console.error("[PDV] Failed to start MCP server:", error);
-        }
-      }
-    }
   })();
   try {
     await openingWindow;
@@ -198,7 +148,7 @@ const hasSingleInstanceLock = app.requestSingleInstanceLock();
 if (!hasSingleInstanceLock) {
   app.quit();
 } else {
-  wireAppEvents(() => kernelManager, () => mcpServer, () => cellRpc);
+  wireAppEvents(() => kernelManager, getWiredMcpServer, getWiredCellRpc);
   app.on("second-instance", () => {
     if (mainWindow && !mainWindow.isDestroyed()) {
       if (mainWindow.isMinimized()) {

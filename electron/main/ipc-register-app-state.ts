@@ -2,11 +2,12 @@
  * ipc-register-app-state.ts — Register app-state and file-picker IPC handlers.
  *
  * Responsibilities:
- * - Register config/theme/code-cell/menu/file-picker IPC handlers.
- * - Hydrate in-memory theme/code-cell caches from disk.
+ * - Register theme/menu/chrome/updater/file-picker IPC handlers.
+ * - Hydrate the in-memory theme cache from disk.
  *
  * Non-responsibilities:
  * - Kernel lifecycle, project, tree, or modules IPC handling.
+ * - `config.get`/`config.set` — server channels (see ipc-register-config.ts).
  * - Push forwarding between comm router and renderer.
  */
 
@@ -16,7 +17,7 @@ import * as fs from "fs/promises";
 import * as fsSync from "fs";
 import * as path from "path";
 
-import type { ConfigStore, PDVConfig } from "./config";
+import type { UpdateCheckStamp } from "./auto-updater";
 import type { Theme, WindowChromeInfo, WindowChromePlatform } from "./ipc";
 import { IPC } from "./ipc";
 import { getTopLevelMenuModel, popupTopLevelMenu, updateMenuEnabled, updateRecentProjectsMenu } from "./menu";
@@ -27,14 +28,12 @@ let savedThemes: Theme[] = [];
 
 interface RegisterAppStateIpcHandlersOptions {
   win: BrowserWindow;
-  configStore: ConfigStore;
-  readConfig: (configStore: ConfigStore) => PDVConfig;
   themesDir: string;
   stateDir: string;
   /** Flips the close-guard flag in `app.ts` so the next `win.close()` proceeds. */
   setAllowClose: (allow: boolean) => void;
-  /** Called after config:set with the old and new config values. */
-  onConfigChanged?: (prev: PDVConfig, next: PDVConfig) => void;
+  /** Async accessors for the updater's lastUpdateCheck timestamp. */
+  updateCheckStamp: UpdateCheckStamp;
 }
 
 function getWindowChromePlatform(): WindowChromePlatform {
@@ -105,7 +104,7 @@ function loadThemesFromDisk(themesDir: string): void {
 export function registerAppStateIpcHandlers(
   options: RegisterAppStateIpcHandlersOptions
 ): void {
-  const { win, configStore, readConfig, themesDir, stateDir, setAllowClose, onConfigChanged } = options;
+  const { win, themesDir, stateDir, setAllowClose, updateCheckStamp } = options;
 
   fs.mkdir(themesDir, { recursive: true }).catch((error) => {
     console.warn(
@@ -135,8 +134,6 @@ export function registerAppStateIpcHandlers(
   win.on("enter-full-screen", pushWindowChromeState);
   win.on("leave-full-screen", pushWindowChromeState);
 
-  handleIpc(IPC.config.get, async () => readConfig(configStore));
-
   handleIpc(IPC.about.getVersion, () => app.getVersion());
 
   handleIpc(IPC.about.openRepoPage, async () => {
@@ -157,40 +154,12 @@ export function registerAppStateIpcHandlers(
   });
 
   // Auto-updater
-  initAutoUpdater(win, configStore);
-  handleIpc(IPC.updater.checkForUpdates, async () => { await checkForUpdates(configStore); });
+  initAutoUpdater(win, updateCheckStamp);
+  handleIpc(IPC.updater.checkForUpdates, async () => { await checkForUpdates(updateCheckStamp); });
   handleIpc(IPC.updater.downloadUpdate, async () => { await downloadUpdate(); });
   handleIpc(IPC.updater.installUpdate, async () => { installUpdate(); });
   handleIpc(IPC.updater.openReleasesPage, async () => { await openReleasesPage(); });
   handleIpc(IPC.updater.getStatus, async () => getUpdateStatus());
-
-  handleIpc(IPC.config.set, async (_event, updates: Partial<PDVConfig>) => {
-    const prev = readConfig(configStore);
-    const merged: PDVConfig = { ...prev, ...updates };
-    for (const key of Object.keys(updates) as Array<keyof PDVConfig>) {
-      const value = updates[key];
-      if (value === undefined) continue;
-      if ((key === "mcp" || key === "launchers") && value !== null && typeof value === "object") {
-        // Shallow-merge these nested subtrees rather than full-replacing them:
-        // - `mcp`: the renderer's `Config['mcp']` type omits main-only fields
-        //   (e.g. `authToken`); a full replace would drop the persisted bearer
-        //   token and break every connected agent on the next toggle.
-        // - `launchers`: a caller may send a partial update (just `terminal`,
-        //   say); a full replace would silently drop the sibling `editor` /
-        //   `agent` slots.
-        const existing = (configStore.get(key) ?? {}) as Record<string, unknown>;
-        configStore.set(key, {
-          ...existing,
-          ...(value as Record<string, unknown>),
-        } as PDVConfig[typeof key]);
-      } else {
-        configStore.set(key, value);
-      }
-    }
-    const next = { ...merged, ...configStore.getAll() };
-    onConfigChanged?.(prev, next);
-    return next;
-  });
 
   handleIpc(IPC.window.setBackgroundColor, (event, color: string) => {
     // Sync the BrowserWindow's native background to the active theme's

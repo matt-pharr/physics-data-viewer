@@ -117,6 +117,8 @@ import { registerTreeNamespaceScriptIpcHandlers } from "./ipc-register-tree-name
 import { registerModulesIpcHandlers } from "./ipc-register-modules";
 import { registerProjectIpcHandlers } from "./ipc-register-project";
 import { registerAppStateIpcHandlers } from "./ipc-register-app-state";
+import { registerConfigIpcHandlers } from "./ipc-register-config";
+import { registerGuiFilesIpcHandlers } from "./ipc-register-gui-files";
 import { registerModuleWindowIpcHandlers } from "./ipc-register-module-windows";
 import { registerGuiEditorIpcHandlers } from "./ipc-register-gui-editor";
 import { registerLaunchersIpcHandlers } from "./ipc-register-launchers";
@@ -153,11 +155,11 @@ function listExpectedHandlerChannels(): string[] {
 }
 
 /**
- * Channels that are NOT registered by any of the 7 `ipc-register-*` files —
- * instead they are registered inline in `electron/main/index.ts`, or by the
- * MCP subsystem (`mcp:getStatus` by `PdvMcpServer.start()`, `cells:respond`
- * by `CellRpcClient.start()`). Track them here so the meta-test only asserts
- * on what the dedicated register functions own.
+ * Channels that are NOT registered by the standalone `ipc-register-*`
+ * functions exercised here: the autosave/environment registrars need the
+ * full wire-time dependency set, and `mcp:getStatus` / `cells:respond` are
+ * registered directly by `server/wire.ts`. All of them are covered by the
+ * wire test (`server/wire.test.ts`) instead.
  */
 const CHANNELS_REGISTERED_IN_INDEX = [
   ...Object.values(IPC.autosave),
@@ -222,8 +224,6 @@ function setupAll(): void {
     sanitizeScriptName: (n: string) => n,
     ensureScriptFile: async () => undefined,
     ensureLibFile: async () => undefined,
-    buildEditorSpawn: () => ({ file: "", args: [] }),
-    resolveEditorSpawn: (_file: string, _args: string[], _opts?: unknown) => ({ file: "", args: [] }),
   });
   registerModulesIpcHandlers({
     push: win.webContentsSend,
@@ -264,12 +264,16 @@ function setupAll(): void {
   });
   registerAppStateIpcHandlers({
     win: win.win,
-    configStore: config.store,
-    readConfig: (s) => s.getAll() as PDVConfig,
     themesDir: "/tmp/themes",
     stateDir: "/tmp/state",
     setAllowClose: vi.fn(),
+    updateCheckStamp: {
+      get: vi.fn(async () => undefined),
+      set: vi.fn(async () => undefined),
+    },
   });
+  registerConfigIpcHandlers({ configStore: config.store });
+  registerGuiFilesIpcHandlers({ commRouter: commRouter.router });
   registerModuleWindowIpcHandlers({
     moduleWindowManager: createModuleWindowManagerMock(),
     mainWindow: win.win,
@@ -277,14 +281,12 @@ function setupAll(): void {
   registerGuiEditorIpcHandlers({
     guiEditorWindowManager: createGuiEditorWindowManagerMock(),
     guiViewerWindowManager: createGuiViewerWindowManagerMock(),
-    commRouter: commRouter.router,
   });
   registerLaunchersIpcHandlers({
-    kernelWorkingDirs,
-    getActiveKernelId: () => null,
-    getActiveProjectDir: () => null,
-    getConfig: () => config.store.getAll() as PDVConfig,
-    getMcpStatus: () => null,
+    getLauncherContext: async () => ({ kernelId: null, workingDir: null, projectDir: null }),
+    getConfig: async () => config.store.getAll() as PDVConfig,
+    getMcpStatus: async () => null,
+    resolveTreeFile: async () => null,
   });
 }
 

@@ -1,7 +1,8 @@
 /**
  * mcp-server.ts — The local MCP server for external AI coding agents.
  *
- * Runs inside the Electron main process for the lifetime of the app. Exposes
+ * Runs inside the pdv-server core for the lifetime of the app (the Electron
+ * main process in single-process mode). Exposes
  * the active PDV project to MCP-capable agents (Claude Code, Codex, Cursor)
  * over Streamable HTTP on a loopback port, guarded by a bearer token.
  *
@@ -13,6 +14,9 @@
  *   project/kernel generation at connect time (ARCHITECTURE.md §15.3).
  *
  * What it does NOT do
+ * - It does not register the `mcp:getStatus` invoke handler — `server/wire.ts`
+ *   does, reading {@link PdvMcpServer.status} (which is valid before
+ *   `start()` resolves: `running` is simply false).
  * - It does not own the kernel transport — tools reach the kernel through
  *   the shared `CommRouter` / `QueryRouter` / `KernelManager`.
  * - It is not a global singleton: one instance per project/window session,
@@ -22,8 +26,6 @@
  * --------
  * ARCHITECTURE.md §15 — AI Agent Integration (MCP Server)
  */
-
-import { ipcMain } from "electron";
 
 import { randomUUID } from "node:crypto";
 import * as http from "node:http";
@@ -164,7 +166,6 @@ export class PdvMcpServer {
       throw err;
     }
     console.log(`[mcp] server listening on http://${HOST}:${this.port}/mcp`);
-    ipcMain.handle(IPC.mcp.getStatus, () => this.status);
   }
 
   /**
@@ -173,7 +174,6 @@ export class PdvMcpServer {
    * @returns Resolves once the HTTP server has closed.
    */
   async stop(): Promise<void> {
-    ipcMain.removeHandler(IPC.mcp.getStatus);
     for (const session of this.sessions.values()) {
       try {
         await session.transport.close();

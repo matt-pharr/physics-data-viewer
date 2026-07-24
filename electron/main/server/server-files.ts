@@ -14,9 +14,7 @@
  * NOT listed (deliberately, they stay in the shell): window managers, menu,
  * auto-updater, bootstrap/app/index wiring, ipc-registry (the ipcMain
  * mirror), the shell registrars (app-state, launchers, module-windows,
- * gui-editor), editor-spawn + agent-launcher (local-process launchers), and
- * — until the extraction relocates them — mcp/mcp-server.ts and
- * mcp/cell-rpc.ts.
+ * gui-editor), and editor-spawn + agent-launcher (local-process launchers).
  */
 
 /** Server-destined source files, relative to `electron/main/`. */
@@ -27,6 +25,13 @@ export const SERVER_DESTINED_FILES: readonly string[] = [
   "server/invoke-registry.ts",
   "server/confirm.ts",
   "server/server-paths.ts",
+  "server/wire.ts",
+  "server/server-main.ts",
+  // Stdio RPC transport
+  "transport/protocol.ts",
+  "transport/line-codec.ts",
+  "transport/rpc-client.ts",
+  "transport/rpc-server.ts",
   // Core managers
   "comm-router.ts",
   "query-router.ts",
@@ -64,7 +69,11 @@ export const SERVER_DESTINED_FILES: readonly string[] = [
   "ipc-register-autosave.ts",
   "ipc-register-modules.ts",
   "ipc-register-tree-namespace-script.ts",
-  // MCP (server process after the flip; mcp-server.ts/cell-rpc.ts follow then)
+  "ipc-register-config.ts",
+  "ipc-register-gui-files.ts",
+  // MCP
+  "mcp/mcp-server.ts",
+  "mcp/cell-rpc.ts",
   "mcp/mcp-context.ts",
   "mcp/mcp-auth.ts",
   "mcp/mcp-config-writer.ts",

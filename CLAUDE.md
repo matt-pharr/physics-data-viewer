@@ -16,8 +16,9 @@ PLANNED_FEATURES.md      ← planned features organised by release milestone
 
 electron/                ← Electron app (TypeScript)
     main/                ← Node.js main process (kernel management, IPC, filesystem)
-        ipc.ts           ← SINGLE SOURCE OF TRUTH for all IPC channel names and types
-        index.ts         ← ipcMain handler registration (entry point)
+        ipc.ts           ← SINGLE SOURCE OF TRUTH for all IPC channel names and types,
+                           plus the SHELL_CHANNELS / SERVER_CHANNELS partition
+        index.ts         ← shell-side IPC wiring (shell registrars + server mirror)
         kernel-manager.ts
         comm-router.ts
         pdv-protocol.ts  ← PDV comm protocol types and constants
@@ -25,6 +26,9 @@ electron/                ← Electron app (TypeScript)
         config.ts
         environment-detector.ts
         project-manager.ts
+        server/          ← Electron-free pdv-server core: wire.ts (session assembly),
+                           invoke-registry.ts, server-main.ts (stdio CLI entry)
+        transport/       ← JSON-lines stdio RPC (protocol, line-codec, rpc-client/server)
     preload.ts           ← exposes window.pdv API to renderer via contextBridge
     renderer/src/        ← React frontend
         app/index.tsx    ← root component; orchestrates all kernel lifecycle and state
@@ -69,7 +73,7 @@ Renderer (React) ──window.pdv──► Preload ──ipcRenderer──► Ma
 
 1. **`ARCHITECTURE.md` is authoritative.** If code contradicts it, the code is wrong. If you need to deviate, update the document first.
 
-2. **`ipc.ts` is the single source of truth for all IPC.** Channel names, request/response types, and the `PDVApi` interface all live there. Preload and index.ts consume them — they do not define their own strings.
+2. **`ipc.ts` is the single source of truth for all IPC.** Channel names, request/response types, and the `PDVApi` interface all live there. Preload and index.ts consume them — they do not define their own strings. Every new invoke channel must also be added to exactly one of `SHELL_CHANNELS` (window/OS concerns, Electron shell) or `SERVER_CHANNELS` (session concerns, the Electron-free pdv-server core in `main/server/`), and new push channels to `SERVER_PUSH_CHANNELS` or `SHELL_PUSH_CHANNELS` — the channel-partition unit test enforces this.
 
 3. **The Tree is the sole data authority.** `PDVTree` in the kernel is the only source of truth for project data. The main process never caches tree state. The renderer always fetches via `pdv.tree.list` / `pdv.tree.get`.
 
@@ -153,7 +157,7 @@ The full sweep takes ~3 minutes locally and produces a results CSV plus per-cell
 
 When reviewing a pull request (including via `/review`), check every item below in addition to standard code-quality review:
 
-- [ ] **IPC single source of truth** — All IPC channel names and types are defined in `ipc.ts`. No new strings introduced in preload, index.ts, or renderer code.
+- [ ] **IPC single source of truth** — All IPC channel names and types are defined in `ipc.ts`. No new strings introduced in preload, index.ts, or renderer code. New channels are assigned to exactly one of the `SHELL_CHANNELS`/`SERVER_CHANNELS` partition sets (and push channels to `SERVER_PUSH_CHANNELS`/`SHELL_PUSH_CHANNELS`).
 - [ ] **Process boundary respected** — Renderer imports types from `types/pdv.d.ts`, never from `../../main/ipc`. Renderer never accesses Node.js APIs or the filesystem directly.
 - [ ] **No tree state caching in main** — The main process does not cache or duplicate tree data. The kernel's `PDVTree` remains the sole authority.
 - [ ] **Script execution path** — No Python or Julia code strings in the renderer. Script execution goes through `window.pdv.script.run()`.

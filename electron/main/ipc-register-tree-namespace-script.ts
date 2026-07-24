@@ -11,7 +11,6 @@
  * - Push forwarding registration.
  */
 
-import { spawn } from "child_process";
 import { handleInvoke } from "./server/invoke-registry";
 import * as fs from "fs/promises";
 import * as path from "path";
@@ -70,18 +69,6 @@ interface RegisterTreeNamespaceScriptIpcHandlersOptions {
     language: "python" | "julia",
     moduleAlias?: string,
   ) => Promise<void>;
-  buildEditorSpawn: (
-    cmdString: string | undefined,
-    filePath: string
-  ) => { file: string; args: string[] };
-  resolveEditorSpawn: (
-    command: string,
-    args: string[],
-    opts?: {
-      wrapInTerminal?: boolean;
-      terminal?: import("./editor-spawn").TerminalLauncherConfig;
-    },
-  ) => { file: string; args: string[] };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -201,8 +188,6 @@ export function registerTreeNamespaceScriptIpcHandlers(
     sanitizeScriptName,
     ensureScriptFile,
     ensureLibFile,
-    buildEditorSpawn,
-    resolveEditorSpawn,
   } = options;
 
   /** Try query socket first (works during execution); fall back to comm. */
@@ -580,49 +565,6 @@ export function registerTreeNamespaceScriptIpcHandlers(
       { code, executionId, origin },
     );
     return { code, executionId, origin, result };
-  });
-
-  handleInvoke(IPC.script.edit, async (_ctx, _kernelId: string, scriptPath: string) => {
-    // Under E2E we never spawn an external editor — the spawn is detached
-    // (`detached: true`, `child.unref()`) so a real VS Code instance launched
-    // by a test would outlive the Electron app being torn down.
-    if (process.env.PDV_E2E === "1") {
-      return { success: true };
-    }
-    const config = readConfig(configStore);
-
-    const response = await queryRequest(
-      PDVMessageType.TREE_RESOLVE_FILE,
-      { path: scriptPath }
-    );
-    const filePath = (response.payload as Record<string, unknown> | undefined)?.file_path;
-    if (typeof filePath !== "string" || filePath.length === 0) {
-      return { success: false, error: `Could not resolve file path for "${scriptPath}".` };
-    }
-    const resolvedPath = filePath;
-
-    const { file, args } = buildEditorSpawn(
-      config.launchers?.editor?.fileCommand,
-      resolvedPath,
-    );
-    const spawnSpec = resolveEditorSpawn(file, args, {
-      wrapInTerminal: config.launchers?.editor?.isTuiEditor,
-      terminal: config.launchers?.terminal,
-    });
-    try {
-      const child = spawn(spawnSpec.file, spawnSpec.args, { detached: true, stdio: "ignore" });
-      child.on("error", (err) => {
-        const msg = err && (err as NodeJS.ErrnoException).code === "ENOENT"
-          ? `Editor command not found: "${spawnSpec.file}". Configure your editor in Settings → General.`
-          : `Failed to launch editor: ${err.message}`;
-        console.error("[pdv] editor spawn error:", msg);
-      });
-      child.unref();
-      return { success: true };
-    } catch (err) {
-      const error = err instanceof Error ? err.message : String(err);
-      return { success: false, error: `Failed to launch editor: ${error}` };
-    }
   });
 
   handleInvoke(
