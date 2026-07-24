@@ -14,14 +14,9 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const dialogMock = vi.hoisted(() => ({
-  showMessageBox: vi.fn(async () => ({ response: 0 })),
-}));
-
-vi.mock("electron", () => ({
-  dialog: dialogMock,
-  ipcMain: { handle: vi.fn(), removeHandler: vi.fn() },
-}));
+// Injected confirm dialog (server/confirm.ts): resolves with the clicked
+// button index. Default 0 = Cancel for the delete dialog (cancelId: 0).
+const confirmMock = vi.fn(async (): Promise<number> => 0);
 
 import type { McpToolContext } from "../mcp-context";
 import type { ToolExtra } from "./_helpers";
@@ -135,7 +130,8 @@ function makeCtx(opts: CtxOpts = {}): {
     },
     appVersion: "0.0.0-test",
     cellRpc: {} as McpToolContext["cellRpc"],
-    getRendererWindow: () => null,
+    push: () => undefined,
+    confirm: confirmMock,
     getSessionGeneration: () => 0,
     recordCellRead: () => undefined,
     getCellReadHash: () => undefined,
@@ -151,7 +147,7 @@ function textOf(result: CallToolResult): string {
 const extra = { sessionId: "s1" } as ToolExtra;
 
 beforeEach(() => {
-  dialogMock.showMessageBox.mockReset();
+  confirmMock.mockReset();
 });
 
 describe("create_tree_node", () => {
@@ -277,7 +273,7 @@ describe("create_tree_node", () => {
 
 describe("delete_tree_node", () => {
   it("does NOT send TREE_DELETE when the user cancels the dialog", async () => {
-    dialogMock.showMessageBox.mockResolvedValueOnce({ response: 0 });
+    confirmMock.mockResolvedValueOnce(0);
     const { server, tools } = captureTools();
     const { ctx, commRequest } = makeCtx();
     registerTreeMutateTools(server, ctx);
@@ -289,7 +285,7 @@ describe("delete_tree_node", () => {
   });
 
   it("sends TREE_DELETE only when the user clicks Delete", async () => {
-    dialogMock.showMessageBox.mockResolvedValueOnce({ response: 1 });
+    confirmMock.mockResolvedValueOnce(1);
     const { server, tools } = captureTools();
     const { ctx, commRequest } = makeCtx();
     registerTreeMutateTools(server, ctx);
@@ -313,7 +309,7 @@ describe("delete_tree_node", () => {
       tools.get("delete_tree_node")!({ path: "analysis.draft" }, extra),
     ).rejects.toThrow(/Mutating MCP tools are disabled/);
     expect(commRequest).not.toHaveBeenCalled();
-    expect(dialogMock.showMessageBox).not.toHaveBeenCalled();
+    expect(confirmMock).not.toHaveBeenCalled();
   });
 });
 

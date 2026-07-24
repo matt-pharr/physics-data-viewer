@@ -97,14 +97,14 @@ import type { KernelManager } from "./kernel-manager";
 import {
   createBrowserWindowMock,
   createKernelManagerMock,
+  getInvokeHandler,
   makeKernelInfo,
+  resetInvokeRegistry,
   type InvokeHandler,
 } from "./test-helpers";
 
 function getHandler(channel: string): InvokeHandler {
-  const h = ipcRegistry.handlers.get(channel);
-  if (!h) throw new Error(`Channel not registered: ${channel}`);
-  return h;
+  return getInvokeHandler(channel);
 }
 
 function setup(language: "python" | "julia") {
@@ -115,7 +115,7 @@ function setup(language: "python" | "julia") {
   const kernelWorkingDirs = new Map<string, string>([["k1", "/tmp/pdv-wd"]]);
   const kernelEnvMeta = new Map<string, ActiveEnvironmentInfo>();
   registerEnvironmentIpcHandlers({
-    win: win.win,
+    push: win.webContentsSend,
     configStore: { getAll: vi.fn(() => ({})) } as unknown as ConfigStore,
     kernelManager,
     kernelWorkingDirs,
@@ -128,6 +128,7 @@ function setup(language: "python" | "julia") {
 
 beforeEach(() => {
   ipcRegistry.handlers.clear();
+  resetInvokeRegistry();
   vi.clearAllMocks();
   juliaEnvMocks.listJuliaProjectPackages.mockResolvedValue([
     { name: "NPZ", spec: "NPZ", installedVersion: "0.4.3" },
@@ -271,7 +272,7 @@ describe("juliaup version management (§10.7.5)", () => {
     };
 
     expect(juliaupRunnerMocks.juliaupAdd).toHaveBeenCalledWith("1.10", {
-      win: win.win,
+      push: win.webContentsSend,
       pushChannel: IPC.push.installOutput,
     });
     expect(result.success).toBe(true);
@@ -286,7 +287,7 @@ describe("juliaup version management (§10.7.5)", () => {
     };
 
     expect(juliaupRunnerMocks.installJuliaup).toHaveBeenCalledWith({
-      win: win.win,
+      push: win.webContentsSend,
       pushChannel: IPC.push.installOutput,
     });
     expect(result).toEqual({ success: true, output: "installed" });

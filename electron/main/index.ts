@@ -15,8 +15,8 @@
  * ipc.ts — channel constants and API types
  */
 
-import { BrowserWindow, app } from "electron";
-import { removeAllIpcHandlers } from "./ipc-registry";
+import { BrowserWindow, app, dialog } from "electron";
+import { handleIpcRaw, removeAllIpcHandlers } from "./ipc-registry";
 import * as fs from "fs/promises";
 import * as fsSync from "fs";
 import * as os from "os";
@@ -70,6 +70,14 @@ import {
 } from "./ipc";
 import { uvSync } from "./uv-runner";
 import { PDVMessage, PDVMessageType, setAppVersion } from "./pdv-protocol";
+import type { ConfirmOptions } from "./server/confirm";
+import {
+  dispatchInvoke,
+  listRegisteredInvokeChannels,
+  removeAllInvokeHandlers,
+  type InvokeContext,
+  type PushSender,
+} from "./server/invoke-registry";
 import { registerLaunchersIpcHandlers } from "./ipc-register-launchers";
 import type { McpServerHooks } from "./mcp/mcp-context";
 import {
@@ -480,11 +488,26 @@ export function registerIpcHandlers(
   const guiEditorWindowManager = new GuiEditorWindowManager(preloadPath);
   const guiViewerWindowManager = new GuiViewerWindowManager(preloadPath);
 
+  // Renderer-push sender shared by every server-destined registrar: the one
+  // place pushes meet the BrowserWindow. The destroyed-window guard lives
+  // here so handler code never needs it.
+  const push: PushSender = (channel, payload) => {
+    if (!win.isDestroyed()) win.webContents.send(channel, payload);
+  };
+
+  // Native-confirmation closure injected into server-destined code that
+  // needs a blocking user decision (module-export overwrite, MCP tree
+  // deletion). See server/confirm.ts for the post-flip reverse-RPC plan.
+  const confirm = async (options: ConfirmOptions): Promise<number> => {
+    const result = await dialog.showMessageBox(win, options);
+    return result.response;
+  };
+
   // Autosave handlers + the snapshot routines shared with the kernel
   // registrar (pre-restart snapshot, post-restart recovery) and the
   // execution-state idle listener below.
   const autosave = registerAutosaveIpcHandlers({
-    win,
+    push,
     kernelManager,
     commRouter,
     projectManager,
@@ -504,12 +527,10 @@ export function registerIpcHandlers(
 
   // Shared between the kernel and tree registrars: gives each double-click
   // handler invoke a real console entry (measured duration, routed output).
-  const handlerInvokeTracker = new HandlerInvokeTracker((channel, payload) => {
-    if (!win.isDestroyed()) win.webContents.send(channel, payload);
-  });
+  const handlerInvokeTracker = new HandlerInvokeTracker(push);
 
   registerKernelIpcHandlers({
-    win,
+    push,
     kernelManager,
     commRouter,
     queryRouter,
@@ -608,7 +629,8 @@ export function registerIpcHandlers(
   });
 
   registerModulesIpcHandlers({
-    win,
+    push,
+    confirm,
     kernelManager,
     commRouter,
     moduleManager,
@@ -627,7 +649,7 @@ export function registerIpcHandlers(
   // Environment discovery/install + Packages tab + installModule. Returns
   // the import-cache refresher the project-load env sync below reuses.
   const { refreshKernelImportCaches } = registerEnvironmentIpcHandlers({
-    win,
+    push,
     configStore,
     kernelManager,
     kernelWorkingDirs,
@@ -667,7 +689,7 @@ export function registerIpcHandlers(
     clearModuleHealthWarnings: () => moduleHealthWarningsByAlias.clear(),
     refreshProjectModuleHealth,
     runSerializedProjectManifestMutation,
-    getMainWindow: () => win,
+    push,
     getInterpreterPath: () => {
       const config = readConfig(configStore);
       const lang = activeKernelId
@@ -689,7 +711,7 @@ export function registerIpcHandlers(
         runUvSync: async (cwd) => {
           const sync = await uvSync({
             cwd,
-            win,
+            push,
             pushChannel: IPC.push.envActivity,
             binaryPath: readConfig(configStore).uv?.binaryPath,
             // In-place sync under a live kernel: --inexact keeps pdv-python
@@ -718,7 +740,7 @@ export function registerIpcHandlers(
               : undefined) ??
             resolveJuliaShim(readConfig(configStore).juliaPath ?? "julia");
           const result = await instantiateJuliaEnvironment(cwd, juliaPath, {
-            win,
+            push,
             pushChannel: IPC.push.envActivity,
           });
           return { success: result.success, output: result.output };
@@ -732,6 +754,19 @@ export function registerIpcHandlers(
       projectManager.resetAutosaveTimer();
     },
   });
+
+  // Mirror every server-registrar channel onto ipcMain. The server-destined
+  // registrars above register into the Electron-free invoke registry
+  // (server/invoke-registry.ts); this mirror is the only point where those
+  // handlers meet Electron. dispatchInvoke owns the error logging and
+  // normalization, so the unwrapped ipcMain registration is used here —
+  // wrapping again via handleIpc would double-log every failure.
+  const invokeCtx: InvokeContext = { push };
+  for (const channel of listRegisteredInvokeChannels()) {
+    handleIpcRaw(channel, (_event, ...args) =>
+      dispatchInvoke(channel, invokeCtx, args)
+    );
+  }
 
   registerAppStateIpcHandlers({
     win,
@@ -990,6 +1025,7 @@ export function registerCommPushForwarding(
  */
 export function unregisterIpcHandlers(): void {
   removeAllIpcHandlers();
+  removeAllInvokeHandlers();
   removeKernelMemoryListener();
   removeKernelBootOutputListener();
   if (trackedExecutionStateListener) {

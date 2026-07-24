@@ -14,8 +14,6 @@
  * mcp-server.ts — constructs the context and owns the session registry
  */
 
-import type { BrowserWindow } from "electron";
-
 import type { CommRouter } from "../comm-router";
 import type { ConfigStore } from "../config";
 import type {
@@ -26,6 +24,8 @@ import type {
 import type { KernelManager } from "../kernel-manager";
 import type { ProjectManager } from "../project-manager";
 import type { QueryRouter } from "../query-router";
+import type { ConfirmFn } from "../server/confirm";
+import type { PushSender } from "../server/invoke-registry";
 import type { CellRpcClient } from "./cell-rpc";
 
 /**
@@ -105,13 +105,18 @@ export interface McpToolContext {
    */
   cellRpc: CellRpcClient;
   /**
-   * Accessor for the renderer window an agent run's output should stream
-   * into. Returns `null` when no window is open. Used by execution tools to
-   * forward iopub chunks to the Console via `IPC.push.executeOutput` so
-   * agent-initiated runs are visible alongside user runs (ARCHITECTURE.md
-   * §15.9).
+   * Renderer-push sender agent-run output streams through (no-op once the
+   * window is gone). Used by execution tools to forward iopub chunks to the
+   * Console via `IPC.push.executeOutput` so agent-initiated runs are visible
+   * alongside user runs (ARCHITECTURE.md §15.9).
    */
-  getRendererWindow(): BrowserWindow | null;
+  push: PushSender;
+  /**
+   * Native confirmation dialog (injected — see server/confirm.ts). Used by
+   * `delete_tree_node` to require explicit user approval before an
+   * agent-requested deletion reaches the kernel.
+   */
+  confirm: ConfirmFn;
   /**
    * Generation a given MCP session connected at, or `undefined` for an
    * unknown session. Used by tools to reject calls from a session that

@@ -16,9 +16,9 @@
  * kernel-manager.ts — owns the ping() method
  */
 
-import type { BrowserWindow } from "electron";
 import type { KernelManager } from "./kernel-manager";
 import { IPC } from "./ipc";
+import type { PushSender } from "./server/invoke-registry";
 
 /**
  * Check the active kernel after a system resume event.
@@ -30,11 +30,11 @@ import { IPC } from "./ipc";
  * action is needed here.
  *
  * @param kernelManager - Active kernel manager (may be null before first use).
- * @param getMainWindow - Returns the main BrowserWindow, or null.
+ * @param push - Renderer-push sender (no-op once the window is gone).
  */
 export async function handleSystemResume(
   kernelManager: KernelManager | null,
-  getMainWindow: () => BrowserWindow | null
+  push: PushSender
 ): Promise<void> {
   if (!kernelManager) return;
 
@@ -42,12 +42,9 @@ export async function handleSystemResume(
   const kernel = kernels.find((k) => k.status !== "dead");
   if (!kernel) return;
 
-  const win = getMainWindow();
-  if (!win || win.isDestroyed()) return;
-
   try {
     await kernelManager.ping(kernel.id, 10_000);
-    win.webContents.send(IPC.push.kernelReconnected, {
+    push(IPC.push.kernelReconnected, {
       kernelId: kernel.id,
     });
   } catch {

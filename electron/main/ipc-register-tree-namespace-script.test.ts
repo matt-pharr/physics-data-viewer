@@ -66,14 +66,14 @@ import {
   makeKernelInfo,
   makeOkResponse,
   type InvokeHandler,
+  getInvokeHandler,
+  resetInvokeRegistry,
 } from "./test-helpers";
 import { QueryRouter } from "./query-router";
 import type { PDVConfig } from "./config";
 
 function getHandler(channel: string): InvokeHandler {
-  const h = ipcRegistry.handlers.get(channel);
-  if (!h) throw new Error(`Channel not registered: ${channel}`);
-  return h;
+  return getInvokeHandler(channel);
 }
 
 interface Harness {
@@ -141,6 +141,7 @@ function setup(initial: { knownAliases?: Set<string> } = {}): Harness {
 
 beforeEach(() => {
   ipcRegistry.handlers.clear();
+  resetInvokeRegistry();
   vi.clearAllMocks();
 });
 

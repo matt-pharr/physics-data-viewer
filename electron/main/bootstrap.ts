@@ -41,7 +41,7 @@
   }
 })();
 
-import { app, BrowserWindow, powerMonitor } from "electron";
+import { app, BrowserWindow, dialog, powerMonitor } from "electron";
 import * as os from "os";
 import * as path from "path";
 import * as fs from "fs";
@@ -55,6 +55,9 @@ import { QueryRouter } from "./query-router";
 import { ConfigStore } from "./config";
 import { KernelManager } from "./kernel-manager";
 import { ProjectManager } from "./project-manager";
+import type { ConfirmOptions } from "./server/confirm";
+import type { PushSender } from "./server/invoke-registry";
+import { initServerPaths } from "./server/server-paths";
 import { handleSystemResume } from "./wake-handler";
 
 // Under PDV_E2E, redirect Electron's userData (where the renderer's
@@ -68,6 +71,15 @@ if (process.env.PDV_E2E === "1" && process.env.HOME) {
   app.setPath("userData", path.join(process.env.HOME, ".pdv-e2e-userdata"));
 }
 
+// Inject the Electron-derived filesystem roots into the server-destined
+// code (server/server-paths.ts) — after the E2E userData redirect above so
+// tests see the redirected location. In the extracted pdv-server process
+// these come from PDV_USER_DATA_DIR / PDV_RESOURCES_ROOT instead.
+initServerPaths({
+  userDataDir: app.getPath("userData"),
+  resourcesRoot: process.resourcesPath ?? null,
+});
+
 let kernelManager: KernelManager | null = null;
 let mainWindow: BrowserWindow | null = null;
 let openingWindow: Promise<void> | null = null;
@@ -78,6 +90,32 @@ let cellRpc: CellRpcClient | null = null;
 const commRouter = new CommRouter();
 const queryRouter = new QueryRouter();
 const projectManager = new ProjectManager(commRouter);
+
+/**
+ * Renderer-push sender bound to the current main window; a no-op while no
+ * window is open. Injected into code that outlives any single window (the
+ * wake handler, the MCP server).
+ */
+const pushToMainWindow: PushSender = (channel, payload) => {
+  const win = mainWindow;
+  if (win && !win.isDestroyed()) win.webContents.send(channel, payload);
+};
+
+/**
+ * Native-confirmation closure injected into the MCP server (agent-requested
+ * tree deletions). Parents the dialog to the main window when one is open.
+ *
+ * @param options - Dialog options (see server/confirm.ts).
+ * @returns Index of the clicked button.
+ */
+const confirmViaDialog = async (options: ConfirmOptions): Promise<number> => {
+  const win = mainWindow;
+  const result =
+    win && !win.isDestroyed()
+      ? await dialog.showMessageBox(win, options)
+      : await dialog.showMessageBox(options);
+  return result.response;
+};
 
 async function openMainWindow(): Promise<void> {
   if (mainWindow && !mainWindow.isDestroyed()) {
@@ -129,7 +167,8 @@ async function openMainWindow(): Promise<void> {
           hooks,
           appVersion: app.getVersion(),
           cellRpc,
-          getRendererWindow: () => mainWindow,
+          push: pushToMainWindow,
+          confirm: confirmViaDialog,
         });
         try {
           await mcpServer.start();
@@ -179,7 +218,7 @@ if (!hasSingleInstanceLock) {
     }
 
     powerMonitor.on("resume", () => {
-      void handleSystemResume(kernelManager, () => mainWindow).catch(
+      void handleSystemResume(kernelManager, pushToMainWindow).catch(
         (err) => {
           console.error("[PDV] Wake handler error:", err);
         }

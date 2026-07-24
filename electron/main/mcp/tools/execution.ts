@@ -386,17 +386,12 @@ async function runOnKernel(
   if (!kernelId) throw new Error("No active kernel for execution.");
   const workingDir = ctx.hooks.getActiveWorkingDir();
   const transcript = workingDir ? new TranscriptWriter(workingDir) : null;
-  const win = ctx.getRendererWindow();
   // Generate the executionId up front so we can bracket the run with
   // begin/finish pushes — the renderer needs a seeded log entry before
   // streaming chunks attach to it.
   const executionId = randomUUID();
   const start = Date.now();
-  const sendToRenderer = (channel: string, payload: unknown): void => {
-    if (win && !win.isDestroyed()) {
-      win.webContents.send(channel, payload);
-    }
-  };
+  const sendToRenderer = ctx.push;
   sendToRenderer(IPC.push.executeBegin, {
     executionId,
     code,

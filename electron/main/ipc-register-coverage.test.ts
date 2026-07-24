@@ -120,6 +120,7 @@ import { registerAppStateIpcHandlers } from "./ipc-register-app-state";
 import { registerModuleWindowIpcHandlers } from "./ipc-register-module-windows";
 import { registerGuiEditorIpcHandlers } from "./ipc-register-gui-editor";
 import { registerLaunchersIpcHandlers } from "./ipc-register-launchers";
+import { listRegisteredInvokeChannels } from "./server/invoke-registry";
 import {
   createBrowserWindowMock,
   createCommRouterMock,
@@ -130,6 +131,7 @@ import {
   createModuleManagerMock,
   createModuleWindowManagerMock,
   createProjectManagerMock,
+  resetInvokeRegistry,
   TEST_PDV_VERSION,
 } from "./test-helpers";
 import { QueryRouter } from "./query-router";
@@ -183,7 +185,7 @@ function setupAll(): void {
   const handlerInvokeTracker = new HandlerInvokeTracker(() => undefined);
 
   registerKernelIpcHandlers({
-    win: win.win,
+    push: win.webContentsSend,
     kernelManager,
     commRouter: commRouter.router,
     queryRouter,
@@ -224,7 +226,8 @@ function setupAll(): void {
     resolveEditorSpawn: (_file: string, _args: string[], _opts?: unknown) => ({ file: "", args: [] }),
   });
   registerModulesIpcHandlers({
-    win: win.win,
+    push: win.webContentsSend,
+    confirm: vi.fn(async () => 0),
     kernelManager,
     commRouter: commRouter.router,
     moduleManager,
@@ -255,7 +258,7 @@ function setupAll(): void {
     clearModuleHealthWarnings: vi.fn(),
     refreshProjectModuleHealth: async () => null,
     runSerializedProjectManifestMutation: async (_dir, fn) => fn(),
-    getMainWindow: () => win.win,
+    push: win.webContentsSend,
     getInterpreterPath: () => "/usr/bin/python3",
     getActiveKernelEnvMeta: () => undefined,
   });
@@ -287,6 +290,7 @@ function setupAll(): void {
 
 beforeEach(() => {
   ipcRegistry.handlers.clear();
+  resetInvokeRegistry();
   vi.clearAllMocks();
 });
 
@@ -300,7 +304,12 @@ describe("IPC channel coverage", () => {
     const expected = listExpectedHandlerChannels().filter(
       (channel) => !CHANNELS_REGISTERED_IN_INDEX.includes(channel as never),
     );
-    const missing = expected.filter((channel) => !ipcRegistry.handlers.has(channel));
+    // Shell registrars land on the (mocked) ipcMain; server registrars land
+    // in the Electron-free invoke registry. Coverage = the union.
+    const invokeChannels = new Set(listRegisteredInvokeChannels());
+    const missing = expected.filter(
+      (channel) => !ipcRegistry.handlers.has(channel) && !invokeChannels.has(channel),
+    );
     expect(missing).toEqual([]);
   });
 

@@ -28,7 +28,8 @@
 import { spawn } from "child_process";
 import * as path from "path";
 import * as fs from "fs";
-import { BrowserWindow } from "electron";
+import type { PushSender } from "./server/invoke-registry";
+import { getResourcesRoot } from "./server/server-paths";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -46,8 +47,8 @@ export interface UvOutputChunk {
 export interface UvRunOptions {
   /** Working directory for the uv invocation. */
   cwd?: string;
-  /** Window to stream {@link UvOutputChunk}s to. Omit to capture silently. */
-  win?: BrowserWindow;
+  /** Push sender to stream {@link UvOutputChunk}s to. Omit to capture silently. */
+  push?: PushSender;
   /** IPC channel name for streamed output chunks. */
   pushChannel?: string;
   /** Extra environment variables merged over `process.env`. */
@@ -115,8 +116,9 @@ export function resolveUvBinary(binaryPathOverride?: string): string | null {
     return binaryPathOverride;
   }
   const exe = uvExecutableName();
-  if (process.resourcesPath) {
-    const packaged = path.join(process.resourcesPath, "uv", exe);
+  const resourcesRoot = getResourcesRoot();
+  if (resourcesRoot) {
+    const packaged = path.join(resourcesRoot, "uv", exe);
     if (fs.existsSync(packaged)) {
       return packaged;
     }
@@ -175,8 +177,8 @@ export function runUv(args: string[], opts: UvRunOptions = {}): Promise<UvResult
 
     const sendChunk = (stream: "stdout" | "stderr", data: string): void => {
       chunks.push(data);
-      if (opts.win && !opts.win.isDestroyed() && opts.pushChannel) {
-        opts.win.webContents.send(opts.pushChannel, { stream, data } as UvOutputChunk);
+      if (opts.push && opts.pushChannel) {
+        opts.push(opts.pushChannel, { stream, data } as UvOutputChunk);
       }
     };
 

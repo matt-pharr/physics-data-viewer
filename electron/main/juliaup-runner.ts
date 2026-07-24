@@ -37,7 +37,7 @@ import { spawn } from "child_process";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { BrowserWindow } from "electron";
+import type { PushSender } from "./server/invoke-registry";
 
 import type { EnvironmentInstallResult } from "./environment-detector";
 import {
@@ -62,8 +62,8 @@ export interface JuliaupStatus {
 
 /** Options controlling a streamed juliaup/installer subprocess. */
 export interface JuliaupRunOptions {
-  /** Window to stream output chunks to. Omit to capture silently. */
-  win?: BrowserWindow;
+  /** Push sender to stream output chunks to. Omit to capture silently. */
+  push?: PushSender;
   /** IPC channel name for streamed output chunks (installOutput shape). */
   pushChannel?: string;
   /** Extra environment variables merged over `process.env` (tests). */
@@ -301,7 +301,7 @@ export async function ensureJuliaVersionReady(
   if (!ready) {
     const installed = await installPDVKernel(channel.juliaPath, {
       stagingDir: opts.stagingDir,
-      win: opts.win,
+      push: opts.push,
       pushChannel: opts.pushChannel,
     });
     if (!installed.success) {
@@ -401,8 +401,8 @@ function runStreamed(
       const plain = plainStreamText(data);
       if (!plain) return;
       chunks.push(plain);
-      if (opts.win && !opts.win.isDestroyed() && opts.pushChannel) {
-        opts.win.webContents.send(opts.pushChannel, { stream, data: plain });
+      if (opts.push && opts.pushChannel) {
+        opts.push(opts.pushChannel, { stream, data: plain });
       }
     };
 

@@ -48,11 +48,11 @@ vi.mock("./project-file-sync", () => projectFileSyncMocks);
 import { registerAutosaveIpcHandlers, type AutosaveController } from "./ipc-register-autosave";
 import type { ConfigStore, PDVConfig } from "./config";
 import {
-  createBrowserWindowMock,
   createCommRouterMock,
   createKernelManagerMock,
   createModuleManagerMock,
   createProjectManagerMock,
+  resetInvokeRegistry,
 } from "./test-helpers";
 
 describe("recoverUnsavedSession environment preservation (review M2)", () => {
@@ -71,7 +71,7 @@ describe("recoverUnsavedSession environment preservation (review M2)", () => {
 
     const kernelWorkingDirs = new Map<string, string>([["k1", workingDir]]);
     controller = registerAutosaveIpcHandlers({
-      win: createBrowserWindowMock().win,
+      push: vi.fn(),
       kernelManager: createKernelManagerMock(),
       commRouter: createCommRouterMock().router,
       projectManager: createProjectManagerMock(),
@@ -89,6 +89,7 @@ describe("recoverUnsavedSession environment preservation (review M2)", () => {
 
   afterEach(async () => {
     ipcRegistry.handlers.clear();
+    resetInvokeRegistry();
     vi.clearAllMocks();
     await fs.rm(baseDir, { recursive: true, force: true });
   });

@@ -89,12 +89,12 @@ import {
   createProjectManagerMock,
   TEST_PDV_VERSION,
   type InvokeHandler,
+  getInvokeHandler,
+  resetInvokeRegistry,
 } from "./test-helpers";
 
 function getHandler(channel: string): InvokeHandler {
-  const h = ipcRegistry.handlers.get(channel);
-  if (!h) throw new Error(`Channel not registered: ${channel}`);
-  return h;
+  return getInvokeHandler(channel);
 }
 
 interface Harness {
@@ -167,7 +167,7 @@ function setup(): Harness {
     clearModuleHealthWarnings: harness.clearModuleHealthWarnings,
     refreshProjectModuleHealth: harness.refreshProjectModuleHealth,
     runSerializedProjectManifestMutation: async (_dir, fn) => fn(),
-    getMainWindow: () => win.win,
+    push: win.webContentsSend,
     getInterpreterPath: () => "/usr/bin/python3",
     getActiveKernelEnvMeta: harness.getActiveKernelEnvMeta,
     syncUvEnvironmentForLoad: harness.syncUvEnvironmentForLoad,
@@ -178,6 +178,7 @@ function setup(): Harness {
 
 beforeEach(() => {
   ipcRegistry.handlers.clear();
+  resetInvokeRegistry();
   vi.clearAllMocks();
   fsMocks.readFile.mockResolvedValue("{}");
   fsMocks.writeFile.mockResolvedValue(undefined);

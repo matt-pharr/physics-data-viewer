@@ -12,7 +12,7 @@
  */
 
 import { spawn } from "child_process";
-import { handleIpc } from "./ipc-registry";
+import { handleInvoke } from "./server/invoke-registry";
 import * as fs from "fs/promises";
 import * as path from "path";
 
@@ -217,7 +217,7 @@ export function registerTreeNamespaceScriptIpcHandlers(
     return await commRouter.request(type, payload);
   };
 
-  handleIpc(IPC.tree.list, async (_event, kernelId: string, nodePath = "") => {
+  handleInvoke(IPC.tree.list, async (_ctx, kernelId: string, nodePath = "") => {
     if (!kernelManager.getKernel(kernelId)) {
       return [];
     }
@@ -228,7 +228,7 @@ export function registerTreeNamespaceScriptIpcHandlers(
     return Array.isArray(nodes) ? nodes : [];
   });
 
-  handleIpc(IPC.tree.get, async (_event, kernelId: string, nodePath: string) => {
+  handleInvoke(IPC.tree.get, async (_ctx, kernelId: string, nodePath: string) => {
     if (!kernelManager.getKernel(kernelId)) {
       throw new Error(`Kernel not found: ${kernelId}`);
     }
@@ -238,7 +238,7 @@ export function registerTreeNamespaceScriptIpcHandlers(
     return response.payload;
   });
 
-  handleIpc(IPC.tree.getVersion, async (_event, kernelId: string) => {
+  handleInvoke(IPC.tree.getVersion, async (_ctx, kernelId: string) => {
     if (!kernelManager.getKernel(kernelId) || !queryRouter.isAttached()) {
       return null;
     }
@@ -255,10 +255,10 @@ export function registerTreeNamespaceScriptIpcHandlers(
     }
   });
 
-  handleIpc(
+  handleInvoke(
     IPC.tree.createScript,
     async (
-      _event,
+      _ctx,
       kernelId: string,
       targetPath: string,
       scriptName: string,
@@ -281,10 +281,10 @@ export function registerTreeNamespaceScriptIpcHandlers(
       ),
   );
 
-  handleIpc(
+  handleInvoke(
     IPC.tree.createNote,
     async (
-      _event,
+      _ctx,
       kernelId: string,
       targetPath: string,
       noteName: string,
@@ -304,10 +304,10 @@ export function registerTreeNamespaceScriptIpcHandlers(
       ),
   );
 
-  handleIpc(
+  handleInvoke(
     IPC.tree.createGui,
     async (
-      _event,
+      _ctx,
       kernelId: string,
       targetPath: string,
       guiName: string
@@ -368,10 +368,10 @@ export function registerTreeNamespaceScriptIpcHandlers(
     }
   );
 
-  handleIpc(
+  handleInvoke(
     IPC.tree.createLib,
     async (
-      _event,
+      _ctx,
       kernelId: string,
       targetPath: string,
       libName: string,
@@ -401,10 +401,10 @@ export function registerTreeNamespaceScriptIpcHandlers(
     },
   );
 
-  handleIpc(
+  handleInvoke(
     IPC.tree.addFile,
     async (
-      _event,
+      _ctx,
       kernelId: string,
       sourcePath: string,
       targetTreePath: string,
@@ -431,10 +431,10 @@ export function registerTreeNamespaceScriptIpcHandlers(
     }
   );
 
-  handleIpc(
+  handleInvoke(
     IPC.namespace.query,
     async (
-      _event,
+      _ctx,
       kernelId: string,
       options?: NamespaceQueryOptions
     ): Promise<NamespaceVariable[]> => {
@@ -471,10 +471,10 @@ export function registerTreeNamespaceScriptIpcHandlers(
     }
   );
 
-  handleIpc(
+  handleInvoke(
     IPC.namespace.inspect,
     async (
-      _event,
+      _ctx,
       kernelId: string,
       target: NamespaceInspectTarget
     ): Promise<NamespaceInspectResult> => {
@@ -489,7 +489,7 @@ export function registerTreeNamespaceScriptIpcHandlers(
     }
   );
 
-  handleIpc(IPC.script.run, async (_event, kernelId: string, request: ScriptRunRequest): Promise<ScriptRunResult> => {
+  handleInvoke(IPC.script.run, async (_ctx, kernelId: string, request: ScriptRunRequest): Promise<ScriptRunResult> => {
     const kernel = kernelManager.getKernel(kernelId);
     if (!kernel) throw new Error(`Kernel not found: ${kernelId}`);
 
@@ -554,7 +554,7 @@ export function registerTreeNamespaceScriptIpcHandlers(
     return { code, executionId, origin, result };
   });
 
-  handleIpc(IPC.tree.print, async (_event, kernelId: string, request: TreePrintRequest): Promise<ScriptRunResult> => {
+  handleInvoke(IPC.tree.print, async (_ctx, kernelId: string, request: TreePrintRequest): Promise<ScriptRunResult> => {
     const kernel = kernelManager.getKernel(kernelId);
     if (!kernel) throw new Error(`Kernel not found: ${kernelId}`);
 
@@ -582,7 +582,7 @@ export function registerTreeNamespaceScriptIpcHandlers(
     return { code, executionId, origin, result };
   });
 
-  handleIpc(IPC.script.edit, async (_event, _kernelId: string, scriptPath: string) => {
+  handleInvoke(IPC.script.edit, async (_ctx, _kernelId: string, scriptPath: string) => {
     // Under E2E we never spawn an external editor — the spawn is detached
     // (`detached: true`, `child.unref()`) so a real VS Code instance launched
     // by a test would outlive the Electron app being torn down.
@@ -625,9 +625,9 @@ export function registerTreeNamespaceScriptIpcHandlers(
     }
   });
 
-  handleIpc(
+  handleInvoke(
     IPC.script.getParams,
-    async (_event, _kernelId: string, treePath: string): Promise<ScriptParameter[]> => {
+    async (_ctx, _kernelId: string, treePath: string): Promise<ScriptParameter[]> => {
       const response = await commRouter.request(PDVMessageType.SCRIPT_PARAMS, {
         path: treePath,
       });
@@ -636,9 +636,9 @@ export function registerTreeNamespaceScriptIpcHandlers(
     }
   );
 
-  handleIpc(
+  handleInvoke(
     IPC.note.save,
-    async (_event, _kernelId: string, treePath: string, content: string) => {
+    async (_ctx, _kernelId: string, treePath: string, content: string) => {
       try {
         const response = await queryRequest(
           PDVMessageType.TREE_RESOLVE_FILE,
@@ -657,9 +657,9 @@ export function registerTreeNamespaceScriptIpcHandlers(
     }
   );
 
-  handleIpc(
+  handleInvoke(
     IPC.note.read,
-    async (_event, _kernelId: string, treePath: string) => {
+    async (_ctx, _kernelId: string, treePath: string) => {
       try {
         const response = await queryRequest(
           PDVMessageType.TREE_RESOLVE_FILE,
@@ -677,10 +677,10 @@ export function registerTreeNamespaceScriptIpcHandlers(
     }
   );
 
-  handleIpc(
+  handleInvoke(
     IPC.tree.invokeHandler,
     async (
-      _event,
+      _ctx,
       kernelId: string,
       nodePath: string
     ): Promise<HandlerInvokeResult> => {
@@ -736,7 +736,7 @@ export function registerTreeNamespaceScriptIpcHandlers(
     mapResult: (payload: Record<string, unknown>) => T,
     actionLabel?: string,
   ): void {
-    handleIpc(channel, async (_event, kernelId: string, ...rest: string[]): Promise<T> => {
+    handleInvoke(channel, async (_ctx, kernelId: string, ...rest: string[]): Promise<T> => {
       if (!kernelManager.getKernel(kernelId)) {
         return { success: false, error: "No active kernel. Try restarting the kernel." } as T;
       }
@@ -783,10 +783,10 @@ export function registerTreeNamespaceScriptIpcHandlers(
     "duplicate the node",
   );
 
-  handleIpc(
+  handleInvoke(
     IPC.tree.delete,
     async (
-      _event,
+      _ctx,
       kernelId: string,
       treePath: string
     ): Promise<{ success: boolean; error?: string }> => {
@@ -805,10 +805,10 @@ export function registerTreeNamespaceScriptIpcHandlers(
     }
   );
 
-  handleIpc(
+  handleInvoke(
     IPC.namelist.read,
     async (
-      _event,
+      _ctx,
       kernelId: string,
       treePath: string
     ): Promise<NamelistReadResult> => {
@@ -822,10 +822,10 @@ export function registerTreeNamespaceScriptIpcHandlers(
     }
   );
 
-  handleIpc(
+  handleInvoke(
     IPC.namelist.write,
     async (
-      _event,
+      _ctx,
       kernelId: string,
       treePath: string,
       data: Record<string, Record<string, unknown>>

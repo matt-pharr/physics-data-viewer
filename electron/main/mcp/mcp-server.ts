@@ -38,6 +38,8 @@ import { IPC, type McpClientStatusPayload, type McpStatus } from "../ipc";
 import type { KernelManager } from "../kernel-manager";
 import type { ProjectManager } from "../project-manager";
 import type { QueryRouter } from "../query-router";
+import type { ConfirmFn } from "../server/confirm";
+import type { PushSender } from "../server/invoke-registry";
 import type { CellRpcClient } from "./cell-rpc";
 import { generateBearerToken, requestHasValidToken } from "./mcp-auth";
 import type { McpServerHooks, McpToolContext } from "./mcp-context";
@@ -69,8 +71,10 @@ export interface PdvMcpServerDeps {
   appVersion: string;
   /** Renderer cell-state RPC client (ARCHITECTURE.md §15.8). */
   cellRpc: CellRpcClient;
-  /** Accessor for the renderer window agent runs stream output to. */
-  getRendererWindow: () => import("electron").BrowserWindow | null;
+  /** Renderer-push sender agent runs stream output through. */
+  push: PushSender;
+  /** Native confirmation dialog (injected — see server/confirm.ts). */
+  confirm: ConfirmFn;
 }
 
 /** One connected MCP client session. */
@@ -119,7 +123,8 @@ export class PdvMcpServer {
       hooks: deps.hooks,
       appVersion: deps.appVersion,
       cellRpc: deps.cellRpc,
-      getRendererWindow: deps.getRendererWindow,
+      push: deps.push,
+      confirm: deps.confirm,
       getSessionGeneration: (sessionId) =>
         sessionId ? this.sessions.get(sessionId)?.generation : undefined,
       recordCellRead: (sessionId, tabId, code) => {
@@ -280,12 +285,10 @@ export class PdvMcpServer {
   // Push the current client-session count to the renderer. The renderer
   // uses this to drive the StatusBar's MCP connection indicator dot.
   private pushClientStatus(): void {
-    const win = this.deps.getRendererWindow();
-    if (!win || win.isDestroyed()) return;
     const payload: McpClientStatusPayload = {
       clientCount: this.sessions.size,
     };
-    win.webContents.send(IPC.push.mcpClientStatus, payload);
+    this.deps.push(IPC.push.mcpClientStatus, payload);
   }
 }
 

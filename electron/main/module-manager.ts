@@ -50,6 +50,7 @@ import {
   validateModuleManifest,
 } from "./modules/manifest-utils";
 import type { NodeDescriptor } from "./pdv-protocol";
+import { getResourcesRoot } from "./server/server-paths";
 
 const execFileAsync = promisify(execFile);
 
@@ -176,8 +177,9 @@ export class ModuleManager {
    * @returns Absolute path, or null when not found.
    */
   private static resolveBundledModulesDir(): string | null {
-    if (process.resourcesPath) {
-      const candidate = path.join(process.resourcesPath, "examples", "modules");
+    const resourcesRoot = getResourcesRoot();
+    if (resourcesRoot) {
+      const candidate = path.join(resourcesRoot, "examples", "modules");
       try {
         const stat = statSync(candidate);
         if (stat.isDirectory()) return candidate;

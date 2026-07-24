@@ -19,7 +19,6 @@
  */
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { dialog } from "electron";
 import { promises as fs } from "node:fs";
 import { z } from "zod";
 
@@ -157,7 +156,7 @@ export function registerTreeMutateTools(server: McpServer, ctx: McpToolContext):
     async ({ path }, extra) => {
       assertCurrentGeneration(ctx, extra);
       assertMutatingToolsEnabled(ctx);
-      const confirmed = await promptDeleteConfirmation(path);
+      const confirmed = await promptDeleteConfirmation(ctx, path);
       if (!confirmed) {
         throw new Error(
           `User refused to delete "${path}" (or did not respond within 60s).`,
@@ -210,15 +209,20 @@ export function registerTreeMutateTools(server: McpServer, ctx: McpToolContext):
 }
 
 /**
- * Show the user a native delete-confirmation dialog. Returns `true` only when
- * the user explicitly clicks "Delete". Closing the dialog or letting it sit
- * for 60 seconds is treated as a refusal so an agent cannot wait the user out.
+ * Show the user a native delete-confirmation dialog (via the injected
+ * `ctx.confirm`). Returns `true` only when the user explicitly clicks
+ * "Delete". Closing the dialog or letting it sit for 60 seconds is treated
+ * as a refusal so an agent cannot wait the user out.
  *
+ * @param ctx - Tool context providing the injected confirm dialog.
  * @param path - The dot-delimited tree path the agent wants to delete.
  * @returns `true` if the user confirmed, `false` otherwise.
  */
-async function promptDeleteConfirmation(path: string): Promise<boolean> {
-  const dialogPromise = dialog.showMessageBox({
+async function promptDeleteConfirmation(
+  ctx: McpToolContext,
+  path: string,
+): Promise<boolean> {
+  const dialogPromise = ctx.confirm({
     type: "warning",
     title: "Confirm Tree Node Deletion",
     message: `An AI agent is requesting to delete "${path}".`,
@@ -234,12 +238,12 @@ async function promptDeleteConfirmation(path: string): Promise<boolean> {
   // user's quick click and the timer's expiry. Clear the timer when the
   // dialog resolves first.
   let timeoutHandle: NodeJS.Timeout | undefined;
-  const timeoutPromise = new Promise<{ response: number }>((resolve) => {
-    timeoutHandle = setTimeout(() => resolve({ response: 0 }), 60_000);
+  const timeoutPromise = new Promise<number>((resolve) => {
+    timeoutHandle = setTimeout(() => resolve(0), 60_000);
   });
   try {
-    const result = await Promise.race([dialogPromise, timeoutPromise]);
-    return result.response === 1;
+    const response = await Promise.race([dialogPromise, timeoutPromise]);
+    return response === 1;
   } finally {
     if (timeoutHandle) clearTimeout(timeoutHandle);
   }

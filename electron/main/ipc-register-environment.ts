@@ -34,7 +34,6 @@
  * - It does not own the `kernelEnvMeta` map; the caller passes it in.
  */
 
-import { app, BrowserWindow } from "electron";
 import { randomUUID } from "node:crypto";
 import * as fs from "fs/promises";
 import * as path from "path";
@@ -58,7 +57,8 @@ import {
   type EnvironmentInstallResult,
   type ProjectPackage,
 } from "./ipc";
-import { handleIpc } from "./ipc-registry";
+import { handleInvoke, type PushSender } from "./server/invoke-registry";
+import { getUserDataDir } from "./server/server-paths";
 import type { KernelManager } from "./kernel-manager";
 import { executeAndTranscribe, TranscriptWriter } from "./mcp/transcript";
 import { parseDependencies, normalizeDistName, specName } from "./pyproject";
@@ -74,8 +74,8 @@ import { venvPythonPath } from "./uv-environment";
 
 /** Dependencies for {@link registerEnvironmentIpcHandlers}. */
 export interface RegisterEnvironmentIpcHandlersOptions {
-  /** Main window, used to stream install/uv output pushes. */
-  win: BrowserWindow;
+  /** Renderer-push sender, used to stream install/uv output pushes. */
+  push: PushSender;
   /** Config store for interpreter path and uv binary overrides. */
   configStore: ConfigStore;
   /** Kernel manager for import-cache refresh and installModule execution. */
@@ -115,7 +115,7 @@ export function registerEnvironmentIpcHandlers(
   options: RegisterEnvironmentIpcHandlersOptions,
 ): EnvironmentController {
   const {
-    win,
+    push,
     configStore,
     kernelManager,
     kernelWorkingDirs,
@@ -126,25 +126,25 @@ export function registerEnvironmentIpcHandlers(
 
   // --- Discovery / installation -------------------------------------------
 
-  handleIpc(IPC.environment.activeInfo, async () => {
+  handleInvoke(IPC.environment.activeInfo, async () => {
     const kernelId = getActiveKernelId();
     return kernelId ? (kernelEnvMeta.get(kernelId) ?? null) : null;
   });
 
-  handleIpc(IPC.environment.list, async () => {
+  handleInvoke(IPC.environment.list, async () => {
     const config = configStore.getAll();
     return EnvironmentDetector.listEnvironmentInfo(config.pythonPath);
   });
 
-  handleIpc(IPC.environment.check, async (_event, pythonPath: string) => {
+  handleInvoke(IPC.environment.check, async (_ctx, pythonPath: string) => {
     return EnvironmentDetector.checkEnvironment(pythonPath);
   });
 
-  handleIpc(IPC.environment.install, async (_event, pythonPath: string) => {
-    return EnvironmentDetector.installPDVFromBundle(pythonPath, win, IPC.push.installOutput);
+  handleInvoke(IPC.environment.install, async (_ctx, pythonPath: string) => {
+    return EnvironmentDetector.installPDVFromBundle(pythonPath, push, IPC.push.installOutput);
   });
 
-  handleIpc(IPC.environment.refresh, async () => {
+  handleInvoke(IPC.environment.refresh, async () => {
     EnvironmentDetector.clearCache();
     const config = configStore.getAll();
     return EnvironmentDetector.listEnvironmentInfo(config.pythonPath);
@@ -154,19 +154,19 @@ export function registerEnvironmentIpcHandlers(
   // The selector's Refresh reuses juliaList after clearing the cache, so no
   // separate refresh channel exists: the renderer calls juliaList again.
 
-  handleIpc(IPC.environment.juliaList, async () => {
+  handleInvoke(IPC.environment.juliaList, async () => {
     clearJuliaRuntimeCache();
     return listJuliaRuntimes(configStore.getAll().juliaPath);
   });
 
-  handleIpc(IPC.environment.juliaCheck, async (_event, juliaPath: string) => {
+  handleInvoke(IPC.environment.juliaCheck, async (_ctx, juliaPath: string) => {
     return checkJuliaRuntime(juliaPath);
   });
 
-  handleIpc(IPC.environment.juliaInstall, async (_event, juliaPath: string) => {
+  handleInvoke(IPC.environment.juliaInstall, async (_ctx, juliaPath: string) => {
     return installPDVKernel(resolveJuliaShim(juliaPath), {
-      stagingDir: path.join(app.getPath("userData"), "pdv-julia"),
-      win,
+      stagingDir: path.join(getUserDataDir(), "pdv-julia"),
+      push,
       pushChannel: IPC.push.installOutput,
     });
   });
@@ -176,16 +176,16 @@ export function registerEnvironmentIpcHandlers(
   // ops stream over the same installOutput channel the selector already
   // subscribes to.
 
-  handleIpc(IPC.environment.juliaupStatus, async () => juliaupStatus());
+  handleInvoke(IPC.environment.juliaupStatus, async () => juliaupStatus());
 
-  handleIpc(IPC.environment.juliaupChannels, async () => listJuliaupChannels());
+  handleInvoke(IPC.environment.juliaupChannels, async () => listJuliaupChannels());
 
-  handleIpc(IPC.environment.juliaupAdd, async (_event, channel: string) => {
-    return juliaupAdd(channel, { win, pushChannel: IPC.push.installOutput });
+  handleInvoke(IPC.environment.juliaupAdd, async (_ctx, channel: string) => {
+    return juliaupAdd(channel, { push, pushChannel: IPC.push.installOutput });
   });
 
-  handleIpc(IPC.environment.juliaupInstall, async () => {
-    return installJuliaup({ win, pushChannel: IPC.push.installOutput });
+  handleInvoke(IPC.environment.juliaupInstall, async () => {
+    return installJuliaup({ push, pushChannel: IPC.push.installOutput });
   });
 
   // --- Packages tab (ARCHITECTURE.md §10.5.13 / §10.6.8) --------------------
@@ -194,7 +194,7 @@ export function registerEnvironmentIpcHandlers(
     const activeKernelId = getActiveKernelId();
     return {
       cwd: activeKernelId ? kernelWorkingDirs.get(activeKernelId) : undefined,
-      win,
+      push,
       pushChannel: IPC.push.envActivity,
       binaryPath: readConfig(configStore).uv?.binaryPath,
     };
@@ -235,9 +235,7 @@ export function registerEnvironmentIpcHandlers(
     const executionId = randomUUID();
     const origin = { kind: "unknown" as const, label };
     const start = Date.now();
-    const send = (channel: string, payload: unknown): void => {
-      if (!win.isDestroyed()) win.webContents.send(channel, payload);
-    };
+    const send = push;
     const chunks: string[] = [];
     send(IPC.push.executeBegin, { executionId, code, origin, timestamp: start });
     try {
@@ -297,7 +295,7 @@ export function registerEnvironmentIpcHandlers(
     }
   };
 
-  handleIpc(IPC.environment.listPackages, async (): Promise<ProjectPackage[]> => {
+  handleInvoke(IPC.environment.listPackages, async (): Promise<ProjectPackage[]> => {
     const activeKernelId = getActiveKernelId();
     if (!activeKernelId) return [];
     const workingDir = kernelWorkingDirs.get(activeKernelId);
@@ -339,9 +337,9 @@ export function registerEnvironmentIpcHandlers(
   // import-cache refresh needed, Julia has none); Python sessions go
   // through uv subprocesses (§10.5.13).
 
-  handleIpc(
+  handleInvoke(
     IPC.environment.addPackage,
-    async (_event, specs: string[]): Promise<EnvironmentInstallResult> => {
+    async (_ctx, specs: string[]): Promise<EnvironmentInstallResult> => {
       if (activeKernelLanguage() === "julia") {
         return runJuliaPkgOp(
           `PDVKernel.install(${juliaArgList(specs)})`,
@@ -354,9 +352,9 @@ export function registerEnvironmentIpcHandlers(
     }
   );
 
-  handleIpc(
+  handleInvoke(
     IPC.environment.removePackage,
-    async (_event, names: string[]): Promise<EnvironmentInstallResult> => {
+    async (_ctx, names: string[]): Promise<EnvironmentInstallResult> => {
       if (activeKernelLanguage() === "julia") {
         return runJuliaPkgOp(
           `PDVKernel.remove(${juliaArgList(names)})`,
@@ -369,9 +367,9 @@ export function registerEnvironmentIpcHandlers(
     }
   );
 
-  handleIpc(
+  handleInvoke(
     IPC.environment.upgradePackage,
-    async (_event, names: string[]): Promise<EnvironmentInstallResult> => {
+    async (_ctx, names: string[]): Promise<EnvironmentInstallResult> => {
       if (activeKernelLanguage() === "julia") {
         return runJuliaPkgOp(
           `PDVKernel.update(${juliaArgList(names)})`,
@@ -395,9 +393,9 @@ export function registerEnvironmentIpcHandlers(
   // console seeds a log entry and streams the install output live — same
   // pattern as MCP agent runs.
 
-  handleIpc(
+  handleInvoke(
     IPC.environment.installModule,
-    async (_event, kernelId: string, moduleName: string): Promise<void> => {
+    async (_ctx, kernelId: string, moduleName: string): Promise<void> => {
       const kernel = kernelManager.getKernel(kernelId);
       if (!kernel) {
         throw new Error(`Kernel not found: ${kernelId}`);
@@ -413,9 +411,7 @@ export function registerEnvironmentIpcHandlers(
       const transcript = workingDir ? new TranscriptWriter(workingDir) : null;
       const executionId = randomUUID();
       const start = Date.now();
-      const send = (channel: string, payload: unknown): void => {
-        if (!win.isDestroyed()) win.webContents.send(channel, payload);
-      };
+      const send = push;
       send(IPC.push.executeBegin, { executionId, code, origin, timestamp: start });
       try {
         const result = await executeAndTranscribe(
