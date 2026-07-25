@@ -111,6 +111,20 @@ transport (SSH instead of a local child), not the logic.
 - Run the MCP server for AI agent integration (§15)
 - Enforce all filesystem security (path traversal checks, sandboxing)
 
+**Packaged layout.** In development the supervisor runs the tsc output
+directly (`dist/main/server/server-main.js`). Packaged builds instead ship a
+single esbuild bundle, produced by `npm run build:server` into
+`dist/server-bundle/pdv-server.cjs` and placed at
+`<Resources>/pdv-server/pdv-server.cjs` via electron-builder's
+`extraResources` — it must be a real file on disk because the child runs
+under plain Node (`ELECTRON_RUN_AS_NODE=1`), which cannot `require()` from
+inside the asar archive. The bundle externalizes `zeromq`; the supervisor
+points the server at the asar-unpacked copy through the `PDV_ZEROMQ_PATH`
+environment variable (resolved with `createRequire` in `kernel-manager.ts`).
+Everything on zeromq's runtime require path (`zeromq`, `cmake-ts`,
+`node-addon-api`) must therefore stay in `asarUnpack`;
+`main/electron-builder-config.test.ts` guards this layout against drift.
+
 ### 2.2 Renderer Process Responsibilities
 - Display and interact with the Tree panel
 - Display and interact with the Code Cell (Monaco editor tabs)

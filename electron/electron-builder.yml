@@ -28,8 +28,16 @@ files:
 
 # Native modules (.node binaries) cannot be loaded from inside an asar
 # archive. This extracts zeromq to app.asar.unpacked/ alongside the asar.
+# cmake-ts must ride along: zeromq's lib/load-addon.js does
+# require("cmake-ts/build/loader") at runtime, and the pdv-server child runs
+# under plain Node (ELECTRON_RUN_AS_NODE), which cannot resolve modules from
+# inside the asar at all — everything on zeromq's runtime require path has to
+# be a real file. node-addon-api is included for the same reason (zeromq's
+# only other dependency; near-zero size).
 asarUnpack:
   - "node_modules/zeromq/**"
+  - "node_modules/cmake-ts/**"
+  - "node_modules/node-addon-api/**"
 
 # pdv-python source is placed into the app's Resources directory
 # (Contents/Resources/ on macOS, resources/ on Linux).
@@ -44,6 +52,13 @@ extraResources:
       - "!**/tests/**"
       - "!**/.pytest_cache/**"
       - "!**/.git/**"
+      # Local dev/build droppings (uv venv, setuptools build dir + egg-info
+      # from the wheel prebuild). Without these excludes a developer machine's
+      # 100+ MB .venv rides into Resources/pdv-python and codesign has to
+      # sign every file in it.
+      - "!.venv/**"
+      - "!build/**"
+      - "!*.egg-info/**"
   # pdv-julia source, staged by julia-discovery.ts into <userData>/pdv-julia
   # and Pkg.develop'ed by the one-click PDVKernel install (§10.7.4).
   # resolveBundledPDVJuliaPath() expects <Resources>/pdv-julia in packaged
@@ -61,6 +76,13 @@ extraResources:
       - "**/*"
       - "!**/__pycache__/**"
       - "!**/*.pyc"
+  # The pdv-server bundle (built by `npm run build:server`). It runs under
+  # plain Node (ELECTRON_RUN_AS_NODE), which cannot require() from inside the
+  # asar archive, so it must be a real file on disk. server-supervisor.ts
+  # resolves <Resources>/pdv-server/pdv-server.cjs in packaged builds, with
+  # zeromq loaded from app.asar.unpacked via PDV_ZEROMQ_PATH.
+  - from: dist/server-bundle
+    to: pdv-server
 
 # ---------------------------------------------------------------------------
 # macOS
