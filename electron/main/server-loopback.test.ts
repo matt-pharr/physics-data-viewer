@@ -24,7 +24,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { buildSync } from "esbuild";
 
 import type { PDVConfig } from "./ipc";
-import { IPC } from "./ipc";
+import { INTERNAL_CHANNELS, IPC } from "./ipc";
 import type { KernelInfo } from "./kernel-manager";
 import { dispatchInvoke } from "./server/invoke-registry";
 import { RPC_CHANNELS } from "./transport/protocol";
@@ -126,22 +126,35 @@ describe("pdv-server over loopback stdio", () => {
     expect(pong.ts).toBeGreaterThan(0);
   });
 
-  it("serves real wire handlers: kernels:list and config:get", async () => {
+  it("does not serve the renderer-facing config channels", async () => {
+    // `config:*` are shell channels: the shell merges its own half (theme,
+    // launchers) with the server's before answering the renderer. Shell code
+    // asking the *server* for `config:get` is a real bug that once left the
+    // app unable to open a window at all, so pin it against a live server.
+    const { client } = spawnServer();
+    await client.waitForHello(10_000);
+
+    await expect(client.invoke(IPC.config.get)).rejects.toThrow(
+      "No handler registered for 'config:get'"
+    );
+  });
+
+  it("serves real wire handlers: kernels:list and the server config half", async () => {
     const { client } = spawnServer();
     await client.waitForHello(10_000);
 
     const kernels = (await client.invoke(IPC.kernels.list)) as KernelInfo[];
     expect(kernels).toEqual([]);
 
-    const config = (await client.invoke(IPC.config.get)) as PDVConfig;
+    const config = (await client.invoke(INTERNAL_CHANNELS.serverConfigGet)) as PDVConfig;
     expect(config).toMatchObject({
       showPrivateVariables: expect.any(Boolean) as boolean,
       autoRefreshNamespace: expect.any(Boolean) as boolean,
     });
 
     // config:set round-trips through the server's ConfigStore.
-    await client.invoke(IPC.config.set, [{ pythonPath: "/opt/fake/python" }]);
-    const updated = (await client.invoke(IPC.config.get)) as PDVConfig;
+    await client.invoke(INTERNAL_CHANNELS.serverConfigSet, [{ pythonPath: "/opt/fake/python" }]);
+    const updated = (await client.invoke(INTERNAL_CHANNELS.serverConfigGet)) as PDVConfig;
     expect(updated.pythonPath).toBe("/opt/fake/python");
   });
 
@@ -186,7 +199,7 @@ describe("pdv-server over loopback stdio", () => {
     const pending = client.invoke(IPC.kernels.list);
     child.kill("SIGKILL");
     await expect(pending).rejects.toThrow(/stream|closed|exited/);
-    await expect(client.invoke(IPC.config.get)).rejects.toThrow(
+    await expect(client.invoke(INTERNAL_CHANNELS.serverConfigGet)).rejects.toThrow(
       "RPC connection closed"
     );
   });
@@ -209,7 +222,7 @@ describe.skipIf(!process.env.PYTHON_PATH)(
       async () => {
         const { client } = spawnServer();
         await client.waitForHello(10_000);
-        await client.invoke(IPC.config.set, [
+        await client.invoke(INTERNAL_CHANNELS.serverConfigSet, [
           { pythonPath: process.env.PYTHON_PATH },
         ]);
         const info = (await client.invoke(IPC.kernels.start, [

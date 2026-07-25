@@ -25,12 +25,7 @@ import * as path from "path";
 import type { UpdateCheckStamp } from "./auto-updater";
 import { GuiEditorWindowManager } from "./gui-editor-window-manager";
 import { GuiViewerWindowManager } from "./gui-viewer-window-manager";
-import {
-  INTERNAL_CHANNELS,
-  IPC,
-  type McpStatus,
-  type PDVConfig,
-} from "./ipc";
+import { INTERNAL_CHANNELS, IPC, type McpStatus } from "./ipc";
 import { registerAppStateIpcHandlers } from "./ipc-register-app-state";
 import type { LauncherContext } from "./ipc-register-launchers";
 import { registerGuiEditorIpcHandlers } from "./ipc-register-gui-editor";
@@ -38,6 +33,8 @@ import { registerLaunchersIpcHandlers } from "./ipc-register-launchers";
 import { registerModuleWindowIpcHandlers } from "./ipc-register-module-windows";
 import { removeAllIpcHandlers } from "./ipc-registry";
 import { ModuleWindowManager } from "./module-window-manager";
+import { readMergedConfig, registerConfigBridge } from "./shell/config-bridge";
+import type { LocalConfigStore } from "./shell/local-config-store";
 import { registerServerBridge } from "./shell/server-bridge";
 import type { ServerHandle } from "./shell/server-supervisor";
 
@@ -55,7 +52,8 @@ import type { ServerHandle } from "./shell/server-supervisor";
  * macOS window re-creation.
  *
  * @param win - Main browser window used for push forwarding.
- * @param server - Handle to the supervised pdv-server process.
+ * @param server - Handle to the session's pdv-server.
+ * @param localConfig - This machine's half of the config (theme, launchers, …).
  * @param pdvDir - `~/.PDV` root for themes/state paths.
  * @param setAllowClose - Flips the close-guard flag in `app.ts`.
  * @returns The light session-reset callback, called on renderer reloads.
@@ -64,6 +62,7 @@ import type { ServerHandle } from "./shell/server-supervisor";
 export async function registerIpcHandlers(
   win: BrowserWindow,
   server: ServerHandle,
+  localConfig: LocalConfigStore,
   pdvDir: string,
   setAllowClose: (allow: boolean) => void
 ): Promise<() => void> {
@@ -97,13 +96,15 @@ export async function registerIpcHandlers(
   // must not touch the ConfigStore directly — it lives with the server.
   const serverInvoke = (channel: string, ...args: unknown[]): Promise<unknown> =>
     server.invoke(channel, args);
+  // Purely shell-owned, so this no longer costs a round trip to the server.
   const updateCheckStamp: UpdateCheckStamp = {
-    get: async () =>
-      ((await serverInvoke(IPC.config.get)) as PDVConfig).lastUpdateCheck,
+    get: async () => localConfig.getAll().lastUpdateCheck,
     set: async () => {
-      await serverInvoke(IPC.config.set, { lastUpdateCheck: Date.now() });
+      localConfig.apply({ lastUpdateCheck: Date.now() });
     },
   };
+
+  registerConfigBridge({ server, localConfig });
 
   registerAppStateIpcHandlers({
     win,
@@ -126,7 +127,7 @@ export async function registerIpcHandlers(
   registerLaunchersIpcHandlers({
     getLauncherContext: async () =>
       (await serverInvoke(INTERNAL_CHANNELS.launcherContext)) as LauncherContext,
-    getConfig: async () => (await serverInvoke(IPC.config.get)) as PDVConfig,
+    getConfig: async () => readMergedConfig(server, localConfig),
     getMcpStatus: async () =>
       (await serverInvoke(IPC.mcp.getStatus)) as McpStatus,
     resolveTreeFile: async (treePath) =>

@@ -438,6 +438,13 @@ export const SHELL_CHANNELS: readonly string[] = [
   // re-routed to a local editor with remote capabilities (e.g.
   // `code --remote`) — a remote-mode follow-up, not handled here.
   IPC.script.edit,
+  // Served by `shell/config-bridge.ts`, which merges two stores: the
+  // shell-owned keys (theme, shortcuts, launchers — they follow the user)
+  // and the server-owned rest (pythonPath, workingDirBase, mcp — they
+  // belong to whichever host runs the session). The server still registers
+  // these channel names in its own invoke registry; the bridge calls them
+  // over the transport for its half.
+  ...Object.values(IPC.config),
 ];
 
 /** Invoke channels handled by the pdv-server core. */
@@ -451,7 +458,6 @@ export const SERVER_CHANNELS: readonly string[] = [
   ...Object.values(IPC.modules),
   ...Object.values(IPC.namelist),
   ...Object.values(IPC.project),
-  ...Object.values(IPC.config),
   ...Object.values(IPC.mcp),
   ...Object.values(IPC.autosave),
   ...Object.values(IPC.codeCells),
@@ -525,12 +531,20 @@ export const BROADCAST_PUSH_CHANNELS: readonly string[] = [
  * - `resetSessionState` — light session reset on renderer load/reload
  *   (clears in-session closures, keeps per-kernel state on disk). The full
  *   reset rides the reserved `pdv.rpc.sessionReset` channel instead.
+ * - `serverConfigGet` / `serverConfigSet` — the *server-owned half* of the
+ *   config. The renderer-facing `config:get`/`config:set` are shell
+ *   channels served by `shell/config-bridge.ts`, which merges this half
+ *   with the shell-owned one (theme, launchers, …). Keeping them under
+ *   distinct names means "the config the session's host owns" and "the
+ *   config the user sees" never get confused for each other.
  */
 export const INTERNAL_CHANNELS = {
   launcherContext: "pdv.internal.launcherContext",
   resolveTreeFile: "pdv.internal.resolveTreeFile",
   systemResumed: "pdv.internal.systemResumed",
   resetSessionState: "pdv.internal.resetSessionState",
+  serverConfigGet: "pdv.internal.serverConfigGet",
+  serverConfigSet: "pdv.internal.serverConfigSet",
 } as const;
 
 // Re-export for preload and renderer use.

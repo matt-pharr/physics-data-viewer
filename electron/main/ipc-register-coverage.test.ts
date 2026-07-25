@@ -118,6 +118,9 @@ import { registerModulesIpcHandlers } from "./ipc-register-modules";
 import { registerProjectIpcHandlers } from "./ipc-register-project";
 import { registerAppStateIpcHandlers } from "./ipc-register-app-state";
 import { registerConfigIpcHandlers } from "./ipc-register-config";
+import { registerConfigBridge } from "./shell/config-bridge";
+import { LocalConfigStore } from "./shell/local-config-store";
+import type { ServerHandle } from "./shell/server-supervisor";
 import { registerGuiFilesIpcHandlers } from "./ipc-register-gui-files";
 import { registerModuleWindowIpcHandlers } from "./ipc-register-module-windows";
 import { registerGuiEditorIpcHandlers } from "./ipc-register-gui-editor";
@@ -273,6 +276,15 @@ function setupAll(): void {
     },
   });
   registerConfigIpcHandlers({ configStore: config.store });
+  // `config:*` are shell channels served by the bridge, which merges the
+  // server half (registered just above, on its internal channels) with the
+  // shell-owned one.
+  // `fs` is mocked above, so this touches no real disk: construction only
+  // calls mkdirSync + existsSync, and nothing here writes.
+  registerConfigBridge({
+    server: { invoke: async () => ({}) } as unknown as ServerHandle,
+    localConfig: new LocalConfigStore("/tmp/pdv-coverage-local-config"),
+  });
   registerGuiFilesIpcHandlers({ commRouter: commRouter.router });
   registerModuleWindowIpcHandlers({
     moduleWindowManager: createModuleWindowManagerMock(),

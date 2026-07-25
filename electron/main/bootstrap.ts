@@ -47,7 +47,8 @@ import * as os from "os";
 import * as path from "path";
 
 import { createWindow, wireAppEvents } from "./app";
-import { INTERNAL_CHANNELS } from "./ipc";
+import { INTERNAL_CHANNELS, type PDVConfig } from "./ipc";
+import { LocalConfigStore } from "./shell/local-config-store";
 import { LocalServerSupervisor } from "./shell/server-supervisor";
 import { SessionRouter } from "./shell/session-router";
 
@@ -64,6 +65,7 @@ if (process.env.PDV_E2E === "1" && process.env.HOME) {
 }
 
 let sessionRouter: SessionRouter | null = null;
+let localConfigStore: LocalConfigStore | null = null;
 let mainWindow: BrowserWindow | null = null;
 let openingWindow: Promise<void> | null = null;
 
@@ -77,10 +79,10 @@ async function openMainWindow(): Promise<void> {
   }
   openingWindow = (async () => {
     const server = sessionRouter;
-    if (!server) {
+    if (!server || !localConfigStore) {
       throw new Error("pdv-server is not running");
     }
-    const win = await createWindow(server);
+    const win = await createWindow(server, localConfigStore);
     mainWindow = win;
     win.on("closed", () => {
       if (mainWindow === win) {
@@ -156,6 +158,25 @@ if (!hasSingleInstanceLock) {
     // being re-registered.
     const router = new SessionRouter(supervisor);
     sessionRouter = router;
+
+    // Split the config: appearance, keybindings and launchers follow the
+    // user, while pythonPath/workingDirBase/mcp belong to whichever host
+    // runs the session. On an existing install every one of those keys is
+    // still in the server's preferences.json, so seed once from there
+    // rather than silently reverting the user to defaults.
+    const localConfig = new LocalConfigStore(app.getPath("userData"));
+    if (!localConfig.isSeeded) {
+      try {
+        // Deliberately the server half, not the merged view: the seed is
+        // reading the pre-split values that still live in its store.
+        localConfig.seedFrom(
+          (await router.invoke(INTERNAL_CHANNELS.serverConfigGet)) as PDVConfig
+        );
+      } catch (error) {
+        console.error("[PDV] Could not seed local config from the server:", error);
+      }
+    }
+    localConfigStore = localConfig;
 
     // System wake recovery runs next to the kernel connection — forward
     // the resume event to whichever server currently backs the session.

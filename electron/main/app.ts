@@ -21,7 +21,9 @@ import * as fsSync from "fs";
 
 import { registerIpcHandlers } from "./index";
 import { initializeAppMenu } from "./menu";
-import { IPC, type PDVConfig } from "./ipc";
+import { IPC } from "./ipc";
+import { readMergedConfig } from "./shell/config-bridge";
+import type { LocalConfigStore } from "./shell/local-config-store";
 import type { ServerHandle } from "./shell/server-supervisor";
 
 /**
@@ -126,17 +128,22 @@ async function loadDevUrlWithRetry(
  *
  * @param server - The session's server handle (already started); used for
  *   the pre-window config read and the IPC bridge registration.
+ * @param localConfig - This machine's config half; supplies the appearance
+ *   settings that decide the window's initial background colour.
  * @returns Created BrowserWindow.
  * @throws {Error} When renderer content cannot be loaded or the server is
  *   unreachable for the initial config read.
  */
 export async function createWindow(
-  server: ServerHandle
+  server: ServerHandle,
+  localConfig: LocalConfigStore
 ): Promise<BrowserWindow> {
   // One config snapshot before any window exists: initial background color
-  // and the custom working-dir base for the orphan scan below. The config
-  // lives with the server — the shell holds no ConfigStore.
-  const config = (await server.invoke(IPC.config.get)) as PDVConfig;
+  // (shell-owned — appearance follows the user, not the session's host) and
+  // the custom working-dir base for the orphan scan below (server-owned).
+  // Goes through the same merge the renderer sees; `IPC.config.get` is a
+  // shell channel and is NOT registered on the server.
+  const config = await readMergedConfig(server, localConfig);
 
   const win = new BrowserWindow({
     width: 1440,
@@ -203,6 +210,7 @@ export async function createWindow(
   const resetSessionState = await registerIpcHandlers(
     win,
     server,
+    localConfig,
     path.join(os.homedir(), ".PDV"),
     setAllowClose,
   );
