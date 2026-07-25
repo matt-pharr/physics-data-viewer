@@ -100,6 +100,9 @@ transport (SSH instead of a local child), not the logic.
 - Show native confirmation dialogs on the server's behalf (reverse RPC:
   `pdv.rpc.confirmRequest` push → dialog → `pdv.rpc.confirmResponse`)
 - Launch local external programs (editor, terminal, AI agent)
+- Own custom-theme storage (`~/.PDV/themes`, the `themes.*` channels) — the
+  window's background color is applied before the renderer loads, and
+  themes stay local even when a future session runs on a remote host
 
 ### 2.1.1 pdv-server Responsibilities
 - Spawn and manage kernel subprocess(es) via ZeroMQ (Jupyter Messaging Protocol)
@@ -2026,8 +2029,13 @@ the Electron shell; `SERVER_CHANNELS` (kernels, tree, namespace, script
 run, notes, modules, project, config, autosave, environment, MCP status,
 cells) are handled by the pdv-server core and reach it through the shell's
 server bridge. A unit test (`channel-partition.test.ts`) enforces that the
-two sets exactly partition the surface, and that every push channel is
-classified as shell- or server-originated.
+two sets exactly partition the surface, that every push channel is
+classified as shell- or server-originated, and that `INTERNAL_CHANNELS`
+stays disjoint from both. Pushes that child windows also need (module
+windows, GUI editor/viewer) are listed in `BROADCAST_PUSH_CHANNELS`: the
+server emits each such push exactly once and the shell's bridge fans it
+out, so the fan-out policy lives in one place rather than at every emit
+site.
 
 **The stdio transport** (`main/transport/`) carries `ipc.ts` channel names
 verbatim over newline-delimited JSON: `{id, channel, args}` requests,
@@ -2568,11 +2576,11 @@ The mental model for the tool surface follows from one principle: **PDV exposes 
 
 ### 15.2 The Server
 
-- **Process.** The MCP server runs inside the Electron **main process**. It reaches the kernel through the existing `CommRouter` / `QueryRouter` (§3) and `KernelManager.execute` (§9) entry points, exactly as the IPC handlers do. It introduces no new transport to the kernel.
+- **Process.** The MCP server runs inside the **pdv-server** process (§2.1.1), constructed by `server/wire.ts` and started from `server/server-main.ts`. Every dependency it needs — the managers, the tree-create and generation hooks — is a server-side object, so it sits naturally on that side of the transport. It reaches the kernel through the existing `CommRouter` / `QueryRouter` (§3) and `KernelManager.execute` (§9) entry points, exactly as the IPC handlers do, and introduces no new transport to the kernel. Its two renderer-bound edges ride the shell⇄server transport with no protocol additions: cell-RPC's outbound messages are ordinary push channels, and its reply arrives on the `cells.respond` invoke channel. The shell reads `mcp.getStatus` over the bridge like any other server channel. Remote sessions simply do not start MCP — it stays local-only.
 - **Transport.** Streamable HTTP, bound to loopback (`127.0.0.1`) only. Stdio is rejected: the server must talk to an *already-running* PDV instance with an open project, which a stdio-spawned process cannot.
 - **Dependency.** The official `@modelcontextprotocol/sdk` package. This is the one new runtime dependency; hand-rolling the protocol would be strictly more long-term maintenance.
 - **Lifecycle.** The server starts on app launch and stops on quit — its lifetime is the **app's**, not the project's. The listening port is chosen dynamically (a default, with fallback on collision) and surfaced in Settings (§15.10); it is never hardcoded.
-- **Not a global singleton.** The server is owned by a project/window session. Today PDV exposes one window, so there is one server instance and one port. When multi-window lands, each window owns its own server instance on its own port, and the user connects an agent to the specific window they want. The server instance is destined to live on the future `Session` abstraction, alongside the autosave timer; until then it is main-process-owned but encapsulated so the move is mechanical. No code may assume a single global server.
+- **Not a global singleton.** The server is owned by a project/window session. Today PDV exposes one window, so there is one server instance and one port. When multi-window lands, each window owns its own server instance on its own port, and the user connects an agent to the specific window they want. The server instance is destined to live on the future `Session` abstraction, alongside the autosave timer; until then it is a pdv-server-owned singleton (`wire.ts` keeps it across window re-creation and re-registers only its invoke channels), reached through module-scoped trampoline hooks so a re-wire cannot leave it holding a stale session's closures. No code may assume a single global server.
 
 ### 15.3 Session Binding and Staleness
 

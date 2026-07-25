@@ -413,9 +413,8 @@ export const IPC = {
 // Every invoke channel is owned by exactly one process. SHELL channels are
 // window/OS concerns handled in the Electron shell (menus, native dialogs,
 // window chrome, local app launchers); SERVER channels are session concerns
-// handled by the pdv-server core (kernel, tree, project, config, …) — in
-// single-process mode they are served from the invoke registry mirrored
-// onto ipcMain, and in the extracted pdv-server they ride the stdio
+// handled by the pdv-server core (kernel, tree, project, config, …), which
+// registers them in the invoke registry and serves them over the stdio
 // transport. New channels MUST be added to exactly one of these sets; the
 // channel-partition unit test enforces completeness and disjointness.
 

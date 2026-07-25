@@ -8,10 +8,11 @@
  * `dialog.showMessageBox` directly; server code cannot. Instead they
  * receive a {@link ConfirmFn} through their dependency bag:
  *
- * - **Single-process mode**: the shell supplies a closure wrapping
- *   `dialog.showMessageBox` parented to the main window.
- * - **Extracted pdv-server**: the server sends a reverse RPC over the
- *   transport; the shell shows the dialog and replies.
+ * The pdv-server's implementation (`server/shell-confirm.ts`) sends a
+ * reverse RPC over the transport — a `pdv.rpc.confirmRequest` push — and
+ * parks the promise until the shell shows `dialog.showMessageBox` parented
+ * to its window and answers on `pdv.rpc.confirmResponse`. With no window
+ * attached the supervisor answers with the request's own cancel choice.
  *
  * This file contains type declarations only — no runtime logic.
  */

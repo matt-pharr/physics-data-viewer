@@ -4,15 +4,10 @@
  *
  * Server-destined IPC handlers (kernels, tree, project, modules, autosave,
  * environment, …) register here via {@link handleInvoke} instead of calling
- * `ipcMain.handle` directly. The registry is a plain Map, so the same
- * handler set can be dispatched from two front ends:
- *
- * - **Single-process mode**: `index.ts` mirrors every registered channel
- *   onto `ipcMain` through the shell's `ipc-registry`, forwarding each
- *   invoke to {@link dispatchInvoke}.
- * - **Extracted pdv-server**: the stdio transport's rpc-server dispatches
- *   incoming requests straight into {@link dispatchInvoke} with no Electron
- *   present.
+ * `ipcMain.handle` directly — the registry is a plain Map with no Electron
+ * anywhere in it. The stdio transport's rpc-server dispatches incoming
+ * requests straight into {@link dispatchInvoke}; tests dispatch the same
+ * way without a transport.
  *
  * {@link dispatchInvoke} owns the error contract previously provided by
  * `ipc-registry.ts`'s wrapper: failures are logged once with their channel
@@ -79,9 +74,8 @@ export function handleInvoke<Args extends unknown[]>(
  *
  * Owns the cross-boundary error contract: failures are logged with the
  * channel name, and non-`Error` throws are normalized to `Error` instances.
- * Callers (the ipcMain mirror in-process, the transport rpc-server in the
- * extracted pdv-server) forward the result/rejection to the renderer
- * unchanged.
+ * The caller (the transport's rpc-server) forwards the result/rejection to
+ * the shell, which hands it to the renderer unchanged.
  *
  * @param channel - IPC channel name to dispatch.
  * @param ctx - Per-dispatch context (push sender).

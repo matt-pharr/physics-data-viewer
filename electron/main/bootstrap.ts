@@ -127,7 +127,12 @@ if (!hasSingleInstanceLock) {
       version: app.getVersion(),
       userDataDir: app.getPath("userData"),
       pdvDir: path.join(os.homedir(), ".PDV"),
-      resourcesRoot: process.resourcesPath ?? null,
+      // Unpackaged, process.resourcesPath points at Electron's OWN Resources
+      // dir (inside node_modules), which holds none of PDV's bundled
+      // resources. Passing null keeps getResourcesRoot()'s contract honest so
+      // server-side resolvers fall through to their __dirname walk instead of
+      // probing a directory that can only ever yield false positives.
+      resourcesRoot: app.isPackaged ? (process.resourcesPath ?? null) : null,
       getWindow: () => mainWindow,
     });
     try {

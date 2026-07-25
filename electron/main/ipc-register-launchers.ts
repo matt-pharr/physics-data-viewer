@@ -11,9 +11,9 @@
  *
  * These are shell channels: they spawn processes on the user's machine. The
  * session state they need (config, MCP status, active kernel context, tree
- * file resolution) lives in the pdv-server core, so every accessor in the
- * dependency bag is async — served from the in-process wiring today, over
- * the transport once the server is extracted.
+ * file resolution) lives in the pdv-server, so every accessor in the
+ * dependency bag is async: each one is an invoke across the transport
+ * (`index.ts` builds them over the server bridge).
  *
  * Non-responsibilities:
  * - Building the agent spawn spec (see `agent-launcher.ts`).

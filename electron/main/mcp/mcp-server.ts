@@ -1,8 +1,7 @@
 /**
  * mcp-server.ts — The local MCP server for external AI coding agents.
  *
- * Runs inside the pdv-server core for the lifetime of the app (the Electron
- * main process in single-process mode). Exposes
+ * Runs inside the pdv-server process for the lifetime of the app. Exposes
  * the active PDV project to MCP-capable agents (Claude Code, Codex, Cursor)
  * over Streamable HTTP on a loopback port, guarded by a bearer token.
  *

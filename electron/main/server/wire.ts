@@ -10,12 +10,10 @@
  * registrations land in the Electron-free invoke registry
  * (`server/invoke-registry.ts`).
  *
- * Two front ends call this:
- * - **Single-process mode**: `index.ts` calls `wireServer()` with the
- *   shell's window-bound push/confirm closures, then mirrors the registry
- *   onto `ipcMain`.
- * - **Extracted pdv-server**: `server-main.ts` calls it with the stdio
- *   transport's push sender and serves the registry over `rpc-server`.
+ * `server-main.ts` is the only production caller: it wires the session with
+ * the stdio transport's push sender and a reverse-RPC confirm broker, then
+ * serves the registry over `rpc-server`. Tests call `wireServer()` directly
+ * with mock managers and dispatch through `dispatchInvoke`.
  *
  * This module does NOT import Electron, own shell channels (menu, chrome,
  * native pickers, launchers — see `index.ts`), or perform transport I/O.
@@ -407,9 +405,9 @@ function clearPushSubscriptions(): void {
 /** Dependencies `wireServer` needs from its host process. */
 export interface ServerContext {
   /**
-   * Renderer-push sender. In single-process mode: the shell's window-bound
-   * closure (which also owns the `BROADCAST_PUSH_CHANNELS` fan-out to child
-   * windows); in the extracted pdv-server: the transport's sender.
+   * Renderer-push sender. In the pdv-server this is the transport's push
+   * writer; the shell side of the bridge owns the window fan-out (including
+   * `BROADCAST_PUSH_CHANNELS` to child windows). Tests inject a spy.
    */
   push: PushSender;
   /** Native-confirmation function (blocking user decision). */
@@ -423,9 +421,9 @@ export interface ServerContext {
   configStore: ConfigStore;
   /**
    * Closes GUI editor/viewer and module child windows on session/project
-   * resets. Provided by the shell; once the server is extracted this
-   * becomes a push the shell reacts to. Optional — `server-main.ts` has no
-   * windows to close.
+   * resets. Child windows live in the shell, so `server-main.ts` supplies a
+   * hook that emits the reserved `pdv.rpc.closeChildWindows` push and lets
+   * the shell do the closing. Optional — tests wire a spy or omit it.
    */
   closeChildWindows?: () => void;
   /**

@@ -61,9 +61,8 @@ export class CellRpcClient {
   private readonly pending = new Map<string, PendingRequest>();
 
   /**
-   * @param push - Renderer-push sender. In single-process mode this is the
-   *   shell's window-bound closure; in the extracted pdv-server it is the
-   *   transport's seq-stamping sender.
+   * @param push - Renderer-push sender: the transport's seq-stamping sender,
+   *   whose frames the shell's bridge forwards to the renderer window.
    */
   constructor(push: PushSender) {
     this.push = push;

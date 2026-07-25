@@ -73,6 +73,20 @@ export function serverMain(): void {
     console.error("[pdv-server] PDV_USER_DATA_DIR is required");
     process.exit(2);
   }
+  // Baked into the bundle by scripts/build-server.mjs (esbuild --define).
+  // Undefined in development, where the supervisor runs the tsc output that
+  // was just compiled from the same tree and cannot be stale. In a packaged
+  // build it is the only value not derived from the running app, so it is
+  // what makes the hello version check meaningful: without it both sides
+  // read app.getVersion() and a stale server bundle would pass.
+  const buildVersion = process.env.PDV_BUILD_VERSION;
+  if (buildVersion && buildVersion !== version) {
+    console.error(
+      `[pdv-server] bundle is stale: built for ${buildVersion}, shell is ${version}. ` +
+        "Rebuild with `npm run build:server`."
+    );
+    process.exit(2);
+  }
   setAppVersion(version);
 
   const pdvDir = process.env.PDV_PDV_DIR ?? path.join(os.homedir(), ".PDV");

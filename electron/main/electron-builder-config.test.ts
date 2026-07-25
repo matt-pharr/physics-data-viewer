@@ -45,14 +45,39 @@ describe("electron-builder.yml extraResources", () => {
     // packaged builds; plain Node (ELECTRON_RUN_AS_NODE) cannot require()
     // from inside app.asar, so the bundle must ride extraResources.
     expect(configText).toMatch(/from: dist\/server-bundle\s+to: pdv-server/);
-    // ...and build:server must actually emit into that from: directory.
+    // ...and the build must actually produce that directory.
     const pkg = JSON.parse(
       fs.readFileSync(path.join(__dirname, "..", "package.json"), "utf8"),
     ) as { scripts: Record<string, string> };
-    expect(pkg.scripts["build:server"]).toContain(
-      "--outfile=dist/server-bundle/pdv-server.cjs",
-    );
     expect(pkg.scripts["build"]).toContain("build:server");
+    expect(pkg.scripts["build:server"]).toContain("scripts/build-server.mjs");
+    // The builder script owns the outfile path and the version stamp; assert
+    // against it rather than an inline esbuild command line.
+    const buildServer = fs.readFileSync(
+      path.join(__dirname, "..", "scripts", "build-server.mjs"),
+      "utf8",
+    );
+    expect(buildServer).toContain('"server-bundle"');
+    expect(buildServer).toContain('"pdv-server.cjs"');
+    expect(buildServer).toContain("PDV_BUILD_VERSION");
+  });
+
+  it("keeps the server bundle out of the asar (it would be dead weight there)", () => {
+    // `dist/**/*` in `files` would otherwise copy the bundle into app.asar,
+    // where the plain-Node child can never require it.
+    expect(configText).toMatch(/- "!dist\/server-bundle\/\*\*"/);
+  });
+
+  it("excludes local dev droppings from the bundled pdv-python tree", () => {
+    // A developer machine's uv venv is >100 MB and every file in it would be
+    // codesigned; the linter/build caches are pure noise.
+    const pythonBlock = configText.slice(
+      configText.indexOf("from: ../pdv-python"),
+      configText.indexOf("from: ../pdv-julia"),
+    );
+    for (const pattern of ["!.venv/**", "!build/**", "!*.egg-info/**"]) {
+      expect(pythonBlock).toContain(pattern);
+    }
   });
 
   it("unpacks zeromq from the asar for the pdv-server's PDV_ZEROMQ_PATH (§2.1.1)", () => {

@@ -63,9 +63,11 @@ export function handleIpc(channel: string, handler: IpcInvokeHandler): void {
  * Register an `ipcMain.handle` listener WITHOUT the error-normalization
  * wrapper, recording its channel for teardown like {@link handleIpc}.
  *
- * Used only by the invoke-registry mirror in `index.ts`: dispatchInvoke
- * already logs and normalizes errors identically, so wrapping again here
- * would double-log every failure. All other registrations keep using
+ * Used only by the server bridge (`shell/server-bridge.ts`) for its
+ * `SERVER_CHANNELS` forwarders: the pdv-server's `dispatchInvoke` already
+ * logged and normalized the error before it crossed the transport, so
+ * wrapping again here would double-log every failure and alter the
+ * renderer-visible message. All other registrations keep using
  * {@link handleIpc}.
  *
  * @param channel - IPC channel name (a constant from `ipc.ts`).

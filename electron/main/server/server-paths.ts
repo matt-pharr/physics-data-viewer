@@ -7,14 +7,11 @@
  * and the packaged-resources root (`process.resourcesPath`). Server code
  * cannot touch either, so both are injected here once at startup:
  *
- * - **Single-process mode**: `bootstrap.ts` calls {@link initServerPaths}
- *   with the Electron values before any handlers are registered.
- * - **Extracted pdv-server**: the server entry point reads them from the
- *   `PDV_USER_DATA_DIR` / `PDV_RESOURCES_ROOT` environment variables set by
- *   its supervisor.
- *
- * Reads fall back to those environment variables directly, so unit tests
- * (and the server process itself) work without an explicit init call.
+ * In production the values arrive purely as environment variables: the
+ * shell's `server-supervisor.ts` sets `PDV_USER_DATA_DIR` and
+ * `PDV_RESOURCES_ROOT` when it spawns the server, and the getters below
+ * read them directly — no init call is involved. {@link initServerPaths}
+ * exists for tests that need to point this module at a temp directory.
  *
  * This module does NOT create directories or validate that the paths exist —
  * callers keep their existing existence checks (a missing resources root is
