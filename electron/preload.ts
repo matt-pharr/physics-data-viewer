@@ -257,6 +257,15 @@ const api: PDVApi = {
     openIssuesPage: () => invoke(IPC.about.openIssuesPage),
     openDocsPage: () => invoke(IPC.about.openDocsPage),
   },
+  remote: {
+    listHosts: () => invoke(IPC.remote.listHosts),
+    connect: (host) => invoke(IPC.remote.connect, host),
+    respond: (text) => invoke(IPC.remote.respond, text),
+    cancel: () => invoke(IPC.remote.cancel),
+    disconnect: () => invoke(IPC.remote.disconnect),
+    getStatus: () => invoke(IPC.remote.getStatus),
+    onStatus: (cb) => onPush(IPC.push.remoteStatus, cb),
+  },
   updater: {
     checkForUpdates: () => invoke(IPC.updater.checkForUpdates),
     downloadUpdate: () => invoke(IPC.updater.downloadUpdate),

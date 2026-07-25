@@ -431,7 +431,7 @@ async function setup() {
   const localConfig = new LocalConfigStore(
     fsSync.mkdtempSync(path.join(os.tmpdir(), "pdv-index-test-")),
   );
-  await registerIpcHandlers(win, server, localConfig, os.tmpdir(), setAllowClose);
+  await registerIpcHandlers(win, server, localConfig, os.tmpdir(), os.tmpdir(), setAllowClose);
 
   return {
     webContentsSend,

@@ -16,7 +16,8 @@
  * having to model any of it — the bytes simply flow both ways.
  *
  * Responsibilities
- * - Spawn `ssh` under a pty to create a backgrounded ControlMaster.
+ * - Spawn `ssh` under a pty and hold it: the process PDV keeps *is* the
+ *   ControlMaster, for as long as the connection lives.
  * - Stream the auth conversation out for display, and feed the user's
  *   replies back in.
  * - Report success only once the master is independently confirmed usable.
@@ -30,13 +31,13 @@
  *   `ssh-mux.ts`, which is cheaper and far easier to parse.
  * - Decide when to connect, or own connection state.
  *
- * **Success is not detected by scraping prompts, and deliberately not by a
- * sentinel line either.** A pty stream carries terminal escape sequences and
+ * **Success is not detected by scraping prompts, nor by a sentinel line, nor
+ * by an exit status.** A pty stream carries terminal escape sequences and
  * echoes back everything typed into it, which makes any in-band marker
- * fragile in exactly the situation where reliability matters most. Instead
- * `ssh -f` exits zero only after authentication has completed, and PDV then
- * confirms the master answers `-O check` before calling it a success. That
- * is a stronger claim than any marker in the byte stream: it proves the
+ * fragile in exactly the situation where reliability matters most. And the
+ * process is *expected* to keep running, so it exiting is a failure, not a
+ * result. Instead PDV polls `-O check` until the control socket answers.
+ * That is a stronger claim than any marker in the byte stream: it proves the
  * socket is usable, not merely that some text appeared.
  *
  * See Also
@@ -61,8 +62,8 @@ const DEFAULT_OVERALL_TIMEOUT_MS = 180_000;
 /** Default `ConnectTimeout` for the ssh process itself, in seconds. */
 const DEFAULT_CONNECT_TIMEOUT_SECONDS = 90;
 
-/** Default `ControlPersist`, in seconds, for the master PDV creates. */
-const DEFAULT_CONTROL_PERSIST_SECONDS = 600;
+/** How often to ask whether the master socket has appeared. */
+const MASTER_POLL_INTERVAL_MS = 250;
 
 /** The subset of a spawned pty this module uses. */
 export interface PtyProcess {
@@ -97,7 +98,7 @@ export type PtyAuthFailure =
   | "cancelled"
   /** ssh exited non-zero: bad credentials, denied approval, refused host. */
   | "auth-failed"
-  /** ssh exited zero but no usable master appeared. */
+  /** ssh exited without leaving a usable master behind. */
   | "no-master";
 
 /** Outcome of an interactive connect. */
@@ -108,9 +109,12 @@ export interface PtyAuthResult {
   /** Operator-facing explanation, safe to display. */
   message: string;
   /**
-   * Everything ssh printed, for the connect log. This is ssh's own output;
-   * it never contains what the user typed, because prompts are not echoed
-   * by the remote and PDV does not add an echo of its own.
+   * Everything ssh printed, for the connect log.
+   *
+   * Replies given at a secret prompt are stripped from this before it is
+   * recorded: a pty echoes what is written to it, and while ssh disables
+   * echo around its own password prompts, PDV does not rely on the far end
+   * to do that.
    */
   transcript: string;
 }
@@ -124,6 +128,12 @@ export interface PtyMasterSession {
   respond(text: string): void;
   /** Abandon the attempt and reap the ssh process. */
   cancel(): void;
+  /**
+   * Tear down a *successful* connection. The held process is the master, so
+   * this closes every channel riding on it. Callers must call it, or the ssh
+   * process outlives the session.
+   */
+  close(): void;
   /** Settles once the attempt succeeds or fails. Never rejects. */
   readonly result: Promise<PtyAuthResult>;
 }
@@ -136,8 +146,6 @@ export interface EstablishMasterOptions {
   controlPath: string;
   /** `ssh` binary. Defaults to `ssh` on PATH. Injected by tests. */
   sshPath?: string;
-  /** Seconds the master lingers after its last channel closes. */
-  controlPersistSeconds?: number;
   /** Seconds ssh waits for the TCP connection. */
   connectTimeoutSeconds?: number;
   /** Milliseconds for the whole attempt, including human response time. */
@@ -165,6 +173,23 @@ const SECRET_PROMPT_PATTERNS: readonly RegExp[] = [
   /\botp\b\s*[:?]/i,
   /\btoken\b\s*[:?]/i,
 ];
+
+/**
+ * Whether the tail of the stream looks like a prompt awaiting input.
+ *
+ * A prompt is text left on the line with no newline after it — `ssh` has
+ * stopped and is waiting. Used to distinguish "the user must do something"
+ * from "ssh is narrating", so a connection that is merely slow does not
+ * present an input box, and an error message does not look like a question.
+ *
+ * @param recentOutput - The accumulated pty stream.
+ * @returns True when the last line appears to be an unanswered prompt.
+ */
+export function looksLikePrompt(recentOutput: string): boolean {
+  if (isSecretPrompt(recentOutput)) return true;
+  const lastLine = recentOutput.slice(-200).split(/\r?\n/).pop() ?? "";
+  return /[:?]\s*$/.test(lastLine) && lastLine.trim().length > 0;
+}
 
 /**
  * Whether the most recent output is asking for something secret.
@@ -214,24 +239,39 @@ function loadPtyModule(): PtyModule {
 /**
  * Build the argv for the master-establishing ssh invocation.
  *
- * `-f` is what makes success observable: ssh forks to the background only
- * *after* authentication succeeds, so the foreground process exiting zero
- * means the credentials were accepted. `-N` runs no remote command, so
- * nothing about the remote shell — a slow profile, an MOTD, an Lmod banner —
- * can affect whether the connection is judged successful.
+ * The master runs in the **foreground** and PDV holds the process for as
+ * long as the connection lives. The obvious alternative — `ssh -f`, letting
+ * ssh background itself — was tried first and is not reliable: on a host
+ * reached through a `ProxyCommand`, the local proxy helper is a child of
+ * that process, and once ssh forks away the proxy can be orphaned and torn
+ * down, taking the connection with it. Observed exactly that on a host with
+ * a VPN `ProxyCommand`, where the master vanished the instant it was
+ * created, while an otherwise identical connection to a direct host
+ * survived.
+ *
+ * Holding the process instead makes the lifetime explicit: the master and
+ * its proxy live exactly as long as PDV wants them to, and nothing outlives
+ * the app. `ControlPersist=no` is passed for the same reason and must be
+ * explicit — a host config that sets `ControlPersist yes` would otherwise
+ * background the master straight back into the failure above.
+ *
+ * The cost is that a PDV restart re-authenticates. Within one run, a single
+ * sign-in still serves every channel, which is where the pain actually was.
+ *
+ * `-N` runs no remote command, so nothing about the remote shell — a slow
+ * profile, an MOTD, an Lmod banner — can affect the connection.
  *
  * @param options - Host, socket and timeouts.
  * @returns Arguments to pass to `ssh`.
  */
 function buildMasterArgs(options: EstablishMasterOptions): string[] {
   return [
-    "-f",
     "-N",
     "-M",
     "-o",
     `ControlPath=${options.controlPath}`,
     "-o",
-    `ControlPersist=${options.controlPersistSeconds ?? DEFAULT_CONTROL_PERSIST_SECONDS}`,
+    "ControlPersist=no",
     "-o",
     `ConnectTimeout=${options.connectTimeoutSeconds ?? DEFAULT_CONNECT_TIMEOUT_SECONDS}`,
     // A host whose config sets RemoteCommand would otherwise conflict with
@@ -285,6 +325,7 @@ export function establishMasterInteractive(
     return {
       respond: () => {},
       cancel: () => {},
+      close: () => {},
       result: Promise.resolve({
         ok: false,
         failure: "pty-unavailable",
@@ -315,6 +356,7 @@ export function establishMasterInteractive(
     return {
       respond: () => {},
       cancel: () => {},
+      close: () => {},
       result: Promise.resolve({
         ok: false,
         failure: "pty-unavailable",
@@ -337,54 +379,80 @@ export function establishMasterInteractive(
     });
   }, options.overallTimeoutMs ?? DEFAULT_OVERALL_TIMEOUT_MS);
 
+  // A pty echoes what is written to it. `ssh` turns echo off around a real
+  // password prompt, but PDV must not depend on the far end doing that — a
+  // Duo passcode typed at an echoing menu prompt would otherwise be streamed
+  // straight to the renderer and into the transcript. So a reply given at a
+  // secret prompt is remembered just long enough to delete its echo.
+  let pendingEcho: string | null = null;
+
   child.onData((chunk) => {
-    transcript += chunk;
-    options.onOutput?.(chunk);
+    let visible = chunk;
+    if (pendingEcho) {
+      const at = visible.indexOf(pendingEcho);
+      if (at >= 0) {
+        visible = visible.slice(0, at) + visible.slice(at + pendingEcho.length);
+        pendingEcho = null;
+      } else if (visible.includes("\n")) {
+        // The line the echo would have appeared on is over; stop filtering
+        // rather than carrying a stale needle that could clip real output.
+        pendingEcho = null;
+      }
+    }
+    transcript += visible;
+    if (visible) options.onOutput?.(visible);
   });
 
+  // The master runs in the foreground, so it exiting means the attempt is
+  // over — never that it succeeded.
   child.onExit(({ exitCode }) => {
     if (settled) return;
-    if (exitCode !== 0) {
+    if (exitCode === 0) {
       finish({
         ok: false,
-        failure: "auth-failed",
+        failure: "no-master",
         message:
-          `Authentication to ${options.host} failed (ssh exited ${exitCode}). ` +
-          "See the connection log for what ssh reported.",
+          `ssh exited cleanly without leaving a usable connection to ` +
+          `${options.host}. This usually means the host forbids connection sharing.`,
       });
       return;
     }
-    // ssh reported success. Confirm the master is genuinely usable rather
-    // than trusting the exit status alone — this is the claim every later
-    // channel depends on, and it is cheap to verify.
-    void checkMaster({ host: options.host, controlPath: options.controlPath }, muxOptions)
-      .then((state) => {
-        if (state === "alive") {
-          finish({ ok: true, failure: null, message: `Connected to ${options.host}.` });
-          return;
-        }
-        finish({
-          ok: false,
-          failure: "no-master",
-          message:
-            `ssh signed in to ${options.host} but left no usable connection ` +
-            `(control socket reported "${state}"). This usually means the host ` +
-            "forbids connection sharing.",
-        });
-      })
-      .catch(() => {
-        finish({
-          ok: false,
-          failure: "no-master",
-          message: `Could not verify the connection to ${options.host}.`,
-        });
-      });
+    finish({
+      ok: false,
+      failure: "auth-failed",
+      message:
+        `Could not connect to ${options.host} (ssh exited ${exitCode}). ` +
+        "See the connection log for what ssh reported.",
+    });
   });
+
+  // Success is the control socket answering, not anything in the byte stream
+  // and not an exit status. The process is expected to keep running, so
+  // polling is what tells us authentication is behind us.
+  const poll = async (): Promise<void> => {
+    while (!settled) {
+      await new Promise((resolve) => setTimeout(resolve, MASTER_POLL_INTERVAL_MS));
+      if (settled) return;
+      const state = await checkMaster(
+        { host: options.host, controlPath: options.controlPath },
+        muxOptions,
+      );
+      if (state === "alive") {
+        finish({ ok: true, failure: null, message: `Connected to ${options.host}.` });
+        return;
+      }
+    }
+  };
+  void poll();
 
   return {
     respond(text: string): void {
       if (settled) return;
-      child.write(text.endsWith("\n") ? text : `${text}\n`);
+      const reply = text.endsWith("\n") ? text.slice(0, -1) : text;
+      if (reply && isSecretPrompt(transcript)) {
+        pendingEcho = reply;
+      }
+      child.write(`${reply}\n`);
     },
     cancel(): void {
       if (settled) return;
@@ -394,6 +462,12 @@ export function establishMasterInteractive(
         failure: "cancelled",
         message: "Connection cancelled.",
       });
+    },
+    close(): void {
+      // Ends the connection: this process *is* the master, so killing it
+      // closes every channel riding on it and reaps the ProxyCommand helper
+      // with it.
+      child.kill();
     },
     result,
   };

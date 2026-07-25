@@ -4,7 +4,7 @@
  *
  * Emulates the surface `ssh-mux.ts` and `ssh-pty.ts` actually use: `-o
  * key=value` flags, the `-O check` / `-O stop` control commands, master
- * establishment (`-f -N -M`), and `ssh <host> <command>`. In its default exec
+ * establishment (`-N -M`), and `ssh <host> <command>`. In its default exec
  * mode it really runs the command through `/bin/sh` on this machine, and in
  * its prompting auth modes it really reads from the terminal, so the exit
  * sentinel, banner tolerance, exit-code plumbing and pty round trip are all
@@ -18,6 +18,10 @@
  * - FAKE_SSH_MASTER=unconfigured — `-O check` fails the way a host with no
  *   ControlPath does (what a plain `Host` entry answers).
  * - FAKE_SSH_MASTER=refused      — `-O check` reports a socket nothing listens on.
+ * - FAKE_SSH_MASTER=stateful     — the honest one: `-O check` answers "alive"
+ *   only once a master is actually holding the socket, so the absent→alive
+ *   transition PDV polls for really happens. A check with no ControlPath
+ *   still answers like a plain `Host` entry.
  *
  * - FAKE_SSH_EXEC=local     — run the command under /bin/sh (default).
  * - FAKE_SSH_EXEC=banner    — like `local`, but print MOTD noise on both
@@ -31,14 +35,17 @@
  *
  * Master establishment (`-N`) is selected by FAKE_SSH_AUTH:
  *
- * - FAKE_SSH_AUTH=ok      — authenticate silently and exit 0 (default).
+ * - FAKE_SSH_AUTH=hold    — authenticate silently and stay running, as a real
+ *   foreground master does (default).
+ * - FAKE_SSH_AUTH=ok      — authenticate then exit 0 immediately: a master
+ *   that never materialised, which must not count as success.
  * - FAKE_SSH_AUTH=prompt  — ask for a password on the terminal and read the
  *   reply, so a real pty round trip is exercised. Accepts FAKE_SSH_PASSWORD
  *   (default "hunter2").
  * - FAKE_SSH_AUTH=duo     — Duo's stateful two-stage menu, to prove a
  *   multi-prompt exchange works without PDV modelling any of it.
  * - FAKE_SSH_AUTH=fail    — refuse immediately, the way a rejected key does.
- * - FAKE_SSH_AUTH=hang    — never exit, for deadline tests.
+ * - FAKE_SSH_AUTH=hang    — never exit and never authenticate, for deadline tests.
  *
  * - FAKE_SSH_LOG — when set, append one JSON line of argv per invocation, so
  *   tests can assert which flags were passed.
@@ -107,6 +114,23 @@ if (controlCommand) {
       255,
     );
   }
+  if (masterMode === "stateful") {
+    if (!options.ControlPath) {
+      die('No ControlPath specified for "-O" command', 255);
+    }
+    const held = fs.existsSync(options.ControlPath);
+    if (controlCommand === "stop") {
+      if (!held) die(`Control socket connect(${options.ControlPath}): No such file or directory`, 255);
+      fs.rmSync(options.ControlPath, { force: true });
+      process.stderr.write("Exit request sent.\n");
+      process.exit(0);
+    }
+    if (!held) {
+      die(`Control socket connect(${options.ControlPath}): No such file or directory`, 255);
+    }
+    process.stderr.write("Master running (pid=4242)\n");
+    process.exit(0);
+  }
   if (controlCommand === "check") {
     process.stderr.write("Master running (pid=4242)\n");
     process.exit(0);
@@ -120,20 +144,38 @@ if (controlCommand) {
 
 // --- master establishment (-N, the interactive auth path) ------------------
 // Selected by FAKE_SSH_AUTH:
-//   ok      — authenticate silently and exit 0 (default).
+//   hold    — authenticate silently and STAY RUNNING, as a real foreground
+//             master does (default).
+//   ok      — authenticate and exit 0 immediately: a master that never
+//             materialised, which must not be reported as success.
 //   prompt  — ask for a password on the terminal and read the reply, so a
 //             real pty round trip is exercised. Accepts FAKE_SSH_PASSWORD
-//             (default "hunter2"), rejects anything else with exit 5.
+//             (default "hunter2"), rejects anything else.
 //   duo     — like `prompt`, but with Duo's two-stage menu, to prove a
 //             stateful multi-prompt exchange works.
 //   fail    — refuse immediately, the way a rejected key does.
-//   hang    — never exit, for deadline tests.
+//   hang    — never exit and never authenticate, for deadline tests.
 if (createMaster) {
-  const authMode = process.env.FAKE_SSH_AUTH || "ok";
+  const authMode = process.env.FAKE_SSH_AUTH || "hold";
   const expected = process.env.FAKE_SSH_PASSWORD || "hunter2";
 
+  // The real master runs in the foreground for the life of the connection;
+  // exiting would tell the caller the attempt is over. In stateful mode it
+  // also publishes the socket, which is what makes -O check start answering.
+  const hold = () => {
+    if (masterMode === "stateful" && options.ControlPath) {
+      try { fs.writeFileSync(options.ControlPath, String(process.pid)); } catch { /* ignore */ }
+      const cleanup = () => { try { fs.rmSync(options.ControlPath, { force: true }); } catch { /* ignore */ } process.exit(0); };
+      process.on("SIGTERM", cleanup);
+      process.on("SIGHUP", cleanup);
+      process.on("SIGINT", cleanup);
+    }
+    setInterval(() => {}, 1000);
+  };
+
+  if (authMode === "hold") { hold(); return; }
   if (authMode === "ok") process.exit(0);
-  if (authMode === "hang") { setInterval(() => {}, 1000); return; }
+  if (authMode === "hang") { hold(); return; }
   if (authMode === "fail") {
     die("Permission denied (publickey,keyboard-interactive).", 255);
   }
@@ -162,7 +204,7 @@ if (createMaster) {
       ask("Password: ", (answer) => {
         if (answer !== expected) die("Permission denied, please try again.", 255);
         process.stdout.write("Success. Logging you in...\n");
-        process.exit(0);
+        hold();
       });
     });
     return;
@@ -170,7 +212,7 @@ if (createMaster) {
 
   ask("mpharr@flux.pppl.gov's password: ", (answer) => {
     if (answer !== expected) die("Permission denied, please try again.", 255);
-    process.exit(0);
+    hold();
   });
   return;
 }

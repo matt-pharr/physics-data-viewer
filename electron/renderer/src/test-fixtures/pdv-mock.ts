@@ -182,6 +182,23 @@ function buildBase() {
       openIssuesPage: stub<PDVApi["about"]["openIssuesPage"]>(async () => undefined),
       openDocsPage: stub<PDVApi["about"]["openDocsPage"]>(async () => undefined),
     },
+    remote: {
+      listHosts: stub<PDVApi["remote"]["listHosts"]>(async () => []),
+      connect: stub<PDVApi["remote"]["connect"]>(async () => ({
+        ok: false,
+        failure: "not-mocked",
+        message: "",
+      })),
+      respond: stub<PDVApi["remote"]["respond"]>(async () => undefined),
+      cancel: stub<PDVApi["remote"]["cancel"]>(async () => undefined),
+      disconnect: stub<PDVApi["remote"]["disconnect"]>(async () => undefined),
+      getStatus: stub<PDVApi["remote"]["getStatus"]>(async () => ({
+        phase: "idle",
+        host: null,
+        attemptId: null,
+      })),
+      onStatus: subStub<PDVApi["remote"]["onStatus"]>(),
+    },
     updater: {
       checkForUpdates: stub<PDVApi["updater"]["checkForUpdates"]>(async () => undefined),
       downloadUpdate: stub<PDVApi["updater"]["downloadUpdate"]>(async () => undefined),

@@ -125,6 +125,8 @@ import { registerGuiFilesIpcHandlers } from "./ipc-register-gui-files";
 import { registerModuleWindowIpcHandlers } from "./ipc-register-module-windows";
 import { registerGuiEditorIpcHandlers } from "./ipc-register-gui-editor";
 import { registerLaunchersIpcHandlers } from "./ipc-register-launchers";
+import { registerRemoteIpcHandlers } from "./ipc-register-remote";
+import type { RemoteConnectionManager } from "./remote/remote-connection";
 import { listRegisteredInvokeChannels } from "./server/invoke-registry";
 import {
   createBrowserWindowMock,
@@ -284,6 +286,20 @@ function setupAll(): void {
   registerConfigBridge({
     server: { invoke: async () => ({}) } as unknown as ServerHandle,
     localConfig: new LocalConfigStore("/tmp/pdv-coverage-local-config"),
+  });
+  // Injected manager: the real one would harvest ~/.ssh/config and spawn ssh.
+  // This test only asserts that every channel has a handler.
+  registerRemoteIpcHandlers({
+    win: win.win,
+    controlDir: "/tmp/pdv-coverage-ssh-control",
+    manager: {
+      listHosts: async () => [],
+      connect: async () => ({ ok: false, failure: "test", message: "" }),
+      respond: () => {},
+      cancel: () => {},
+      disconnect: async () => {},
+      getStatus: () => ({ phase: "idle" as const, host: null, attemptId: null }),
+    } as unknown as RemoteConnectionManager,
   });
   registerGuiFilesIpcHandlers({ commRouter: commRouter.router });
   registerModuleWindowIpcHandlers({

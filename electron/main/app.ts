@@ -212,6 +212,7 @@ export async function createWindow(
     server,
     localConfig,
     path.join(os.homedir(), ".PDV"),
+    app.getPath("userData"),
     setAllowClose,
   );
 

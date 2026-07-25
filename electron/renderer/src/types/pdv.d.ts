@@ -28,6 +28,14 @@ export interface UpdateStatus {
 /** Script `run(...)` parameter metadata. Canonical: `pdv-protocol.ts`. */
 export type { ScriptParameter } from '../../../main/ipc';
 
+/** Remote-session connection types. Canonical: `main/ipc.ts`. */
+export type {
+  RemoteConnectResult,
+  RemoteHostAlias,
+  RemotePhase,
+  RemoteStatus,
+} from '../../../main/ipc';
+
 /** Tree node descriptor returned by `pdv.tree.list`. Canonical: `pdv-protocol.ts`. */
 export type { NodeDescriptor } from '../../../main/ipc';
 
@@ -1302,6 +1310,17 @@ export interface PDVApi {
     openRepoPage(): Promise<void>;
     openIssuesPage(): Promise<void>;
     openDocsPage(): Promise<void>;
+  };
+  remote: {
+    listHosts(): Promise<import('../../../main/ipc').RemoteHostAlias[]>;
+    connect(host: string): Promise<import('../../../main/ipc').RemoteConnectResult>;
+    respond(text: string): Promise<void>;
+    cancel(): Promise<void>;
+    disconnect(): Promise<void>;
+    getStatus(): Promise<import('../../../main/ipc').RemoteStatus>;
+    onStatus(
+      callback: (status: import('../../../main/ipc').RemoteStatus) => void,
+    ): () => void;
   };
   updater: {
     checkForUpdates(): Promise<void>;

@@ -22,11 +22,18 @@ import { controlPathFor } from "./ssh-mux";
 import {
   establishMasterInteractive,
   isSecretPrompt,
+  looksLikePrompt,
   type PtyModule,
   type PtyProcess,
 } from "./ssh-pty";
 
 const FAKE_SSH = path.join(__dirname, "__fixtures__", "fake-ssh.cjs");
+/**
+ * A binary that does not exist. The injected-pty tests still run the real
+ * master poll, and pointing it here makes each check fail instantly instead
+ * of spawning the machine's actual ssh.
+ */
+const MISSING_SSH = path.join(os.tmpdir(), "pdv-no-such-ssh");
 
 let dir: string;
 const savedEnv: Record<string, string | undefined> = {};
@@ -107,21 +114,44 @@ describe("isSecretPrompt", () => {
   });
 });
 
+describe("looksLikePrompt", () => {
+  it.each([
+    "mpharr@flux.pppl.gov's password: ",
+    "Passcode or option (1-3): ",
+    "Are you sure you want to continue connecting (yes/no)? ",
+  ])("treats %j as awaiting input", (text) => {
+    expect(looksLikePrompt(text)).toBe(true);
+  });
+
+  it.each([
+    "Permission denied, please try again.\n",
+    "Duo two-factor login for mpharr\n\n",
+    "Pushed a login request to your device...\n",
+    "",
+  ])("treats %j as narration, not a question", (text) => {
+    // ssh talking is not ssh asking. Getting this wrong puts an input box in
+    // front of an error message and leaves the user typing into nothing.
+    expect(looksLikePrompt(text)).toBe(false);
+  });
+});
+
 describe("establishMasterInteractive (real pty)", () => {
   it("authenticates a host that needs no prompt", async () => {
-    setEnv("FAKE_SSH_AUTH", "ok");
-    setEnv("FAKE_SSH_MASTER", "alive");
+    setEnv("FAKE_SSH_AUTH", "hold");
+    setEnv("FAKE_SSH_MASTER", "stateful");
     const session = establishMasterInteractive({
       host: "feyn",
       controlPath: controlPathFor("feyn", dir),
       sshPath: FAKE_SSH,
     });
     await expect(session.result).resolves.toMatchObject({ ok: true, failure: null });
+    // The held process *is* the master; leaving it running would leak.
+    session.close();
   }, 30_000);
 
   it("carries a password prompt out and the answer back in", async () => {
     setEnv("FAKE_SSH_AUTH", "prompt");
-    setEnv("FAKE_SSH_MASTER", "alive");
+    setEnv("FAKE_SSH_MASTER", "stateful");
     const chunks: string[] = [];
     const session = establishMasterInteractive({
       host: "flux",
@@ -137,11 +167,12 @@ describe("establishMasterInteractive (real pty)", () => {
     const result = await session.result;
     expect(result).toMatchObject({ ok: true, failure: null });
     expect(result.transcript).toContain("password");
+    session.close();
   }, 30_000);
 
   it("handles Duo's stateful two-stage prompt", async () => {
     setEnv("FAKE_SSH_AUTH", "duo");
-    setEnv("FAKE_SSH_MASTER", "alive");
+    setEnv("FAKE_SSH_MASTER", "stateful");
     let seen = "";
     let answeredMenu = false;
     const session = establishMasterInteractive({
@@ -163,11 +194,12 @@ describe("establishMasterInteractive (real pty)", () => {
     // which is exactly why a pty was chosen over an askpass helper.
     expect(result).toMatchObject({ ok: true, failure: null });
     expect(result.transcript).toContain("Pushed a login request");
+    session.close();
   }, 30_000);
 
   it("reports a wrong password as an auth failure", async () => {
     setEnv("FAKE_SSH_AUTH", "prompt");
-    setEnv("FAKE_SSH_MASTER", "alive");
+    setEnv("FAKE_SSH_MASTER", "stateful");
     const session = establishMasterInteractive({
       host: "flux",
       controlPath: controlPathFor("flux", dir),
@@ -195,6 +227,7 @@ describe("establishMasterInteractive (real pty)", () => {
   }, 30_000);
 
   it("refuses to call it a success when ssh leaves no usable master", async () => {
+    // Authenticates, then exits without publishing a socket.
     setEnv("FAKE_SSH_AUTH", "ok");
     setEnv("FAKE_SSH_MASTER", "absent");
     const session = establishMasterInteractive({
@@ -217,11 +250,13 @@ describe("establishMasterInteractive (injected pty)", () => {
     const session = establishMasterInteractive({
       host: "feyn",
       controlPath: "/tmp/x",
+      sshPath: MISSING_SSH,
       ptyModule: fakeModule(pty),
     });
     session.respond("secret");
     session.respond("already-terminated\n");
     expect(pty.written).toEqual(["secret\n", "already-terminated\n"]);
+    session.cancel();
   });
 
   it("gives up after the overall deadline and reaps the process", async () => {
@@ -229,6 +264,7 @@ describe("establishMasterInteractive (injected pty)", () => {
     const session = establishMasterInteractive({
       host: "feyn",
       controlPath: "/tmp/x",
+      sshPath: MISSING_SSH,
       ptyModule: fakeModule(pty),
       overallTimeoutMs: 50,
     });
@@ -242,6 +278,7 @@ describe("establishMasterInteractive (injected pty)", () => {
     const session = establishMasterInteractive({
       host: "feyn",
       controlPath: "/tmp/x",
+      sshPath: MISSING_SSH,
       ptyModule: fakeModule(pty),
     });
     session.cancel();
@@ -255,6 +292,7 @@ describe("establishMasterInteractive (injected pty)", () => {
     const session = establishMasterInteractive({
       host: "feyn",
       controlPath: "/tmp/x",
+      sshPath: MISSING_SSH,
       ptyModule: fakeModule(pty),
     });
     pty.emit("Permission denied (publickey).\n");
@@ -268,6 +306,7 @@ describe("establishMasterInteractive (injected pty)", () => {
     const session = establishMasterInteractive({
       host: "feyn",
       controlPath: "/tmp/x",
+      sshPath: MISSING_SSH,
       ptyModule: fakeModule(pty),
     });
     session.cancel();

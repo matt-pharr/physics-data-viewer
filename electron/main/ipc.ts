@@ -281,6 +281,18 @@ export const IPC = {
      */
     envActivity: "pdv.environment.envActivity",
     updateStatus: "pdv.updater.status",
+    /**
+     * Shell → renderer. The live state of a remote connection attempt:
+     * streamed ssh output, prompt masking, and the final verdict.
+     *
+     * Deliberately not folded into {@link IPCChannels.push.progress}, which
+     * is a *server*-originated channel whose `operation` is a closed
+     * `"save" | "load"` union. A connection attempt happens before any
+     * server exists to originate a push, so it needs a shell-originated
+     * channel — and this is also where remote bootstrap progress (uploading
+     * and installing the server bundle) belongs, for the same reason.
+     */
+    remoteStatus: "pdv.remote.status",
     requestClose: "pdv.app.requestClose",
     autosaveTrigger: "pdv.autosave.trigger",
     /**
@@ -398,6 +410,33 @@ export const IPC = {
     /** Bootstrap juliaup via the official installer script, streamed (§10.7.5). */
     juliaupInstall: "environment:juliaupInstall",
   },
+  /**
+   * Remote-session connection control (ARCHITECTURE.md §11.7).
+   *
+   * These are shell channels, and necessarily so: they establish and tear
+   * down the ssh connection that a remote pdv-server is reached *through*,
+   * so they cannot be served by the very session they are setting up. Local
+   * mode simply never calls them.
+   *
+   * Note the split of responsibility — these channels own the *connection*,
+   * while everything a session does once connected keeps riding the
+   * existing `SERVER_CHANNELS` unchanged, through whichever `ServerHandle`
+   * is active. There is no second protocol for remote work.
+   */
+  remote: {
+    /** Host aliases harvested from `~/.ssh/config`, for the picker. */
+    listHosts: "remote:listHosts",
+    /** Begin (or reuse) a connection to a host. Progress arrives via push. */
+    connect: "remote:connect",
+    /** Answer the prompt currently displayed by an in-flight connect. */
+    respond: "remote:respond",
+    /** Abandon the in-flight connect. */
+    cancel: "remote:cancel",
+    /** Drop the connection and stop the ControlMaster PDV owns. */
+    disconnect: "remote:disconnect",
+    /** Current connection state, for renderer (re)hydration. */
+    getStatus: "remote:getStatus",
+  },
   /** Native file/directory picker channels. */
   files: {
     pickExecutable: "files:pickExecutable",
@@ -427,6 +466,9 @@ export const SHELL_CHANNELS: readonly string[] = [
   ...Object.values(IPC.updater),
   ...Object.values(IPC.themes),
   ...Object.values(IPC.files),
+  // The ssh client lives in the shell. These set up the connection a remote
+  // session is reached through, so they can never be served by that session.
+  ...Object.values(IPC.remote),
   ...Object.values(IPC.app),
   ...Object.values(IPC.launchers),
   ...Object.values(IPC.moduleWindows),
@@ -501,6 +543,7 @@ export const SHELL_PUSH_CHANNELS: readonly string[] = [
   IPC.push.menuAction,
   IPC.push.chromeStateChanged,
   IPC.push.updateStatus,
+  IPC.push.remoteStatus,
   IPC.push.requestClose,
   IPC.push.moduleExecuteRequest,
 ];
@@ -549,6 +592,81 @@ export const INTERNAL_CHANNELS = {
 
 // Re-export for preload and renderer use.
 export type { ExecuteOutputChunk };
+
+// ---------------------------------------------------------------------------
+// Remote session types
+// ---------------------------------------------------------------------------
+
+/**
+ * A host alias offered by the connect picker.
+ *
+ * `hostName`/`user` are display hints harvested from the same `Host` block
+ * and are frequently absent, because PDV deliberately does not implement
+ * ssh_config inheritance. Never build a connection from them — `alias` is
+ * what gets handed to `ssh`, which resolves the rest itself.
+ */
+export interface RemoteHostAlias {
+  alias: string;
+  hostName: string | null;
+  user: string | null;
+}
+
+/** Where a connection attempt currently stands. */
+export type RemotePhase =
+  /** No connection and no attempt in flight. */
+  | "idle"
+  /** Contacting the host; nothing is being asked of the user yet. */
+  | "connecting"
+  /** ssh is waiting on the user — a passphrase, a Duo choice, a push. */
+  | "prompting"
+  /** A ControlMaster is up and usable. */
+  | "connected"
+  /** The attempt ended without a usable connection. */
+  | "failed";
+
+/**
+ * Live state of the remote connection, pushed on
+ * {@link IPCChannels.push.remoteStatus}.
+ *
+ * `output` carries ssh's own bytes for display. It never contains anything
+ * the user typed: replies go straight to the pty and are not echoed back
+ * here, which is what keeps a password out of the renderer, out of logs,
+ * and out of any screenshot attached to a bug report.
+ */
+export interface RemoteStatus {
+  phase: RemotePhase;
+  /** The host this state refers to, or null when idle. */
+  host: string | null;
+  /** Identifies the attempt, so a stale push cannot drive current UI. */
+  attemptId: string | null;
+  /**
+   * The machine that actually answered, when known.
+   *
+   * A load-balanced alias resolves to one of several nodes, and everything
+   * multiplexes over the single connection that reached it — so a session is
+   * pinned to that node. Surfacing it lets a reconnect that lands elsewhere
+   * be recognised, instead of showing up later as missing state.
+   */
+  node?: string | null;
+  /** Incremental ssh output to append to the connection log. */
+  output?: string;
+  /**
+   * True when the prompt on screen is asking for something secret and the
+   * input field must be masked. Deliberately eager — masking an innocuous
+   * prompt costs nothing, failing to mask a real one puts a password on screen.
+   */
+  secret?: boolean;
+  /** Human-readable explanation, set on `connected` and `failed`. */
+  message?: string;
+}
+
+/** Result of {@link PDVApi.remote.connect}. */
+export interface RemoteConnectResult {
+  ok: boolean;
+  /** Set when `ok` is false; one of the failure kinds from the ssh layer. */
+  failure: string | null;
+  message: string;
+}
 
 // ---------------------------------------------------------------------------
 // Kernel request/response helper types
@@ -2894,6 +3012,29 @@ export interface PDVApi {
     openIssuesPage(): Promise<void>;
     /** Open the docs site for the running app version in the user's browser. */
     openDocsPage(): Promise<void>;
+  };
+
+  /** Remote-session connection control (ARCHITECTURE.md §11.7). */
+  remote: {
+    /** Host aliases from `~/.ssh/config`, for the connect picker. */
+    listHosts(): Promise<RemoteHostAlias[]>;
+    /**
+     * Connect to a host, reusing an existing ControlMaster when there is
+     * one. Resolves when the attempt settles; watch
+     * {@link PDVApi.remote.onStatus} for prompts and streamed output while
+     * it is in flight.
+     */
+    connect(host: string): Promise<RemoteConnectResult>;
+    /** Answer the prompt currently on screen. */
+    respond(text: string): Promise<void>;
+    /** Abandon the in-flight attempt. */
+    cancel(): Promise<void>;
+    /** Disconnect and stop the ControlMaster PDV owns. */
+    disconnect(): Promise<void>;
+    /** Current state, for hydrating a freshly loaded renderer. */
+    getStatus(): Promise<RemoteStatus>;
+    /** Subscribe to connection state and streamed ssh output. */
+    onStatus(callback: (status: RemoteStatus) => void): () => void;
   };
 
   /** App auto-update operations. */

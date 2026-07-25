@@ -30,6 +30,7 @@ import { registerAppStateIpcHandlers } from "./ipc-register-app-state";
 import type { LauncherContext } from "./ipc-register-launchers";
 import { registerGuiEditorIpcHandlers } from "./ipc-register-gui-editor";
 import { registerLaunchersIpcHandlers } from "./ipc-register-launchers";
+import { registerRemoteIpcHandlers } from "./ipc-register-remote";
 import { registerModuleWindowIpcHandlers } from "./ipc-register-module-windows";
 import { removeAllIpcHandlers } from "./ipc-registry";
 import { ModuleWindowManager } from "./module-window-manager";
@@ -55,6 +56,8 @@ import type { ServerHandle } from "./shell/server-supervisor";
  * @param server - Handle to the session's pdv-server.
  * @param localConfig - This machine's half of the config (theme, launchers, …).
  * @param pdvDir - `~/.PDV` root for themes/state paths.
+ * @param userDataDir - Electron `userData` root, for shell-owned runtime
+ *   artifacts that must not live in the server-owned `~/.PDV`.
  * @param setAllowClose - Flips the close-guard flag in `app.ts`.
  * @returns The light session-reset callback, called on renderer reloads.
  * @throws {Error} When the server is not running (session reset fails).
@@ -64,6 +67,7 @@ export async function registerIpcHandlers(
   server: ServerHandle,
   localConfig: LocalConfigStore,
   pdvDir: string,
+  userDataDir: string,
   setAllowClose: (allow: boolean) => void
 ): Promise<() => void> {
   unregisterIpcHandlers();
@@ -113,6 +117,11 @@ export async function registerIpcHandlers(
     setAllowClose,
     updateCheckStamp,
   });
+
+  // Connection control only. Establishing an ssh connection and running a
+  // session over it are separate steps: nothing here swaps the active
+  // ServerHandle, so local mode is unaffected by its presence.
+  registerRemoteIpcHandlers({ win, controlDir: path.join(userDataDir, "ssh-control") });
 
   registerModuleWindowIpcHandlers({
     moduleWindowManager,
