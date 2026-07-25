@@ -44,41 +44,89 @@ The defining characteristic that separates PDV from a Jupyter notebook is the **
 
 ## 2. Process Model
 
-PDV uses the standard Electron three-process architecture:
+PDV runs four processes: the Electron shell (main process), the renderer,
+the **pdv-server**, and the kernel. The pdv-server is a plain Node child
+process (the Electron binary re-executed with `ELECTRON_RUN_AS_NODE=1`)
+that owns every session concern — kernels, the comm router, project
+save/load, configuration, and the MCP server. The shell owns only
+window/OS concerns and forwards session traffic over a newline-delimited
+JSON stdio RPC transport. There is one code path: local mode already runs
+through the extracted server, so a future remote session only swaps the
+transport (SSH instead of a local child), not the logic.
 
 ```
-┌─────────────────────────────────────────────────────┐
-│                   Electron App                      │
-│                                                     │
-│  ┌──────────────┐        ┌────────────────────────┐ │
-│  │ Main Process │◄──IPC─►│ Renderer Process       │ │
-│  │ (Node.js)    │        │ (React / TypeScript)   │ │
-│  │              │        │                        │ │
-│  │ - Kernel mgmt│        │ - Tree panel           │ │
-│  │ - IPC handlers        │ - Code Cell            │ │
-│  │ - Filesystem │        │ - Console              │ │
-│  │ - Config     │        │ - Namespace panel      │ │
-│  │ - Comm router│        │ - Settings / dialogs   │ │
-│  └──────┬───────┘        └────────────────────────┘ │
-│         │ ZeroMQ                                    │
-│         ▼                                           │
-│  ┌──────────────┐                                   │
-│  │ Kernel       │                                   │
-│  │ (subprocess) │                                   │
-│  │              │                                   │
-│  │ ipykernel +  │                                   │
-│  │ pdv-python   │                                   │
-│  └──────────────┘                                   │
-└─────────────────────────────────────────────────────┘
+┌───────────────────────────────────────────────────────────────┐
+│                        Electron App                           │
+│                                                               │
+│  ┌────────────────┐          ┌────────────────────────┐       │
+│  │ Shell (Main)   │◄──IPC───►│ Renderer Process       │       │
+│  │                │          │ (React / TypeScript)   │       │
+│  │ - Windows/menu │          │                        │       │
+│  │ - Native dialogs          │ - Tree panel           │       │
+│  │ - Updater      │          │ - Code Cell            │       │
+│  │ - Launchers    │          │ - Console              │       │
+│  │ - Server bridge│          │ - Namespace panel      │       │
+│  └──────┬─────────┘          └────────────────────────┘       │
+│         │ stdio RPC (JSON lines: invoke / response / push)    │
+│         ▼                                                     │
+│  ┌────────────────┐                                           │
+│  │ pdv-server     │  plain Node (ELECTRON_RUN_AS_NODE=1)      │
+│  │                │                                           │
+│  │ - Kernel mgmt  │                                           │
+│  │ - Comm router  │                                           │
+│  │ - Project/save │                                           │
+│  │ - Config       │                                           │
+│  │ - MCP server   │                                           │
+│  └──────┬─────────┘                                           │
+│         │ ZeroMQ (loopback)                                   │
+│         ▼                                                     │
+│  ┌────────────────┐                                           │
+│  │ Kernel         │                                           │
+│  │ (subprocess)   │                                           │
+│  │ ipykernel +    │                                           │
+│  │ pdv-python     │                                           │
+│  └────────────────┘                                           │
+└───────────────────────────────────────────────────────────────┘
 ```
 
-### 2.1 Main Process Responsibilities
+### 2.1 Shell (Main Process) Responsibilities
+- Create and manage BrowserWindows, menus, native dialogs, and the updater
+- Spawn and supervise the pdv-server child (`main/shell/server-supervisor.ts`):
+  hello handshake with exact version check, ping liveness, crash
+  restart offer, graceful shutdown chain (`pdv.rpc.shutdown` → SIGTERM →
+  SIGKILL)
+- Bridge every `SERVER_CHANNELS` invoke from the renderer to the server
+  and fan server pushes out to windows (`main/shell/server-bridge.ts`)
+- Show native confirmation dialogs on the server's behalf (reverse RPC:
+  `pdv.rpc.confirmRequest` push → dialog → `pdv.rpc.confirmResponse`)
+- Launch local external programs (editor, terminal, AI agent)
+- Own custom-theme storage (`~/.PDV/themes`, the `themes.*` channels) — the
+  window's background color is applied before the renderer loads, and
+  themes stay local even when a future session runs on a remote host
+
+### 2.1.1 pdv-server Responsibilities
 - Spawn and manage kernel subprocess(es) via ZeroMQ (Jupyter Messaging Protocol)
 - Route PDV comm messages between kernel and renderer
 - Create and manage the working directory
 - Coordinate project save and load
-- Own app configuration and theme persistence
+- Own app configuration (the single `ConfigStore`; the shell reads config
+  asynchronously over the transport)
+- Run the MCP server for AI agent integration (§15)
 - Enforce all filesystem security (path traversal checks, sandboxing)
+
+**Packaged layout.** In development the supervisor runs the tsc output
+directly (`dist/main/server/server-main.js`). Packaged builds instead ship a
+single esbuild bundle, produced by `npm run build:server` into
+`dist/server-bundle/pdv-server.cjs` and placed at
+`<Resources>/pdv-server/pdv-server.cjs` via electron-builder's
+`extraResources` — it must be a real file on disk because the child runs
+under plain Node (`ELECTRON_RUN_AS_NODE=1`), which cannot `require()` from
+inside the asar archive. The bundle externalizes `zeromq`; the supervisor
+points the server at the asar-unpacked copy through the `PDV_ZEROMQ_PATH`
+environment variable (resolved with `createRequire` in `kernel-manager.ts`).
+Everything on zeromq's runtime require path (`zeromq`, `cmake-ts`,
+`node-addon-api`) must therefore stay in `asarUnpack`;
+`main/electron-builder-config.test.ts` guards this layout against drift.
 
 ### 2.2 Renderer Process Responsibilities
 - Display and interact with the Tree panel
@@ -1972,13 +2020,45 @@ A fourth layer is **tree panel shortcuts**. The Tree component has its own `onKe
 
 This separation exists because Electron's native menu accelerators cannot be updated at runtime. If a customizable shortcut were shown in a menu, the displayed hint would become stale when the user changes the binding. By keeping menu shortcuts fixed and renderer shortcuts customizable, both systems stay correct.
 
-### 11.4 Message Routing in the Main Process
+### 11.4 Message Routing: Shell ⇄ pdv-server ⇄ Kernel
 
-The main process uses two routers to communicate with the kernel:
+Every invoke channel is owned by exactly one process. The partition lives
+in `ipc.ts`: `SHELL_CHANNELS` (window chrome, menus, native pickers,
+updater, themes, launchers, child windows, `script.edit`) are handled in
+the Electron shell; `SERVER_CHANNELS` (kernels, tree, namespace, script
+run, notes, modules, project, config, autosave, environment, MCP status,
+cells) are handled by the pdv-server core and reach it through the shell's
+server bridge. A unit test (`channel-partition.test.ts`) enforces that the
+two sets exactly partition the surface, that every push channel is
+classified as shell- or server-originated, and that `INTERNAL_CHANNELS`
+stays disjoint from both. Pushes that child windows also need (module
+windows, GUI editor/viewer) are listed in `BROADCAST_PUSH_CHANNELS`: the
+server emits each such push exactly once and the shell's bridge fans it
+out, so the fan-out policy lives in one place rather than at every emit
+site.
+
+**The stdio transport** (`main/transport/`) carries `ipc.ts` channel names
+verbatim over newline-delimited JSON: `{id, channel, args}` requests,
+`{id, result|error}` responses, and `{event, payload, seq}` pushes, with a
+reserved `pdv.rpc.*` namespace for transport-internal traffic (hello,
+ping, shutdown, sessionReset, the reverse-RPC confirm pair, and the
+close-child-windows request). Server-side rejections are serialized as
+`{message, name, stack}` and rethrown in the shell with the same message,
+so renderer-visible error text is identical to a direct handler's. The
+server's stdout is protocol-only (its `console.*` is rebound to stderr as
+the process's first statement); its stderr is relayed by the supervisor
+prefixed `[pdv-server]`. A small `pdv.internal.*` channel set (declared in
+`ipc.ts` as `INTERNAL_CHANNELS`) serves shell-only session accessors
+(launcher context, tree-file resolution, system-resume forwarding, the
+light renderer-reload reset) and is never exposed to the preload.
+Ordering between shell-originated and server-originated pushes is not
+guaranteed (it never was between independent emitters).
+
+Within the pdv-server, two routers communicate with the kernel:
 
 **CommRouter** (`comm-router.ts`) — handles all write operations and push notifications over the Jupyter comm channel. Listens on `iopub` for incoming messages:
 - If `in_reply_to` matches a pending request: resolve that request's promise
-- If `in_reply_to` is null (push notification): forward to the renderer via `BrowserWindow.webContents.send()`
+- If `in_reply_to` is null (push notification): forward to the renderer via the connection's push sender (the shell bridge relays it to `BrowserWindow.webContents.send()`)
 
 **QueryRouter** (`query-router.ts`) — handles read-only tree and namespace queries over the dedicated query socket (ZMQ REQ/REP). Provides a `request()` method with the same PDV envelope format as CommRouter. IPC handlers for `tree:list`, `tree:get`, `namespace:query`, `namespace:inspect`, and `tree.resolve_file` try the QueryRouter first and fall back to CommRouter on failure. This allows tree browsing and namespace inspection during script execution.
 
@@ -2093,10 +2173,26 @@ electron/
     tsconfig.json
     preload.ts                  ← window.pdv API bridge
     main/
-        bootstrap.ts            ← Electron app entry point and singleton guard
-        index.ts                ← IPC handler registration hub, push forwarding
-        ipc.ts                  ← ALL IPC channel names and TypeScript types
+        bootstrap.ts            ← Electron app entry point; starts the pdv-server supervisor
+        index.ts                ← Shell IPC hub: shell registrars + server bridge registration
+        ipc.ts                  ← ALL IPC channel names/types + SHELL/SERVER channel partition
         pdv-protocol.ts         ← PDV comm protocol envelope types, message type constants, version checks
+        shell/
+            server-supervisor.ts ← Spawns/supervises the pdv-server child (hello, ping, crash, shutdown)
+            server-bridge.ts     ← Forwards SERVER_CHANNELS invokes over the transport; push fan-out; reverse-RPC confirm dialog
+        server/
+            server-main.ts      ← pdv-server CLI entry (`serve --stdio`, plain Node)
+            wire.ts             ← pdv-server core assembly: session state + server registrars + MCP
+            invoke-registry.ts  ← Electron-free invoke handler registry (server channels)
+            shell-confirm.ts    ← Reverse-RPC confirm broker (server side)
+            confirm.ts          ← Injected ConfirmFn/ConfirmOptions contract
+            server-paths.ts     ← userData/resources roots from env (extracted process) or injection
+            server-files.ts     ← List of server-destined files (electron-import guard test)
+        transport/
+            protocol.ts         ← RPC envelope types + reserved pdv.rpc.* channels
+            line-codec.ts       ← Newline-delimited JSON encoder/decoder with backpressure
+            rpc-client.ts       ← Shell-side transport client (correlation, hello, ping)
+            rpc-server.ts       ← Server-side transport endpoint (dispatch, push seq)
         kernel-manager.ts       ← Kernel process lifecycle, ZeroMQ socket management
         kernel-session.ts       ← Kernel bootstrap/init handshake helpers (pdv.ready → pdv.init)
         kernel-error-parser.ts  ← Traceback/error parsing for execution errors
@@ -2480,11 +2576,11 @@ The mental model for the tool surface follows from one principle: **PDV exposes 
 
 ### 15.2 The Server
 
-- **Process.** The MCP server runs inside the Electron **main process**. It reaches the kernel through the existing `CommRouter` / `QueryRouter` (§3) and `KernelManager.execute` (§9) entry points, exactly as the IPC handlers do. It introduces no new transport to the kernel.
+- **Process.** The MCP server runs inside the **pdv-server** process (§2.1.1), constructed by `server/wire.ts` and started from `server/server-main.ts`. Every dependency it needs — the managers, the tree-create and generation hooks — is a server-side object, so it sits naturally on that side of the transport. It reaches the kernel through the existing `CommRouter` / `QueryRouter` (§3) and `KernelManager.execute` (§9) entry points, exactly as the IPC handlers do, and introduces no new transport to the kernel. Its two renderer-bound edges ride the shell⇄server transport with no protocol additions: cell-RPC's outbound messages are ordinary push channels, and its reply arrives on the `cells.respond` invoke channel. The shell reads `mcp.getStatus` over the bridge like any other server channel. Remote sessions simply do not start MCP — it stays local-only.
 - **Transport.** Streamable HTTP, bound to loopback (`127.0.0.1`) only. Stdio is rejected: the server must talk to an *already-running* PDV instance with an open project, which a stdio-spawned process cannot.
 - **Dependency.** The official `@modelcontextprotocol/sdk` package. This is the one new runtime dependency; hand-rolling the protocol would be strictly more long-term maintenance.
 - **Lifecycle.** The server starts on app launch and stops on quit — its lifetime is the **app's**, not the project's. The listening port is chosen dynamically (a default, with fallback on collision) and surfaced in Settings (§15.10); it is never hardcoded.
-- **Not a global singleton.** The server is owned by a project/window session. Today PDV exposes one window, so there is one server instance and one port. When multi-window lands, each window owns its own server instance on its own port, and the user connects an agent to the specific window they want. The server instance is destined to live on the future `Session` abstraction, alongside the autosave timer; until then it is main-process-owned but encapsulated so the move is mechanical. No code may assume a single global server.
+- **Not a global singleton.** The server is owned by a project/window session. Today PDV exposes one window, so there is one server instance and one port. When multi-window lands, each window owns its own server instance on its own port, and the user connects an agent to the specific window they want. The server instance is destined to live on the future `Session` abstraction, alongside the autosave timer; until then it is a pdv-server-owned singleton (`wire.ts` keeps it across window re-creation and re-registers only its invoke channels), reached through module-scoped trampoline hooks so a re-wire cannot leave it holding a stale session's closures. No code may assume a single global server.
 
 ### 15.3 Session Binding and Staleness
 

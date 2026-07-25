@@ -17,8 +17,8 @@ import { randomUUID } from "node:crypto";
 import * as fs from "fs/promises";
 import * as path from "path";
 
-import { app, BrowserWindow } from "electron";
-import { handleIpc } from "./ipc-registry";
+import { handleInvoke, type PushSender } from "./server/invoke-registry";
+import { getUserDataDir } from "./server/server-paths";
 
 import { CommRouter } from "./comm-router";
 import { HandlerInvokeTracker } from "./handler-invoke-tracker";
@@ -102,7 +102,8 @@ export function removeKernelBootOutputListener(): void {
 
 
 interface RegisterKernelIpcHandlersOptions {
-  win: BrowserWindow;
+  /** Renderer-push sender (no-op once the window is gone). */
+  push: PushSender;
   kernelManager: KernelManager;
   commRouter: CommRouter;
   queryRouter: QueryRouter;
@@ -211,7 +212,7 @@ export function registerKernelIpcHandlers(
   options: RegisterKernelIpcHandlersOptions
 ): void {
   const {
-    win,
+    push,
     kernelManager,
     commRouter,
     queryRouter,
@@ -320,7 +321,7 @@ export function registerKernelIpcHandlers(
       }
       const result = await materializeUvEnvironment(workingDir, {
         pythonVersion,
-        win,
+        push,
         pushChannel: IPC.push.envActivity,
         binaryPath: getUvBinaryPath(),
       });
@@ -411,7 +412,7 @@ export function registerKernelIpcHandlers(
       const controller = new AbortController();
       const instantiate = needsInstantiate
         ? instantiateJuliaEnvironment(workingDir, juliaPath, {
-            win,
+            push,
             pushChannel: IPC.push.envActivity,
             signal: controller.signal,
             // New-project initial packages (§10.6.5): recorded into the
@@ -438,8 +439,7 @@ export function registerKernelIpcHandlers(
   // to a destroyed webContents.
   removeKernelMemoryListener();
   const memoryListener = (kernelId: string, rssBytes: number): void => {
-    if (win.isDestroyed()) return;
-    win.webContents.send(IPC.push.kernelMemory, {
+    push(IPC.push.kernelMemory, {
       kernelId,
       rssBytes,
       timestamp: Date.now(),
@@ -459,8 +459,8 @@ export function registerKernelIpcHandlers(
   let forwardJuliaBootOutput = false;
   const sendBootChunk = (data: string): void => {
     const plain = plainStreamText(data);
-    if (plain.length === 0 || win.isDestroyed()) return;
-    win.webContents.send(IPC.push.envActivity, { stream: "stdout", data: plain });
+    if (plain.length === 0) return;
+    push(IPC.push.envActivity, { stream: "stdout", data: plain });
   };
   removeKernelBootOutputListener();
   const bootOutputListener = (
@@ -527,7 +527,6 @@ export function registerKernelIpcHandlers(
             : null;
       if (!image) return;
       if (handlerInvokeTracker.emitOutput({ type: "image", image })) return;
-      if (win.isDestroyed()) return;
       // Fallback for figures with no invoke in flight. Reuse the
       // executeBegin/Output/Finish contract so the renderer needs no new
       // channel: the begin push seeds a console entry, the image chunk
@@ -536,9 +535,9 @@ export function registerKernelIpcHandlers(
       const executionId = `display-${randomUUID()}`;
       const origin = { kind: "unknown" as const, label: "Plot" };
       const timestamp = Date.now();
-      win.webContents.send(IPC.push.executeBegin, { executionId, code: "", origin, timestamp });
-      win.webContents.send(IPC.push.executeOutput, { executionId, type: "image", image });
-      win.webContents.send(IPC.push.executeFinish, { executionId, duration: 0 });
+      push(IPC.push.executeBegin, { executionId, code: "", origin, timestamp });
+      push(IPC.push.executeOutput, { executionId, type: "image", image });
+      push(IPC.push.executeFinish, { executionId, duration: 0 });
     });
 
     const onCrash = async (crashedId: string): Promise<void> => {
@@ -553,7 +552,7 @@ export function registerKernelIpcHandlers(
       // `session.lock` surfaces it on the welcome screen as a recoverable
       // session (§11.6).
       if (getActiveKernelId() === crashedId) setActiveKernelId(null);
-      win.webContents.send(IPC.push.kernelCrashed, { kernelId: crashedId });
+      push(IPC.push.kernelCrashed, { kernelId: crashedId });
     };
     crashHandlers.set(kernelId, onCrash);
     kernelManager.on("kernel:crashed", onCrash);
@@ -603,11 +602,11 @@ export function registerKernelIpcHandlers(
     }
   }
 
-  handleIpc(IPC.kernels.list, async () => {
+  handleInvoke(IPC.kernels.list, async () => {
     return kernelManager.list();
   });
 
-  handleIpc(IPC.kernels.start, async (_event, spec, uvContext) => {
+  handleInvoke(IPC.kernels.start, async (_ctx, spec, uvContext) => {
     return withStartLock("kernels.start", async () => {
     let requestedSpec = spec as Parameters<KernelManager["start"]>[0];
     const requestedLanguage = requestedSpec?.language ?? "python";
@@ -672,13 +671,11 @@ export function registerKernelIpcHandlers(
       // The environment is materialized — everything from here is kernel
       // boot. Tell the EnvSyncModal so it can retitle to "Starting
       // ipykernel…" (empty data: this is a stage marker, not output).
-      if (!win.isDestroyed()) {
-        win.webContents.send(IPC.push.envActivity, {
-          stream: "stdout",
-          data: "",
-          stage: "kernel-boot",
-        });
-      }
+      push(IPC.push.envActivity, {
+        stream: "stdout",
+        data: "",
+        stage: "kernel-boot",
+      });
     } else if (requestedLanguage === "python") {
       const pythonPath =
         requestedSpec?.env?.PYTHON_PATH ??
@@ -706,8 +703,8 @@ export function registerKernelIpcHandlers(
         // install into its default env when needed — streaming into the
         // launch overlay, then spawn that channel's real binary.
         juliaPath = await ensureJuliaVersionReady(uv.juliaVersion, {
-          stagingDir: path.join(app.getPath("userData"), "pdv-julia"),
-          win,
+          stagingDir: path.join(getUserDataDir(), "pdv-julia"),
+          push,
           pushChannel: IPC.push.envActivity,
         });
         requestedSpec = {
@@ -759,8 +756,8 @@ export function registerKernelIpcHandlers(
         // instantiate finishes — the kernel boot it overlapped may still be
         // running (empty data: a stage marker, not output).
         pkgInstantiate = pkgEnv.instantiate?.then((res) => {
-          if (res.success && !win.isDestroyed()) {
-            win.webContents.send(IPC.push.envActivity, {
+          if (res.success) {
+            push(IPC.push.envActivity, {
               stream: "stdout",
               data: "",
               stage: "kernel-boot",
@@ -853,7 +850,7 @@ export function registerKernelIpcHandlers(
     });
   });
 
-  handleIpc(IPC.kernels.stop, async (_event, kernelId: string) => {
+  handleInvoke(IPC.kernels.stop, async (_ctx, kernelId: string) => {
     return withStartLock("kernels.stop", async () => {
       await cleanupKernelWorkingDir(projectManager, kernelManager, kernelId, kernelWorkingDirs, crashHandlers);
       kernelEnvMeta.delete(kernelId);
@@ -868,7 +865,7 @@ export function registerKernelIpcHandlers(
     });
   });
 
-  handleIpc(IPC.kernels.execute, async (event, kernelId, request) => {
+  handleInvoke(IPC.kernels.execute, async (ctx, kernelId, request) => {
     const id = kernelId as string;
     const workingDir = kernelWorkingDirs.get(id);
     const transcript = workingDir ? new TranscriptWriter(workingDir) : null;
@@ -877,7 +874,7 @@ export function registerKernelIpcHandlers(
       transcript,
       id,
       request as Parameters<KernelManager["execute"]>[1],
-      (chunk) => event.sender.send(IPC.push.executeOutput, chunk),
+      (chunk) => ctx.push(IPC.push.executeOutput, chunk),
       // The console gets every chunk via the executeOutput push above;
       // returning them again in the result double-prints when the push
       // loses the race against the invoke resolution.
@@ -885,12 +882,12 @@ export function registerKernelIpcHandlers(
     );
   });
 
-  handleIpc(IPC.kernels.interrupt, async (_event, kernelId: string) => {
+  handleInvoke(IPC.kernels.interrupt, async (_ctx, kernelId: string) => {
     await kernelManager.interrupt(kernelId);
     return true;
   });
 
-  handleIpc(IPC.kernels.restart, async (_event, kernelId: string) => {
+  handleInvoke(IPC.kernels.restart, async (_ctx, kernelId: string) => {
     return withStartLock("kernels.restart", async () => {
     // Snapshot the tree while the old server is still alive so a restart
     // never loses in-memory work — for saved projects the snapshot lands
@@ -1164,7 +1161,7 @@ export function registerKernelIpcHandlers(
     // recipe as the project-open recovery path in ipc-register-project).
     const activeProjectDir = getActiveProjectDir();
     if (activeProjectDir) {
-      win.webContents.send(IPC.push.projectReloading, { status: "reloading" });
+      push(IPC.push.projectReloading, { status: "reloading" });
       try {
         const autosaveDir = autosaveDirFor(activeProjectDir);
         const restoreFromAutosave =
@@ -1186,7 +1183,7 @@ export function registerKernelIpcHandlers(
         restoredFromAutosave = restoreFromAutosave;
         await setupModuleNamespaces(restarted.id);
       } finally {
-        win.webContents.send(IPC.push.projectReloading, { status: "ready" });
+        push(IPC.push.projectReloading, { status: "ready" });
       }
     } else {
       await setupModuleNamespaces(restarted.id);
@@ -1194,7 +1191,7 @@ export function registerKernelIpcHandlers(
       // session. Failure is non-fatal — the old dir stays on disk and the
       // welcome screen offers it as a recoverable session next launch.
       if (preserveOldDir && oldWorkingDir) {
-        win.webContents.send(IPC.push.projectReloading, { status: "reloading" });
+        push(IPC.push.projectReloading, { status: "reloading" });
         try {
           await recoverUnsavedAfterRestart(oldWorkingDir);
           restoredFromAutosave = true;
@@ -1204,7 +1201,7 @@ export function registerKernelIpcHandlers(
             err
           );
         } finally {
-          win.webContents.send(IPC.push.projectReloading, { status: "ready" });
+          push(IPC.push.projectReloading, { status: "ready" });
         }
       }
     }
@@ -1214,23 +1211,23 @@ export function registerKernelIpcHandlers(
     });
   });
 
-  handleIpc(
+  handleInvoke(
     IPC.kernels.complete,
-    async (_event, kernelId: string, code: string, cursorPos: number) => {
+    async (_ctx, kernelId: string, code: string, cursorPos: number) => {
       return kernelManager.complete(kernelId, code, cursorPos);
     }
   );
 
-  handleIpc(
+  handleInvoke(
     IPC.kernels.inspect,
-    async (_event, kernelId: string, code: string, cursorPos: number) => {
+    async (_ctx, kernelId: string, code: string, cursorPos: number) => {
       return kernelManager.inspect(kernelId, code, cursorPos);
     }
   );
 
-  handleIpc(
+  handleInvoke(
     IPC.kernels.validate,
-    async (_event, executablePath: string, language: "python" | "julia") => {
+    async (_ctx, executablePath: string, language: "python" | "julia") => {
       if (!executablePath.trim()) {
         return { valid: false, error: "Executable path is required" };
       }

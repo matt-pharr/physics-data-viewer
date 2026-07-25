@@ -14,8 +14,7 @@
 
 import * as fs from "fs/promises";
 import * as path from "path";
-import { type BrowserWindow } from "electron";
-import { handleIpc } from "./ipc-registry";
+import { handleInvoke, type PushSender } from "./server/invoke-registry";
 
 import type { CommRouter } from "./comm-router";
 import type { ActiveEnvironmentInfo, CodeCellData, JuliaVersionLoadCheck, ProjectFailedNode } from "./ipc";
@@ -68,7 +67,8 @@ interface RegisterProjectIpcHandlersOptions {
    * overwritten by the final ``commitProjectManifest``.
    */
   runSerializedProjectManifestMutation: <T>(dir: string, task: () => Promise<T>) => Promise<T>;
-  getMainWindow: () => BrowserWindow | null;
+  /** Renderer-push sender (no-op once the window is gone). */
+  push: PushSender;
   /**
    * Fallback interpreter path from the global config, used only when the
    * active kernel has no recorded environment metadata (legacy sessions).
@@ -320,7 +320,7 @@ export function registerProjectIpcHandlers(
     clearModuleHealthWarnings,
     refreshProjectModuleHealth,
     runSerializedProjectManifestMutation,
-    getMainWindow,
+    push,
     getInterpreterPath,
     getActiveKernelEnvMeta,
     syncUvEnvironmentForLoad,
@@ -337,9 +337,9 @@ export function registerProjectIpcHandlers(
   // explicit save.
   let saveSeq = 0;
 
-  handleIpc(
+  handleInvoke(
     IPC.project.save,
-    async (_event, saveDir: string, codeCells: unknown, projectName?: string) => {
+    async (_ctx, saveDir: string, codeCells: unknown, projectName?: string) => {
       assertCodeCellData(codeCells);
       const seq = ++saveSeq;
       console.debug(`[project:save] IPC received seq=${seq} saveDir=${saveDir}`);
@@ -555,11 +555,9 @@ export function registerProjectIpcHandlers(
           // Best-effort pushes: a window torn down mid-save must not turn
           // into an "Object has been destroyed" throw — and a throw from the
           // finally leg would mask doSave's real error.
-          const win = getMainWindow();
           const safeSend = (channel: string): void => {
-            if (!win || win.isDestroyed()) return;
             try {
-              win.webContents.send(channel);
+              push(channel);
             } catch (err) {
               console.warn(`[project:save] push ${channel} failed:`, err);
             }
@@ -575,7 +573,7 @@ export function registerProjectIpcHandlers(
     }
   );
 
-  handleIpc(IPC.project.load, async (_event, saveDir: string, options?: { restoreFromAutosave?: boolean }) => {
+  handleInvoke(IPC.project.load, async (_ctx, saveDir: string, options?: { restoreFromAutosave?: boolean }) => {
     const restoreFromAutosave = options?.restoreFromAutosave ?? false;
     const autosaveDir = path.join(saveDir, ".autosave");
 
@@ -628,15 +626,14 @@ export function registerProjectIpcHandlers(
             console.warn("[ipc-register-project] julia version check failed:", err);
           }
         }
-        const win = getMainWindow();
-        const onProgress = win ? (current: number, total: number) => {
-          win.webContents.send(IPC.push.progress, {
+        const onProgress = (current: number, total: number): void => {
+          push(IPC.push.progress, {
             operation: "load",
             phase: "Copying files",
             current,
             total,
           });
-        } : undefined;
+        };
         // Baseline: copy from the main save dir
         loadFailedPaths = await copyFilesForLoad(saveDir, workingDir, onProgress);
         // Overlay: copy any files the autosave wrote on top. Uses a directory
@@ -751,7 +748,7 @@ export function registerProjectIpcHandlers(
     return path.join(workingDir, "code-cells.json");
   };
 
-  handleIpc(IPC.codeCells.load, async (): Promise<CodeCellData | null> => {
+  handleInvoke(IPC.codeCells.load, async (): Promise<CodeCellData | null> => {
     const filePath = codeCellsFilePath();
     if (!filePath) return null;
     try {
@@ -765,7 +762,7 @@ export function registerProjectIpcHandlers(
     }
   });
 
-  handleIpc(IPC.codeCells.save, async (_event, data: unknown): Promise<boolean> => {
+  handleInvoke(IPC.codeCells.save, async (_ctx, data: unknown): Promise<boolean> => {
     assertCodeCellData(data);
     const filePath = codeCellsFilePath();
     if (!filePath) return false;
@@ -773,7 +770,7 @@ export function registerProjectIpcHandlers(
     return true;
   });
 
-  handleIpc(IPC.project.new, async () => {
+  handleInvoke(IPC.project.new, async () => {
     setActiveProjectDir(null);
     setPendingModuleImports([]);
     setPendingModuleSettings({});
@@ -781,9 +778,9 @@ export function registerProjectIpcHandlers(
     return true;
   });
 
-  handleIpc(
+  handleInvoke(
     IPC.project.peekLanguages,
-    async (_event, paths: string[]): Promise<Record<string, "python" | "julia">> => {
+    async (_ctx, paths: string[]): Promise<Record<string, "python" | "julia">> => {
       const result: Record<string, "python" | "julia"> = {};
       await Promise.all(
         paths.map(async (dir) => {
@@ -799,9 +796,9 @@ export function registerProjectIpcHandlers(
     }
   );
 
-  handleIpc(
+  handleInvoke(
     IPC.project.peekManifest,
-    async (_event, dir: string) => {
+    async (_ctx, dir: string) => {
       try {
         const manifest = await ProjectManager.readManifest(dir);
         return {

@@ -14,7 +14,7 @@ import * as fs from "fs/promises";
 import * as fsSync from "fs";
 import * as os from "os";
 import * as path from "path";
-import type { BrowserWindow } from "electron";
+import type { PushSender } from "./server/invoke-registry";
 
 import {
   JULIAUP_INSTALL_COMMAND,
@@ -75,18 +75,13 @@ async function makeJuliaupDir(
   return juliaupDir;
 }
 
-/** Minimal BrowserWindow double capturing webContents.send calls. */
-function makeWin(): { win: BrowserWindow; sent: Array<[string, unknown]> } {
+/** Minimal push-sender double capturing (channel, payload) calls. */
+function makePush(): { push: PushSender; sent: Array<[string, unknown]> } {
   const sent: Array<[string, unknown]> = [];
-  const win = {
-    isDestroyed: () => false,
-    webContents: {
-      send: (channel: string, payload: unknown) => {
-        sent.push([channel, payload]);
-      },
-    },
-  } as unknown as BrowserWindow;
-  return { win, sent };
+  const push: PushSender = (channel, payload) => {
+    sent.push([channel, payload]);
+  };
+  return { push, sent };
 }
 
 // ---------------------------------------------------------------------------
@@ -131,11 +126,11 @@ describe("juliaupAdd()", () => {
       "bin/juliaup",
       'echo "adding $2"; printf \'\\033[92minstalled\\033[0m\\n\''
     );
-    const { win, sent } = makeWin();
+    const { push, sent } = makePush();
 
     const result = await juliaupAdd("1.10", {
       binaryPath: stub,
-      win,
+      push,
       pushChannel: "test:installOutput",
     });
 

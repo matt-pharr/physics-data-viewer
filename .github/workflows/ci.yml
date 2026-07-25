@@ -127,6 +127,17 @@ jobs:
         working-directory: electron
         run: npm run build
 
+      # Execute the artifact that actually ships. The unit-test job bundles
+      # the pdv-server from TypeScript source (it never builds dist/), and
+      # the Playwright job runs unpackaged against the tsc output — so
+      # without this, the tsc -> esbuild -> single-.cjs bundle placed in
+      # <Resources>/pdv-server/ is never run by CI at all. Catches bundling
+      # regressions (a dependency that breaks when inlined, anything writing
+      # to the protocol stdout) on both platforms CI covers.
+      - name: Verify the pdv-server bundle runs
+        working-directory: electron
+        run: npm run verify:server-bundle
+
   typecheck:
     # `tsc --noEmit` on both tsconfig.test.json (main + main-test files) and
     # renderer/tsconfig.json (renderer src + renderer tests). `build:main`
@@ -461,6 +472,28 @@ jobs:
         with:
           path: electron/e2e/.fixtures-cache/matplotlib
           key: mpl-fontcache-${{ runner.os }}-py3.11-${{ hashFiles('pdv-python/pyproject.toml') }}
+
+      # Cache uv's package cache (launch.ts pins UV_CACHE_DIR here) so the
+      # uv-project specs don't re-download their default dependencies every
+      # run. Keyed on the files that determine what those specs install —
+      # the defaultPackages list (config.ts) and the supported Python
+      # versions (python-versions.ts) — with a prefix fallback so a key
+      # change still restores the previous cache and only downloads the
+      # delta.
+      - name: Cache uv package cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: electron/e2e/.fixtures-cache/uv
+          # Deliberately a fixed key, not a hash of config.ts: that file is
+          # large and edited constantly, so hashing it minted a fresh
+          # hundreds-of-MB cache entry on most PRs and pushed the repo
+          # against GitHub's 10 GB LRU budget — evicting the node_modules and
+          # matplotlib caches sitting beside it. The cache is additive
+          # (uv only ever adds wheels), so a stale key costs nothing; bump
+          # the version suffix by hand if it ever needs a reset.
+          key: uv-cache-${{ runner.os }}-v1
+          restore-keys: |
+            uv-cache-${{ runner.os }}-
 
       - name: Run Playwright E2E tests
         working-directory: electron

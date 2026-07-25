@@ -1,85 +1,42 @@
 /**
- * cell-rpc.test.ts — Unit tests for the main-side cell-state RPC client.
+ * cell-rpc.test.ts — Unit tests for the server-side cell-state RPC client.
  *
  * Verifies the request/response/timeout shape of the renderer round-trip used
- * by the MCP cell tools (ARCHITECTURE.md §15.8) without spinning up a real
- * BrowserWindow — the WebContents `send` is stubbed.
+ * by the MCP cell tools (ARCHITECTURE.md §15.8). Pushes go through an
+ * injected PushSender stub; replies are delivered directly via `deliver()`
+ * (in production the `cells:respond` invoke handler registered by
+ * `server/wire.ts` forwards there).
  */
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const ipcRegistry = vi.hoisted(() => ({
-  handlers: new Map<
-    string,
-    (event: unknown, ...args: unknown[]) => unknown
-  >(),
-  handle: vi.fn(
-    (channel: string, handler: (event: unknown, ...args: unknown[]) => unknown) => {
-      ipcRegistry.handlers.set(channel, handler);
-    },
-  ),
-  removeHandler: vi.fn((channel: string) => ipcRegistry.handlers.delete(channel)),
-}));
-
-vi.mock("electron", () => ({
-  ipcMain: {
-    handle: ipcRegistry.handle,
-    removeHandler: ipcRegistry.removeHandler,
-  },
-}));
-
-import type { BrowserWindow } from "electron";
-
 import { IPC } from "../ipc";
 import { CellRpcClient } from "./cell-rpc";
 
-interface FakeWindowState {
+interface FakePush {
   sent: Array<{ channel: string; payload: unknown }>;
-  win: BrowserWindow;
+  push: (channel: string, payload?: unknown) => void;
 }
 
-/** Build a stub BrowserWindow whose `webContents.send` records all calls. */
-function makeFakeWindow(): FakeWindowState {
-  const sent: FakeWindowState["sent"] = [];
-  const win = {
-    webContents: {
-      send: (channel: string, payload: unknown) => {
-        sent.push({ channel, payload });
-      },
+/** Build a PushSender stub that records all pushes. */
+function makeFakePush(): FakePush {
+  const sent: FakePush["sent"] = [];
+  return {
+    sent,
+    push: (channel: string, payload?: unknown) => {
+      sent.push({ channel, payload });
     },
-  } as unknown as BrowserWindow;
-  return { sent, win };
-}
-
-/** Synchronously invoke the registered `cells:respond` handler. */
-function invokeRespond(payload: unknown): void {
-  const handler = ipcRegistry.handlers.get(IPC.cells.respond);
-  if (!handler) throw new Error("cells:respond handler not registered");
-  handler({}, payload);
+  };
 }
 
 describe("CellRpcClient", () => {
   afterEach(() => {
-    ipcRegistry.handlers.clear();
     vi.clearAllMocks();
   });
 
-  it("registers an `ipcMain.handle` on start and removes it on stop", () => {
-    const { win } = makeFakeWindow();
-    const client = new CellRpcClient(() => win);
-    client.start();
-    expect(ipcRegistry.handle).toHaveBeenCalledWith(
-      IPC.cells.respond,
-      expect.any(Function),
-    );
-    client.stop();
-    expect(ipcRegistry.removeHandler).toHaveBeenCalledWith(IPC.cells.respond);
-  });
-
   it("list() pushes a request and resolves on the matching response", async () => {
-    const { sent, win } = makeFakeWindow();
-    const client = new CellRpcClient(() => win);
-    client.start();
+    const { sent, push } = makeFakePush();
+    const client = new CellRpcClient(push);
 
     const promise = client.list();
     expect(sent).toHaveLength(1);
@@ -88,7 +45,7 @@ describe("CellRpcClient", () => {
     expect(req.op).toBe("list");
     expect(typeof req.requestId).toBe("string");
 
-    invokeRespond({
+    client.deliver({
       requestId: req.requestId,
       ok: true,
       result: { tabs: [{ id: 1, length: 5 }], activeTabId: 1 },
@@ -101,16 +58,15 @@ describe("CellRpcClient", () => {
   });
 
   it("read(tabId) pushes a read request and resolves on the matching response", async () => {
-    const { sent, win } = makeFakeWindow();
-    const client = new CellRpcClient(() => win);
-    client.start();
+    const { sent, push } = makeFakePush();
+    const client = new CellRpcClient(push);
 
     const promise = client.read(7);
     const req = sent[0].payload as { requestId: string; op: string; tabId?: number };
     expect(req.op).toBe("read");
     expect(req.tabId).toBe(7);
 
-    invokeRespond({
+    client.deliver({
       requestId: req.requestId,
       ok: true,
       result: { id: 7, code: "print('hi')" },
@@ -123,22 +79,38 @@ describe("CellRpcClient", () => {
   });
 
   it("rejects when the renderer reports `ok: false`", async () => {
-    const { sent, win } = makeFakeWindow();
-    const client = new CellRpcClient(() => win);
-    client.start();
+    const { sent, push } = makeFakePush();
+    const client = new CellRpcClient(push);
 
     const promise = client.read(99);
     const req = sent[0].payload as { requestId: string };
-    invokeRespond({ requestId: req.requestId, ok: false, error: "No tab 99" });
+    client.deliver({ requestId: req.requestId, ok: false, error: "No tab 99" });
 
     await expect(promise).rejects.toThrow(/No tab 99/);
     client.stop();
   });
 
+  it("drops a late reply after timeout without touching new requests", async () => {
+    const { sent, push } = makeFakePush();
+    const client = new CellRpcClient(push);
+    const promise = client.list();
+    const req = sent[0].payload as { requestId: string };
+    client.deliver({
+      requestId: req.requestId,
+      ok: true,
+      result: { tabs: [], activeTabId: null },
+    });
+    await promise;
+    // A second delivery for the same id must be a silent no-op.
+    expect(() =>
+      client.deliver({ requestId: req.requestId, ok: false, error: "late" }),
+    ).not.toThrow();
+    client.stop();
+  });
+
   it("write(payload) is one-way (no response awaited)", () => {
-    const { sent, win } = makeFakeWindow();
-    const client = new CellRpcClient(() => win);
-    client.start();
+    const { sent, push } = makeFakePush();
+    const client = new CellRpcClient(push);
     client.write({ tabId: 2, code: "x = 1" });
     expect(sent).toHaveLength(1);
     expect(sent[0].channel).toBe(IPC.push.cellWrite);
@@ -149,9 +121,8 @@ describe("CellRpcClient", () => {
   it("rejects late after the configured timeout and does not leak pending state", async () => {
     vi.useFakeTimers();
     try {
-      const { win } = makeFakeWindow();
-      const client = new CellRpcClient(() => win);
-      client.start();
+      const { push } = makeFakePush();
+      const client = new CellRpcClient(push);
       const promise = client.list();
       promise.catch(() => undefined); // prevent unhandled-rejection during fast-forward
       vi.advanceTimersByTime(11_000);
@@ -162,13 +133,12 @@ describe("CellRpcClient", () => {
     }
   });
 
-  it("throws synchronously when no renderer window is available", async () => {
-    const client = new CellRpcClient(() => null);
-    client.start();
-    await expect(client.list()).rejects.toThrow(/no renderer window/);
-    expect(() => client.write({ tabId: 1, code: "x" })).toThrow(
-      /no renderer window/,
-    );
+  it("stop() rejects in-flight requests", async () => {
+    const { push } = makeFakePush();
+    const client = new CellRpcClient(push);
+    const promise = client.list();
+    promise.catch(() => undefined);
     client.stop();
+    await expect(promise).rejects.toThrow(/stopped/);
   });
 });

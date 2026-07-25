@@ -4,7 +4,20 @@ import reactHooks from "eslint-plugin-react-hooks";
 
 export default tseslint.config(
   {
-    ignores: ["dist/**", "node_modules/**", "renderer/dist/**"],
+    // __fixtures__ hold child-process protocol stubs spawned by tests —
+    // plain-Node CJS scripts, not app code. release/ is electron-builder
+    // output; its extraResources and asar-unpacked modules are real .js/.cjs
+    // files on disk that eslint would otherwise sweep.
+    ignores: [
+      "dist/**",
+      "node_modules/**",
+      "renderer/dist/**",
+      "release/**",
+      "main/**/__fixtures__/**",
+      // Persistent e2e caches (matplotlib font cache, uv package cache) —
+      // the uv cache contains third-party .js sources once populated.
+      "e2e/.fixtures-cache/**",
+    ],
   },
   eslint.configs.recommended,
   ...tseslint.configs.recommended,
@@ -38,6 +51,8 @@ export default tseslint.config(
         Buffer: "readonly",
         fetch: "readonly",
         URL: "readonly",
+        setTimeout: "readonly",
+        clearTimeout: "readonly",
       },
     },
   },

@@ -25,7 +25,7 @@
 import { spawn } from "child_process";
 import * as fs from "fs/promises";
 import * as path from "path";
-import { BrowserWindow } from "electron";
+import type { PushSender } from "./server/invoke-registry";
 
 import type { ProjectPackage } from "./ipc";
 import type { UvOutputChunk } from "./uv-runner";
@@ -49,8 +49,8 @@ export interface JuliaEnvResult {
 
 /** Options controlling {@link instantiateJuliaEnvironment}. */
 export interface JuliaEnvOptions {
-  /** Window to stream output chunks to. Omit to capture silently. */
-  win?: BrowserWindow;
+  /** Push sender to stream output chunks to. Omit to capture silently. */
+  push?: PushSender;
   /** IPC channel name for streamed output chunks (same shape as uv's). */
   pushChannel?: string;
   /** Abort signal; aborting kills the Julia subprocess. */
@@ -165,8 +165,8 @@ export function instantiateJuliaEnvironment(
       if (settled) return;
       chunks.push(data);
       resetIdleTimer();
-      if (opts.win && !opts.win.isDestroyed() && opts.pushChannel) {
-        opts.win.webContents.send(opts.pushChannel, { stream, data } as UvOutputChunk);
+      if (opts.push && opts.pushChannel) {
+        opts.push(opts.pushChannel, { stream, data } as UvOutputChunk);
       }
     };
 

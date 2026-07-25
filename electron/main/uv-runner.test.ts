@@ -14,7 +14,6 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import type { BrowserWindow } from "electron";
 
 import {
   resolveUvBinary,
@@ -70,14 +69,10 @@ describe("runUv", () => {
     expect(result.output).toContain("kaboom");
   });
 
-  it("streams output chunks to the window's webContents", async () => {
+  it("streams output chunks through the push sender", async () => {
     const send = vi.fn();
-    const win = {
-      isDestroyed: () => false,
-      webContents: { send },
-    } as unknown as BrowserWindow;
 
-    await runUv(["hello"], { binaryPath: echoUv, win, pushChannel: "test:uv" });
+    await runUv(["hello"], { binaryPath: echoUv, push: send, pushChannel: "test:uv" });
 
     expect(send).toHaveBeenCalled();
     const [channel, chunk] = send.mock.calls[0];

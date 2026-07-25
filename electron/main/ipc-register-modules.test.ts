@@ -59,13 +59,13 @@ import {
   createModuleManagerMock,
   TEST_PDV_VERSION,
   type InvokeHandler,
+  getInvokeHandler,
+  resetInvokeRegistry,
 } from "./test-helpers";
 import type { ProjectModuleImport } from "./project-manager";
 
 function getHandler(channel: string): InvokeHandler {
-  const h = ipcRegistry.handlers.get(channel);
-  if (!h) throw new Error(`Channel not registered: ${channel}`);
-  return h;
+  return getInvokeHandler(channel);
 }
 
 interface Harness {
@@ -78,6 +78,10 @@ interface Harness {
   activeProjectDir: string | null;
   activeManifest: { modules: ProjectModuleImport[]; module_settings?: Record<string, unknown> } | null;
 }
+
+// Injected confirm dialog (server/confirm.ts) — default response 0 mirrors
+// the old dialogMocks.showMessageBox default ({ response: 0 }).
+const confirmMock = vi.fn(async () => 0);
 
 function setup(initial: Partial<Harness> = {}): Harness {
   const win = createBrowserWindowMock();
@@ -97,7 +101,8 @@ function setup(initial: Partial<Harness> = {}): Harness {
     activeManifest: initial.activeManifest ?? null,
   };
   registerModulesIpcHandlers({
-    win: win.win,
+    push: win.webContentsSend,
+    confirm: confirmMock,
     kernelManager,
     commRouter: commRouter.router,
     moduleManager,
@@ -117,6 +122,7 @@ function setup(initial: Partial<Harness> = {}): Harness {
 
 beforeEach(() => {
   ipcRegistry.handlers.clear();
+  resetInvokeRegistry();
   vi.clearAllMocks();
   fsMocks.stat.mockRejectedValue(
     Object.assign(new Error("ENOENT"), { code: "ENOENT" }),

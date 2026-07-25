@@ -339,6 +339,15 @@ function parseMessage(
 }
 
 async function loadZmq(): Promise<typeof import("zeromq")> {
+  // In the packaged extracted pdv-server, zeromq's native prebuild lives
+  // outside the server bundle (asar-unpacked); the supervisor points at it
+  // via PDV_ZEROMQ_PATH. Everywhere else the normal resolution applies.
+  const overridePath = process.env.PDV_ZEROMQ_PATH;
+  if (overridePath) {
+    const { createRequire } = await import("module");
+    const requireFrom = createRequire(__filename);
+    return requireFrom(overridePath) as typeof import("zeromq");
+  }
   return import("zeromq");
 }
 
@@ -494,14 +503,16 @@ export class KernelManager extends EventEmitter {
       stdio: ["ignore", "pipe", "pipe"],
     });
 
-    // Mirror the kernel's process stdio to the app's, and re-emit it as
-    // `kernel:processOutput` events: Pkg writes precompile progress to the
-    // process stderr during IJulia's own boot, and the activity-based boot
-    // deadline + EnvSyncModal streaming both key off these events
-    // (ARCHITECTURE.md §10.8).
+    // Mirror the kernel's process stdio to this process's stderr, and
+    // re-emit it as `kernel:processOutput` events: Pkg writes precompile
+    // progress to the process stderr during IJulia's own boot, and the
+    // activity-based boot deadline + EnvSyncModal streaming both key off
+    // these events (ARCHITECTURE.md §10.8). Both mirrors MUST go to
+    // stderr: in the extracted pdv-server, stdout is the RPC protocol
+    // channel, and a raw kernel line written there can corrupt a frame.
     kernelProcess.stdout?.on("data", (d: Buffer) => {
       const text = d.toString();
-      process.stdout.write(`[kernel:${kernelId.slice(0, 8)}] ${text}`);
+      process.stderr.write(`[kernel:${kernelId.slice(0, 8)}] ${text}`);
       this.emit("kernel:processOutput", kernelId, "stdout", text);
     });
     kernelProcess.stderr?.on("data", (d: Buffer) => {
@@ -1060,6 +1071,41 @@ export class KernelManager extends EventEmitter {
   async shutdownAll(): Promise<void> {
     const ids = Array.from(this.kernels.keys());
     await Promise.all(ids.map((id) => this.stop(id)));
+  }
+
+  /**
+   * Force-kill every kernel immediately, without the graceful JMP
+   * handshake or the 3 s exit grace period {@link stop} allows.
+   *
+   * Intended for last-resort teardown (a SIGTERM the supervisor sent after
+   * graceful shutdown overran its budget). Kernels are spawned with piped
+   * stdio and are not detached, so a server process that dies without
+   * calling this leaves them reparented to init and running indefinitely.
+   * Synchronous and best-effort: every step is individually guarded so one
+   * unkillable kernel cannot prevent the rest from being reaped.
+   *
+   * @returns Nothing.
+   */
+  killAllNow(): void {
+    for (const [id, managed] of this.kernels) {
+      managed.shuttingDown = true;
+      if (managed.memoryPollHandle !== undefined) {
+        clearInterval(managed.memoryPollHandle);
+        managed.memoryPollHandle = undefined;
+      }
+      try {
+        if (managed.process.exitCode === null) managed.process.kill("SIGKILL");
+      } catch (error) {
+        console.error(`[kernel:${id}] force-kill failed:`, error);
+      }
+      try {
+        fs.unlinkSync(managed.connectionFile);
+      } catch {
+        // Best effort — the connection file may already be gone.
+      }
+    }
+    this.kernels.clear();
+    this.iopubListeners.clear();
   }
 
   /**

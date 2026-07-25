@@ -406,6 +406,133 @@ export const IPC = {
   },
 } as const;
 
+// ---------------------------------------------------------------------------
+// Channel partition: shell vs. server residency
+// ---------------------------------------------------------------------------
+//
+// Every invoke channel is owned by exactly one process. SHELL channels are
+// window/OS concerns handled in the Electron shell (menus, native dialogs,
+// window chrome, local app launchers); SERVER channels are session concerns
+// handled by the pdv-server core (kernel, tree, project, config, …), which
+// registers them in the invoke registry and serves them over the stdio
+// transport. New channels MUST be added to exactly one of these sets; the
+// channel-partition unit test enforces completeness and disjointness.
+
+/** Invoke channels handled by the Electron shell process. */
+export const SHELL_CHANNELS: readonly string[] = [
+  ...Object.values(IPC.chrome),
+  ...Object.values(IPC.menu),
+  ...Object.values(IPC.window),
+  ...Object.values(IPC.about),
+  ...Object.values(IPC.updater),
+  ...Object.values(IPC.themes),
+  ...Object.values(IPC.files),
+  ...Object.values(IPC.app),
+  ...Object.values(IPC.launchers),
+  ...Object.values(IPC.moduleWindows),
+  // GUI editor/viewer *windows* are shell; manifest file I/O is server.
+  IPC.guiEditor.open,
+  IPC.guiEditor.openViewer,
+  IPC.guiEditor.context,
+  // Spawns a local editor process. In a remote session this must be
+  // re-routed to a local editor with remote capabilities (e.g.
+  // `code --remote`) — a remote-mode follow-up, not handled here.
+  IPC.script.edit,
+];
+
+/** Invoke channels handled by the pdv-server core. */
+export const SERVER_CHANNELS: readonly string[] = [
+  ...Object.values(IPC.kernels),
+  ...Object.values(IPC.tree),
+  ...Object.values(IPC.namespace),
+  IPC.script.run,
+  IPC.script.getParams,
+  ...Object.values(IPC.note),
+  ...Object.values(IPC.modules),
+  ...Object.values(IPC.namelist),
+  ...Object.values(IPC.project),
+  ...Object.values(IPC.config),
+  ...Object.values(IPC.mcp),
+  ...Object.values(IPC.autosave),
+  ...Object.values(IPC.codeCells),
+  ...Object.values(IPC.cells),
+  ...Object.values(IPC.environment),
+  IPC.guiEditor.read,
+  IPC.guiEditor.save,
+];
+
+/**
+ * Push channels originated by the pdv-server core (kernel/comm events,
+ * execution streaming, autosave brackets, MCP cell traffic). Everything
+ * else in `IPC.push` is shell-originated (menu, chrome, updater, close
+ * flow, module-window relay) — except `menuAction`, which both sides emit
+ * (the shell menu and the server's kernel-initiated save/load forwarding).
+ */
+export const SERVER_PUSH_CHANNELS: readonly string[] = [
+  IPC.push.treeChanged,
+  IPC.push.projectLoaded,
+  IPC.push.kernelCrashed,
+  IPC.push.kernelReconnected,
+  IPC.push.kernelMemory,
+  IPC.push.menuAction,
+  IPC.push.executeOutput,
+  IPC.push.projectReloading,
+  IPC.push.progress,
+  IPC.push.installOutput,
+  IPC.push.envActivity,
+  IPC.push.autosaveTrigger,
+  IPC.push.autosaveStarted,
+  IPC.push.autosaveEnded,
+  IPC.push.cellsRequest,
+  IPC.push.cellWrite,
+  IPC.push.executeBegin,
+  IPC.push.executeFinish,
+  IPC.push.mcpClientStatus,
+];
+
+/** Push channels originated by the Electron shell. */
+export const SHELL_PUSH_CHANNELS: readonly string[] = [
+  IPC.push.menuAction,
+  IPC.push.chromeStateChanged,
+  IPC.push.updateStatus,
+  IPC.push.requestClose,
+  IPC.push.moduleExecuteRequest,
+];
+
+/**
+ * Server-originated push channels that must also be fanned out to every
+ * child window (module windows, GUI editor/viewer windows), not just the
+ * main window. The shell's push implementation owns the fan-out; the
+ * server emits each push exactly once.
+ */
+export const BROADCAST_PUSH_CHANNELS: readonly string[] = [
+  IPC.push.treeChanged,
+];
+
+/**
+ * Shell → server invoke channels that are internal to the two processes:
+ * they are registered in the server's invoke registry (by `server/wire.ts`)
+ * and called by shell code over the transport, but are NEVER exposed to the
+ * preload/renderer and therefore live outside the `IPC` object and the
+ * shell/server partition above.
+ *
+ * - `launcherContext` — active kernel/project context for the shell's
+ *   launcher handlers (`launchers.*`, `script.edit`).
+ * - `resolveTreeFile` — resolve a tree path to its backing file's absolute
+ *   path via the kernel (used by `script.edit`).
+ * - `systemResumed` — forwarded from the shell's `powerMonitor` resume
+ *   event so the wake handler runs next to the kernel connection.
+ * - `resetSessionState` — light session reset on renderer load/reload
+ *   (clears in-session closures, keeps per-kernel state on disk). The full
+ *   reset rides the reserved `pdv.rpc.sessionReset` channel instead.
+ */
+export const INTERNAL_CHANNELS = {
+  launcherContext: "pdv.internal.launcherContext",
+  resolveTreeFile: "pdv.internal.resolveTreeFile",
+  systemResumed: "pdv.internal.systemResumed",
+  resetSessionState: "pdv.internal.resetSessionState",
+} as const;
+
 // Re-export for preload and renderer use.
 export type { ExecuteOutputChunk };
 

@@ -2,6 +2,7 @@
   "$schema": "https://unpkg.com/knip@5/schema.json",
   "entry": [
     "preload.ts",
+    "main/server/server-main.ts",
     "renderer/src/main.tsx",
     "renderer/src/module-window-main.tsx",
     "renderer/src/gui-editor-main.tsx",

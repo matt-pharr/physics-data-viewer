@@ -98,21 +98,22 @@ import { HandlerInvokeTracker } from "./handler-invoke-tracker";
 import { IPC, type ActiveEnvironmentInfo } from "./ipc";
 import { registerKernelIpcHandlers } from "./ipc-register-kernels";
 import { ProjectManager } from "./project-manager";
+import { initServerPaths } from "./server/server-paths";
 import {
   createBrowserWindowMock,
   createCommRouterMock,
   createKernelManagerMock,
   createModuleManagerMock,
   createProjectManagerMock,
+  getInvokeHandler,
   makeKernelInfo,
+  resetInvokeRegistry,
   type InvokeHandler,
 } from "./test-helpers";
 import { QueryRouter } from "./query-router";
 
 function getHandler(channel: string): InvokeHandler {
-  const h = ipcRegistry.handlers.get(channel);
-  if (!h) throw new Error(`Channel not registered: ${channel}`);
-  return h;
+  return getInvokeHandler(channel);
 }
 
 interface Harness {
@@ -185,7 +186,7 @@ function setup(): Harness {
     recoverUnsavedAfterRestart: vi.fn(async () => undefined),
   };
   registerKernelIpcHandlers({
-    win: win.win,
+    push: win.webContentsSend,
     kernelManager,
     commRouter: commRouter.router,
     queryRouter,
@@ -212,6 +213,8 @@ function setup(): Harness {
 
 beforeEach(() => {
   ipcRegistry.handlers.clear();
+  resetInvokeRegistry();
+  initServerPaths({ userDataDir: "/tmp/pdv-userdata", resourcesRoot: null });
   vi.clearAllMocks();
   envDetectorMocks.checkPDVInstalled.mockResolvedValue({ installed: true });
   envDetectorMocks.checkJuliaPDVInstalled.mockResolvedValue({ installed: true });
@@ -1131,11 +1134,11 @@ describe("kernels:restart", () => {
 });
 
 describe("kernels:execute", () => {
-  it("delegates to kernelManager.execute and routes output via event.sender.send", async () => {
+  it("delegates to kernelManager.execute and routes output via ctx.push", async () => {
     const { kernelManager } = setup();
     const sendSpy = vi.fn();
     await getHandler(IPC.kernels.execute)(
-      { sender: { send: sendSpy } },
+      { push: sendSpy },
       "k1",
       { code: "print(1)", executionId: "e1" },
     );

@@ -24,7 +24,6 @@
  * - It does not track active project/kernel state; accessors are injected.
  */
 
-import { BrowserWindow, app } from "electron";
 import * as fs from "fs/promises";
 import * as os from "os";
 import * as path from "path";
@@ -33,17 +32,18 @@ import { mirrorAutosaveSidecars, autosaveDirFor } from "./autosave-sidecars";
 import type { CommRouter } from "./comm-router";
 import { ConfigStore, PDVConfig } from "./config";
 import { IPC, type CodeCellData } from "./ipc";
-import { handleIpc } from "./ipc-registry";
 import type { KernelManager } from "./kernel-manager";
 import type { ModuleManager } from "./module-manager";
 import { setupProjectModuleNamespaces } from "./module-runtime";
+import { getAppVersion } from "./pdv-protocol";
 import { copyFilesForLoad } from "./project-file-sync";
 import { ProjectManager, type ProjectModuleImport } from "./project-manager";
+import { handleInvoke, type PushSender } from "./server/invoke-registry";
 
 /** Dependencies for {@link registerAutosaveIpcHandlers}. */
 export interface RegisterAutosaveIpcHandlersOptions {
-  /** Main window, used for autosave gating and progress pushes. */
-  win: BrowserWindow;
+  /** Renderer-push sender, used for autosave gating and progress pushes. */
+  push: PushSender;
   kernelManager: KernelManager;
   commRouter: CommRouter;
   projectManager: ProjectManager;
@@ -138,7 +138,7 @@ export function registerAutosaveIpcHandlers(
   options: RegisterAutosaveIpcHandlersOptions,
 ): AutosaveController {
   const {
-    win,
+    push,
     kernelManager,
     commRouter,
     projectManager,
@@ -162,7 +162,7 @@ export function registerAutosaveIpcHandlers(
       projectManager.setAutosavePending();
       return;
     }
-    win.webContents.send(IPC.push.autosaveTrigger);
+    push(IPC.push.autosaveTrigger);
   }
 
   async function performAutosave(
@@ -195,7 +195,7 @@ export function registerAutosaveIpcHandlers(
       // pdv.project.save in ipykernel's shell channel can hang in ways
       // that aren't worth root-causing here — easier to keep them off the
       // wire entirely until the save returns.
-      win.webContents.send(IPC.push.autosaveStarted);
+      push(IPC.push.autosaveStarted);
       try {
         const autosaveDir = autosaveDirFor(baseDir);
         const result = await projectManager.autosave(autosaveDir, codeCells, opts);
@@ -209,14 +209,14 @@ export function registerAutosaveIpcHandlers(
             pendingImports: importsSnapshot,
             pendingSettings: settingsSnapshot,
             language,
-            pdvVersion: app.getVersion(),
+            pdvVersion: getAppVersion(),
           },
           moduleManager,
         );
 
         return { saved: true };
       } finally {
-        win.webContents.send(IPC.push.autosaveEnded);
+        push(IPC.push.autosaveEnded);
       }
     });
   }
@@ -270,7 +270,7 @@ export function registerAutosaveIpcHandlers(
 
     const orphanAutosaveDir = path.join(orphanDir, ".autosave");
     const onProgress = (current: number, total: number) => {
-      win.webContents.send(IPC.push.progress, {
+      push(IPC.push.progress, {
         operation: "load",
         phase: "Copying files",
         current,
@@ -404,11 +404,11 @@ export function registerAutosaveIpcHandlers(
     };
   }
 
-  handleIpc(IPC.autosave.run, async (_event, codeCells: unknown) => {
+  handleInvoke(IPC.autosave.run, async (_ctx, codeCells: unknown) => {
     return performAutosave(codeCells as CodeCellData);
   });
 
-  handleIpc(IPC.autosave.clear, async (_event, dir?: string) => {
+  handleInvoke(IPC.autosave.clear, async (_ctx, dir?: string) => {
     const target =
       dir || getActiveProjectDir() || kernelWorkingDirs.get(getActiveKernelId() ?? "");
     if (target) {
@@ -424,11 +424,11 @@ export function registerAutosaveIpcHandlers(
     }
   });
 
-  handleIpc(IPC.autosave.check, async (_event, dir: string) => {
+  handleInvoke(IPC.autosave.check, async (_ctx, dir: string) => {
     return ProjectManager.checkForAutosave(dir);
   });
 
-  handleIpc(IPC.autosave.scanWorkingDirs, async () => {
+  handleInvoke(IPC.autosave.scanWorkingDirs, async () => {
     const config = readConfig(configStore);
     const base = config.workingDirBase || path.join(os.homedir(), ".PDV", "working");
     const results = await ProjectManager.scanForAutosaves(base);
@@ -442,11 +442,11 @@ export function registerAutosaveIpcHandlers(
       : results;
   });
 
-  handleIpc(IPC.autosave.recoverUnsaved, async (_event, orphanDir: string) => {
+  handleInvoke(IPC.autosave.recoverUnsaved, async (_ctx, orphanDir: string) => {
     return recoverUnsavedSession(orphanDir);
   });
 
-  handleIpc(IPC.autosave.deleteOrphan, async (_event, orphanDir: string) => {
+  handleInvoke(IPC.autosave.deleteOrphan, async (_ctx, orphanDir: string) => {
     // Defense in depth: the renderer-side scan already filters this out, but
     // never let a bug or stale list cause us to rm -rf the live working dir.
     const activeKernelId = getActiveKernelId();

@@ -14,7 +14,7 @@
  * both available at hoist time without imports).
  */
 
-import { vi } from "vitest";
+import { vi, type Mock } from "vitest";
 import type { BrowserWindow } from "electron";
 
 import pkg from "../package.json";
@@ -71,6 +71,47 @@ import type { GuiViewerWindowManager } from "./gui-viewer-window-manager";
 export type InvokeHandler = (event: unknown, ...args: unknown[]) => unknown;
 
 // ---------------------------------------------------------------------------
+// Invoke-registry harness
+// ---------------------------------------------------------------------------
+
+import {
+  dispatchInvoke,
+  removeAllInvokeHandlers,
+  type PushSender,
+} from "./server/invoke-registry";
+
+/**
+ * Fetch a registered invoke handler from the (real) server invoke registry
+ * in the legacy `(event, ...args)` calling convention the registrar tests
+ * were written against. The `event` argument is accepted for call-site
+ * compatibility; when it carries a `push` function that becomes the dispatch
+ * context's push sender, otherwise pushes are dropped.
+ *
+ * @param channel - IPC channel name to dispatch to.
+ * @returns A thunk invoking the registered handler via `dispatchInvoke`
+ *   (which rejects when the channel is not registered).
+ */
+export function getInvokeHandler(channel: string): InvokeHandler {
+  return (event: unknown, ...args: unknown[]) => {
+    const push =
+      (event as { push?: PushSender } | undefined)?.push ?? (() => undefined);
+    return dispatchInvoke(channel, { push }, args);
+  };
+}
+
+/**
+ * Clear the (real, module-level) server invoke registry. Registrar tests
+ * must call this in `beforeEach`/`afterEach` — the registry throws on
+ * duplicate registration, so a second `register*IpcHandlers()` call without
+ * a reset fails exactly like a missing teardown would in production.
+ *
+ * @returns Nothing.
+ */
+export function resetInvokeRegistry(): void {
+  removeAllInvokeHandlers();
+}
+
+// ---------------------------------------------------------------------------
 // Message factories
 // ---------------------------------------------------------------------------
 
@@ -105,12 +146,13 @@ export function makeOkResponse(payload: Record<string, unknown> = {}): PDVMessag
 
 export interface BrowserWindowMock {
   win: BrowserWindow;
-  webContentsSend: ReturnType<typeof vi.fn>;
+  /** Typed as a PushSender so it can be injected directly as a registrar's `push` dep. */
+  webContentsSend: Mock<(channel: string, payload?: unknown) => void>;
   isDestroyed: ReturnType<typeof vi.fn>;
 }
 
 export function createBrowserWindowMock(): BrowserWindowMock {
-  const webContentsSend = vi.fn();
+  const webContentsSend = vi.fn<(channel: string, payload?: unknown) => void>();
   const isDestroyed = vi.fn(() => false);
   const win = {
     webContents: { send: webContentsSend },

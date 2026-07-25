@@ -16,8 +16,9 @@ PLANNED_FEATURES.md      ← planned features organised by release milestone
 
 electron/                ← Electron app (TypeScript)
     main/                ← Node.js main process (kernel management, IPC, filesystem)
-        ipc.ts           ← SINGLE SOURCE OF TRUTH for all IPC channel names and types
-        index.ts         ← ipcMain handler registration (entry point)
+        ipc.ts           ← SINGLE SOURCE OF TRUTH for all IPC channel names and types,
+                           plus the SHELL_CHANNELS / SERVER_CHANNELS partition
+        index.ts         ← shell-side IPC wiring (shell registrars + server bridge)
         kernel-manager.ts
         comm-router.ts
         pdv-protocol.ts  ← PDV comm protocol types and constants
@@ -25,6 +26,12 @@ electron/                ← Electron app (TypeScript)
         config.ts
         environment-detector.ts
         project-manager.ts
+        server/          ← Electron-free pdv-server core: wire.ts (session assembly),
+                           invoke-registry.ts, server-main.ts (stdio CLI entry),
+                           shell-confirm.ts (reverse-RPC confirm broker)
+        shell/           ← server-supervisor.ts (spawns/supervises the pdv-server child),
+                           server-bridge.ts (SERVER_CHANNELS forwarding + push fan-out)
+        transport/       ← JSON-lines stdio RPC (protocol, line-codec, rpc-client/server)
     preload.ts           ← exposes window.pdv API to renderer via contextBridge
     renderer/src/        ← React frontend
         app/index.tsx    ← root component; orchestrates all kernel lifecycle and state
@@ -52,16 +59,20 @@ pdv-julia/               ← Julia kernel package (PDVKernel.jl; ARCHITECTURE.md
 
 ---
 
-## Three-process architecture
+## Process architecture
 
 ```
-Renderer (React) ──window.pdv──► Preload ──ipcRenderer──► Main (Node.js) ──ZeroMQ──► Kernel (Python)
+Renderer (React) ──window.pdv──► Preload ──ipcRenderer──► Shell (Electron main)
+                                                              │ stdio RPC (JSON lines)
+                                                              ▼
+                                                          pdv-server (plain Node) ──ZeroMQ──► Kernel (Python/Julia)
 ```
 
 - **Renderer** never accesses Node.js or the filesystem directly. All communication goes through `window.pdv.*`.
 - **`window.pdv`** is defined in `preload.ts` using Electron's `contextBridge`. It is the only bridge between renderer and main.
-- **Main process** owns ZeroMQ sockets, kernel lifecycle, filesystem, and config. All IPC channel names are constants in `ipc.ts`.
-- **Kernel** runs `ipykernel` + `pdv-python` (Python sessions) or `IJulia` + `pdv-julia`/PDVKernel.jl (Julia sessions). Both communicate with the main process via a custom Jupyter comm channel (`pdv.kernel`) layered on top of ZeroMQ; the protocol is language-agnostic.
+- **Shell (Electron main)** owns windows, menus, native dialogs, the updater, and local launchers. It spawns the pdv-server child (`main/shell/server-supervisor.ts`) and forwards every `SERVER_CHANNELS` invoke to it over a newline-delimited JSON stdio transport (`main/shell/server-bridge.ts`, `main/transport/`).
+- **pdv-server** (the Electron binary re-run as plain Node via `ELECTRON_RUN_AS_NODE=1`, entry `main/server/server-main.ts`) owns ZeroMQ sockets, kernel lifecycle, session filesystem work, config, and the MCP server. Local mode and future remote mode share this one code path — remote only swaps the transport.
+- **Kernel** runs `ipykernel` + `pdv-python` (Python sessions) or `IJulia` + `pdv-julia`/PDVKernel.jl (Julia sessions). Both communicate with the pdv-server via a custom Jupyter comm channel (`pdv.kernel`) layered on top of ZeroMQ; the protocol is language-agnostic.
 
 ---
 
@@ -69,7 +80,7 @@ Renderer (React) ──window.pdv──► Preload ──ipcRenderer──► Ma
 
 1. **`ARCHITECTURE.md` is authoritative.** If code contradicts it, the code is wrong. If you need to deviate, update the document first.
 
-2. **`ipc.ts` is the single source of truth for all IPC.** Channel names, request/response types, and the `PDVApi` interface all live there. Preload and index.ts consume them — they do not define their own strings.
+2. **`ipc.ts` is the single source of truth for all IPC.** Channel names, request/response types, and the `PDVApi` interface all live there. Preload and index.ts consume them — they do not define their own strings. Every new invoke channel must also be added to exactly one of `SHELL_CHANNELS` (window/OS concerns, Electron shell) or `SERVER_CHANNELS` (session concerns, the Electron-free pdv-server core in `main/server/`), and new push channels to `SERVER_PUSH_CHANNELS` or `SHELL_PUSH_CHANNELS` — the channel-partition unit test enforces this.
 
 3. **The Tree is the sole data authority.** `PDVTree` in the kernel is the only source of truth for project data. The main process never caches tree state. The renderer always fetches via `pdv.tree.list` / `pdv.tree.get`.
 
@@ -153,7 +164,7 @@ The full sweep takes ~3 minutes locally and produces a results CSV plus per-cell
 
 When reviewing a pull request (including via `/review`), check every item below in addition to standard code-quality review:
 
-- [ ] **IPC single source of truth** — All IPC channel names and types are defined in `ipc.ts`. No new strings introduced in preload, index.ts, or renderer code.
+- [ ] **IPC single source of truth** — All IPC channel names and types are defined in `ipc.ts`. No new strings introduced in preload, index.ts, or renderer code. New channels are assigned to exactly one of the `SHELL_CHANNELS`/`SERVER_CHANNELS` partition sets (and push channels to `SERVER_PUSH_CHANNELS`/`SHELL_PUSH_CHANNELS`).
 - [ ] **Process boundary respected** — Renderer imports types from `types/pdv.d.ts`, never from `../../main/ipc`. Renderer never accesses Node.js APIs or the filesystem directly.
 - [ ] **No tree state caching in main** — The main process does not cache or duplicate tree data. The kernel's `PDVTree` remains the sole authority.
 - [ ] **Script execution path** — No Python or Julia code strings in the renderer. Script execution goes through `window.pdv.script.run()`.

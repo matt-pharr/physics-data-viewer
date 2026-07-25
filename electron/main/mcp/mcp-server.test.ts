@@ -68,7 +68,8 @@ function makeDeps(
     hooks: makeHooks(),
     appVersion: "0.0.0-test",
     cellRpc: {} as PdvMcpServerDeps["cellRpc"],
-    getRendererWindow: () => null,
+    push: () => undefined,
+    confirm: async () => 0,
   };
 }
 
@@ -197,7 +198,8 @@ describe("assertCurrentGeneration", () => {
       hooks: makeHooks(currentGen),
       appVersion: "0.0.0-test",
       cellRpc: {} as McpToolContext["cellRpc"],
-      getRendererWindow: () => null,
+      push: () => undefined,
+      confirm: async () => 0,
       getSessionGeneration: () => sessionGen,
       recordCellRead: () => undefined,
       getCellReadHash: () => undefined,

@@ -1,11 +1,19 @@
 /**
- * ipc-register-launchers.ts — IPC handlers for the action-bar launcher buttons.
+ * ipc-register-launchers.ts — IPC handlers for local external-app launches.
  *
  * Registers:
  * - `launchers.openAgent` — launch the configured AI agent CLI in a terminal
  *   pointed at PDV's MCP server.
  * - `launchers.openWorkingDir` — open the active kernel's working directory in
  *   the configured editor/IDE.
+ * - `launchers.checkAvailability` — probe whether a configured command exists.
+ * - `script.edit` — open a script's backing file in the configured editor.
+ *
+ * These are shell channels: they spawn processes on the user's machine. The
+ * session state they need (config, MCP status, active kernel context, tree
+ * file resolution) lives in the pdv-server, so every accessor in the
+ * dependency bag is async: each one is an invoke across the transport
+ * (`index.ts` builds them over the server bridge).
  *
  * Non-responsibilities:
  * - Building the agent spawn spec (see `agent-launcher.ts`).
@@ -43,22 +51,33 @@ function spawnDetached(spec: { file: string; args: string[] }, label: string): v
   child.unref();
 }
 
+/** Active session context needed to target a launch. */
+export interface LauncherContext {
+  /** Active kernel id, or null when no kernel is running. */
+  kernelId: string | null;
+  /** Active kernel's working directory, or null when unknown. */
+  workingDir: string | null;
+  /** Active project directory, or null when the project is unsaved. */
+  projectDir: string | null;
+}
+
 /** Dependency bag for {@link registerLaunchersIpcHandlers}. */
 export interface RegisterLaunchersIpcHandlersOptions {
-  /** Per-kernel working-directory map (kernel id → absolute path). */
-  kernelWorkingDirs: Map<string, string>;
-  /** Accessor for the active kernel id. */
-  getActiveKernelId: () => string | null;
-  /** Accessor for the active project directory (`null` when unsaved). */
-  getActiveProjectDir: () => string | null;
-  /** Accessor for the current merged config snapshot. */
-  getConfig: () => PDVConfig;
-  /** Accessor for the live MCP server status (`null` before the server starts). */
-  getMcpStatus: () => McpStatus | null;
+  /** Async accessor for the active kernel/project context. */
+  getLauncherContext: () => Promise<LauncherContext>;
+  /** Async accessor for the current merged config snapshot. */
+  getConfig: () => Promise<PDVConfig>;
+  /** Async accessor for the live MCP server status (`null` before start). */
+  getMcpStatus: () => Promise<McpStatus | null>;
+  /**
+   * Resolve a tree path to its backing file's absolute path via the kernel.
+   * Returns null when the node has no backing file.
+   */
+  resolveTreeFile: (treePath: string) => Promise<string | null>;
 }
 
 /**
- * Register the `launchers.*` IPC handlers.
+ * Register the `launchers.*` and `script.edit` IPC handlers.
  *
  * @param options - Dependency bag; see {@link RegisterLaunchersIpcHandlersOptions}.
  * @returns Nothing.
@@ -67,11 +86,10 @@ export function registerLaunchersIpcHandlers(
   options: RegisterLaunchersIpcHandlersOptions,
 ): void {
   const {
-    kernelWorkingDirs,
-    getActiveKernelId,
-    getActiveProjectDir,
+    getLauncherContext,
     getConfig,
     getMcpStatus,
+    resolveTreeFile,
   } = options;
 
   handleIpc(
@@ -83,27 +101,26 @@ export function registerLaunchersIpcHandlers(
         return { success: true };
       }
 
-      const kernelId = getActiveKernelId();
+      const { kernelId, workingDir, projectDir } = await getLauncherContext();
       if (!kernelId) {
         return { success: false, error: "No active kernel; start one first." };
       }
-      const workingDir = kernelWorkingDirs.get(kernelId);
       if (!workingDir) {
         return { success: false, error: "No working directory for the active kernel." };
       }
-      const mcpStatus = getMcpStatus();
+      const mcpStatus = await getMcpStatus();
       if (!mcpStatus || !mcpStatus.running) {
         return { success: false, error: "The MCP server is not running." };
       }
 
       try {
         const mcpConfigPath = await writeMcpConfigFile(workingDir, mcpStatus);
-        const config = getConfig();
+        const config = await getConfig();
         const spawnSpec = buildAgentInvocation({
           agent: config.launchers?.agent,
           terminal: config.launchers?.terminal,
           mcpConfigPath,
-          projectRoot: getActiveProjectDir(),
+          projectRoot: projectDir,
           workingDir,
         });
         spawnDetached(spawnSpec, "agent");
@@ -123,17 +140,16 @@ export function registerLaunchersIpcHandlers(
         return { success: true };
       }
 
-      const kernelId = getActiveKernelId();
+      const { kernelId, workingDir } = await getLauncherContext();
       if (!kernelId) {
         return { success: false, error: "No active kernel; start one first." };
       }
-      const workingDir = kernelWorkingDirs.get(kernelId);
       if (!workingDir) {
         return { success: false, error: "No working directory for the active kernel." };
       }
 
       try {
-        const config = getConfig();
+        const config = await getConfig();
         const { file, args } = buildEditorSpawn(
           config.launchers?.editor?.dirCommand,
           workingDir,
@@ -161,4 +177,42 @@ export function registerLaunchersIpcHandlers(
       }
     },
   );
+
+  handleIpc(IPC.script.edit, async (_event, _kernelId: string, scriptPath: string) => {
+    // Under E2E we never spawn an external editor — the spawn is detached
+    // (`detached: true`, `child.unref()`) so a real VS Code instance launched
+    // by a test would outlive the Electron app being torn down.
+    if (process.env.PDV_E2E === "1") {
+      return { success: true };
+    }
+    const config = await getConfig();
+
+    const resolvedPath = await resolveTreeFile(scriptPath);
+    if (typeof resolvedPath !== "string" || resolvedPath.length === 0) {
+      return { success: false, error: `Could not resolve file path for "${scriptPath}".` };
+    }
+
+    const { file, args } = buildEditorSpawn(
+      config.launchers?.editor?.fileCommand,
+      resolvedPath,
+    );
+    const spawnSpec = resolveEditorSpawn(file, args, {
+      wrapInTerminal: config.launchers?.editor?.isTuiEditor,
+      terminal: config.launchers?.terminal,
+    });
+    try {
+      const child = spawn(spawnSpec.file, spawnSpec.args, { detached: true, stdio: "ignore" });
+      child.on("error", (err) => {
+        const msg = err && (err as NodeJS.ErrnoException).code === "ENOENT"
+          ? `Editor command not found: "${spawnSpec.file}". Configure your editor in Settings → General.`
+          : `Failed to launch editor: ${err.message}`;
+        console.error("[pdv] editor spawn error:", msg);
+      });
+      child.unref();
+      return { success: true };
+    } catch (err) {
+      const error = err instanceof Error ? err.message : String(err);
+      return { success: false, error: `Failed to launch editor: ${error}` };
+    }
+  });
 }

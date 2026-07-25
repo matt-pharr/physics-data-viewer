@@ -2,12 +2,15 @@
  * app.ts — Electron app lifecycle and BrowserWindow creation.
  *
  * Owns BrowserWindow creation/loading and high-level Electron app events.
- * Kernel/comm business logic remains in `index.ts` and injected dependencies.
+ * Session/kernel logic lives in the pdv-server process; this module only
+ * needs its supervisor handle (async config reads before the window
+ * exists, graceful shutdown on quit).
  *
  * See Also
  * --------
  * ARCHITECTURE.md §4.1, §11.1
  * index.ts — IPC handler registration and push forwarding
+ * shell/server-supervisor.ts — pdv-server process lifecycle
  */
 
 import { BrowserWindow, app, nativeTheme, type BrowserWindowConstructorOptions } from "electron";
@@ -15,16 +18,10 @@ import * as path from "path";
 import * as os from "os";
 import * as fsSync from "fs";
 
-import { KernelManager } from "./kernel-manager";
-import { CommRouter } from "./comm-router";
-import { QueryRouter } from "./query-router";
-import { ProjectManager } from "./project-manager";
-import { ConfigStore } from "./config";
 import { registerIpcHandlers } from "./index";
 import { initializeAppMenu } from "./menu";
-import { IPC } from "./ipc";
-import type { CellRpcClient } from "./mcp/cell-rpc";
-import type { PdvMcpServer } from "./mcp/mcp-server";
+import { IPC, type PDVConfig } from "./ipc";
+import type { ServerSupervisor } from "./shell/server-supervisor";
 
 /**
  * Check whether a process with the given PID is currently running.
@@ -126,25 +123,25 @@ async function loadDevUrlWithRetry(
 /**
  * Create and initialize the main BrowserWindow.
  *
- * @param kernelManager - Active kernel manager instance.
- * @param commRouter - Active comm router instance.
- * @param projectManager - Active project manager instance.
- * @param configStore - Active config store instance.
+ * @param server - Supervised pdv-server handle (already started); used for
+ *   the pre-window config read and the IPC bridge registration.
  * @returns Created BrowserWindow.
- * @throws {Error} When renderer content cannot be loaded.
+ * @throws {Error} When renderer content cannot be loaded or the server is
+ *   unreachable for the initial config read.
  */
 export async function createWindow(
-  kernelManager: KernelManager,
-  commRouter: CommRouter,
-  queryRouter: QueryRouter,
-  projectManager: ProjectManager,
-  configStore: ConfigStore
+  server: ServerSupervisor
 ): Promise<BrowserWindow> {
+  // One config snapshot before any window exists: initial background color
+  // and the custom working-dir base for the orphan scan below. The config
+  // lives with the server — the shell holds no ConfigStore.
+  const config = (await server.invoke(IPC.config.get)) as PDVConfig;
+
   const win = new BrowserWindow({
     width: 1440,
     height: 960,
     show: false,
-    backgroundColor: resolveInitialBackgroundColor(configStore.get("settings")?.appearance),
+    backgroundColor: resolveInitialBackgroundColor(config.settings?.appearance),
     ...getWindowChromeOptions(),
     webPreferences: {
       preload: path.join(__dirname, "..", "preload.js"),
@@ -162,7 +159,7 @@ export async function createWindow(
   // spec) survive into the test, and so a developer running the suite
   // doesn't have their real ~/.PDV/working state mutated.
   const defaultWorkingBase = path.join(os.homedir(), ".PDV", "working");
-  const customWorkingBase = configStore.get("workingDirBase");
+  const customWorkingBase = config.workingDirBase;
   const workingBases = new Set([defaultWorkingBase]);
   if (customWorkingBase) workingBases.add(customWorkingBase);
   if (process.env.PDV_E2E === "1") {
@@ -202,13 +199,9 @@ export async function createWindow(
     allowClose = allow;
   };
 
-  const resetSessionState = registerIpcHandlers(
+  const resetSessionState = await registerIpcHandlers(
     win,
-    kernelManager,
-    commRouter,
-    queryRouter,
-    projectManager,
-    configStore,
+    server,
     path.join(os.homedir(), ".PDV"),
     setAllowClose,
   );
@@ -259,6 +252,13 @@ export async function createWindow(
   // live window's guard has decided whether to block the quit.
   win.on("closed", () => {
     app.removeListener("before-quit", beforeQuitGuard);
+    // Detach the bridge with the window it belongs to. The handlers close
+    // over this BrowserWindow; leaving them attached means a server-side
+    // confirm arriving while no window exists (macOS close-but-don't-quit)
+    // would target a destroyed window instead of taking the supervisor's
+    // safe auto-cancel path. The next window's registerIpcHandlers()
+    // installs a fresh bridge.
+    server.clearBridgeHandlers();
   });
 
   // Reset in-memory project state on every renderer load/reload so that stale
@@ -337,15 +337,12 @@ export function clearQuitRequestPending(): void {
 /**
  * Register core Electron app events.
  *
- * @param getKernelManager - Lazy getter for the current kernel manager.
- * @param getMcpServer - Lazy getter for the MCP server, stopped on quit.
- * @param getCellRpc - Lazy getter for the cell-RPC client, stopped on quit.
+ * @param getServer - Lazy getter for the pdv-server supervisor; drives the
+ *   graceful shutdown chain (server stops kernels and MCP) during quit.
  * @returns Nothing.
  */
 export function wireAppEvents(
-  getKernelManager: () => KernelManager | null,
-  getMcpServer: () => PdvMcpServer | null,
-  getCellRpc: () => CellRpcClient | null = () => null
+  getServer: () => ServerSupervisor | null
 ): void {
   app.on("before-quit", () => {
     isQuittingGlobal = true;
@@ -354,7 +351,7 @@ export function wireAppEvents(
   app.on("window-all-closed", () => {
     // On darwin we normally keep the app alive after the window closes (so
     // Cmd+W behaves like a typical mac app). But if a real quit is in
-    // progress, we must actually exit so `will-quit` runs and the kernel
+    // progress, we must actually exit so `will-quit` runs and the server
     // shuts down — otherwise the process stays in the dock forever and
     // autoUpdater.quitAndInstall() can never replace the binary.
     if (process.platform !== "darwin" || isQuittingGlobal) {
@@ -362,29 +359,21 @@ export function wireAppEvents(
     }
   });
 
-  // Run kernel shutdown during will-quit, after renderer close/save flows
-  // have completed, so save-on-quit can still reach the active kernel.
+  // Run the server shutdown during will-quit, after renderer close/save
+  // flows have completed, so save-on-quit can still reach the active
+  // kernel. The server owns kernel shutdown, MCP stop, and working-dir
+  // cleanup; the supervisor escalates if it hangs.
   app.on("will-quit", (event) => {
-    // Stop the MCP server first — it is independent of kernel shutdown and
-    // closes its loopback socket quickly. Then detach the cell-RPC handler.
-    void getMcpServer()?.stop();
-    getCellRpc()?.stop();
-    const kernelManager = getKernelManager();
-    const kernelCount = kernelManager
-      ? Array.from((kernelManager as unknown as { kernels: Map<string, unknown> }).kernels?.keys() ?? []).length
-      : 0;
-    // Nothing to clean up — let the quit proceed normally. preventDefault'ing
-    // here and re-calling app.quit() afterwards is unreliable on macOS once
-    // will-quit has been canceled.
-    if (!kernelManager || isShuttingDownGlobal || kernelCount === 0) {
+    const server = getServer();
+    if (!server || isShuttingDownGlobal) {
       return;
     }
     event.preventDefault();
     isShuttingDownGlobal = true;
-    kernelManager
-      .shutdownAll()
+    server
+      .shutdown()
       .catch((error: unknown) => {
-        console.error("[PDV] Failed to shutdown kernels during quit:", error);
+        console.error("[PDV] Failed to shutdown pdv-server during quit:", error);
       })
       .finally(() => {
         // Use app.exit() rather than app.quit() — once we've preventDefault'd

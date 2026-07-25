@@ -28,9 +28,9 @@
 import { randomUUID } from "crypto";
 import { IPC, ExecuteBeginPayload, ExecuteFinishPayload } from "./ipc";
 import type { ExecuteOutputChunk } from "./kernel-manager";
+import type { PushSender } from "./server/invoke-registry";
 
-/** Renderer-push sender: `(channel, payload)`, no-op once the window dies. */
-export type PushSender = (channel: string, payload: unknown) => void;
+export type { PushSender } from "./server/invoke-registry";
 
 /** One in-flight handler invocation. */
 interface ActiveInvoke {

@@ -26,6 +26,7 @@ import {
   expect,
   beforeEach,
   afterEach,
+  vi,
 } from "vitest";
 import { KernelManager, KernelInfo } from "./kernel-manager";
 
@@ -321,6 +322,37 @@ describe("@slow KernelManager (real kernel process)", { timeout: 90_000 }, () =>
       expect(km.list().length).toBe(0);
       expect(km.getKernel(a.id)).toBeUndefined();
       expect(km.getKernel(b.id)).toBeUndefined();
+    });
+  });
+
+  describe("killAllNow()", () => {
+    it("reaps every kernel process synchronously", async () => {
+      // The pdv-server's SIGTERM handler calls this. Kernels are spawned
+      // non-detached with piped stdio, so a server that exits without
+      // reaping them leaves them running, reparented to init.
+      const [a, b] = await Promise.all([startKernel(km), startKernel(km)]);
+      // Same private-map cast the crash-detection test below uses — the
+      // child PID is deliberately not part of the public KernelInfo.
+      const kernels = (
+        km as unknown as {
+          kernels: Map<string, { process: import("child_process").ChildProcess }>;
+        }
+      ).kernels;
+      const pids = [a, b].map((info) => {
+        const pid = kernels.get(info.id)?.process.pid;
+        expect(pid).toBeDefined();
+        return pid as number;
+      });
+
+      km.killAllNow();
+
+      expect(km.list().length).toBe(0);
+      for (const pid of pids) {
+        await vi.waitFor(() => {
+          // ESRCH once the process is gone.
+          expect(() => process.kill(pid, 0)).toThrow();
+        });
+      }
     });
   });
 

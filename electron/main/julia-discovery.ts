@@ -26,7 +26,8 @@ import { promisify } from "util";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { BrowserWindow } from "electron";
+import type { PushSender } from "./server/invoke-registry";
+import { getResourcesRoot } from "./server/server-paths";
 
 import { coreVersion, getAppVersion } from "./pdv-protocol";
 import type { EnvironmentInstallResult } from "./environment-detector";
@@ -92,8 +93,8 @@ export interface JuliaInstallOptions {
    * `<userData>/pdv-julia` (§10.7.4). The directory is replaced on every run.
    */
   stagingDir: string;
-  /** Window to stream install output chunks to (optional). */
-  win?: BrowserWindow;
+  /** Push sender to stream install output chunks to (optional). */
+  push?: PushSender;
   /** IPC channel name for streamed output chunks. */
   pushChannel?: string;
 }
@@ -585,8 +586,9 @@ function makeLabel(
  * @returns Absolute path to `pdv-julia`, or null when not found.
  */
 export function resolveBundledPDVJuliaPath(): string | null {
-  if (process.resourcesPath) {
-    const candidate = path.join(process.resourcesPath, "pdv-julia");
+  const resourcesRoot = getResourcesRoot();
+  if (resourcesRoot) {
+    const candidate = path.join(resourcesRoot, "pdv-julia");
     if (fs.existsSync(path.join(candidate, "Project.toml"))) return candidate;
   }
   for (let dir = __dirname; dir !== path.dirname(dir); dir = path.dirname(dir)) {
@@ -678,8 +680,8 @@ function _installPDVKernelExclusive(
 
     const sendChunk = (stream: "stdout" | "stderr", data: string): void => {
       chunks.push(data);
-      if (opts.win && !opts.win.isDestroyed() && opts.pushChannel) {
-        opts.win.webContents.send(opts.pushChannel, { stream, data });
+      if (opts.push && opts.pushChannel) {
+        opts.push(opts.pushChannel, { stream, data });
       }
     };
 

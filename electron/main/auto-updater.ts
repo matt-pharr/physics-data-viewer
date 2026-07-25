@@ -23,7 +23,17 @@ import { app, BrowserWindow, shell } from "electron";
 import { autoUpdater } from "electron-updater";
 import type { UpdateInfo, ProgressInfo } from "electron-updater";
 import { IPC } from "./ipc";
-import type { ConfigStore } from "./config";
+/**
+ * Async accessor pair for the `lastUpdateCheck` timestamp. The ConfigStore
+ * lives in the pdv-server core, so the shell-side updater reads and writes
+ * the stamp through the config invoke channels rather than holding a store.
+ */
+export interface UpdateCheckStamp {
+  /** Read the persisted `lastUpdateCheck` (ms since epoch), if any. */
+  get(): Promise<number | undefined>;
+  /** Persist `lastUpdateCheck` as now. */
+  set(): Promise<void>;
+}
 import { markQuitting } from "./app";
 
 // ---------------------------------------------------------------------------
@@ -111,9 +121,9 @@ function pushStatus(status: UpdateStatus): void {
  * than 24 hours have elapsed since the last check.
  *
  * @param win - The main BrowserWindow for push notifications.
- * @param configStore - Config store for persisting lastUpdateCheck timestamp.
+ * @param stamp - Accessors for the persisted lastUpdateCheck timestamp.
  */
-export function initAutoUpdater(win: BrowserWindow, configStore: ConfigStore): void {
+export function initAutoUpdater(win: BrowserWindow, stamp: UpdateCheckStamp): void {
   mainWindow = win;
 
   if (!app.isPackaged) {
@@ -170,13 +180,19 @@ export function initAutoUpdater(win: BrowserWindow, configStore: ConfigStore): v
 
   // -- Startup check ---------------------------------------------------------
 
-  const lastCheck = configStore.get("lastUpdateCheck");
-  const now = Date.now();
-  if (!lastCheck || now - lastCheck > CHECK_INTERVAL_MS) {
-    setTimeout(() => {
-      void checkForUpdates(configStore);
-    }, STARTUP_DELAY_MS);
-  }
+  void stamp
+    .get()
+    .then((lastCheck) => {
+      const now = Date.now();
+      if (!lastCheck || now - lastCheck > CHECK_INTERVAL_MS) {
+        setTimeout(() => {
+          void checkForUpdates(stamp);
+        }, STARTUP_DELAY_MS);
+      }
+    })
+    .catch((err) => {
+      console.warn("[updater] unable to read lastUpdateCheck:", err);
+    });
 }
 
 /**
@@ -185,15 +201,17 @@ export function initAutoUpdater(win: BrowserWindow, configStore: ConfigStore): v
  * Results arrive asynchronously via autoUpdater events, which push
  * status to the renderer.
  *
- * @param configStore - Optional config store to record the check timestamp.
+ * @param stamp - Optional accessors to record the check timestamp.
  */
-export async function checkForUpdates(configStore?: ConfigStore): Promise<void> {
+export async function checkForUpdates(stamp?: UpdateCheckStamp): Promise<void> {
   if (!app.isPackaged) {
     pushStatus({ state: "not-available" });
     return;
   }
-  if (configStore) {
-    configStore.set("lastUpdateCheck", Date.now());
+  if (stamp) {
+    await stamp.set().catch((err) => {
+      console.warn("[updater] unable to record lastUpdateCheck:", err);
+    });
   }
   await autoUpdater.checkForUpdates();
 }

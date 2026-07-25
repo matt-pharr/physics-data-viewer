@@ -117,9 +117,12 @@ import { registerTreeNamespaceScriptIpcHandlers } from "./ipc-register-tree-name
 import { registerModulesIpcHandlers } from "./ipc-register-modules";
 import { registerProjectIpcHandlers } from "./ipc-register-project";
 import { registerAppStateIpcHandlers } from "./ipc-register-app-state";
+import { registerConfigIpcHandlers } from "./ipc-register-config";
+import { registerGuiFilesIpcHandlers } from "./ipc-register-gui-files";
 import { registerModuleWindowIpcHandlers } from "./ipc-register-module-windows";
 import { registerGuiEditorIpcHandlers } from "./ipc-register-gui-editor";
 import { registerLaunchersIpcHandlers } from "./ipc-register-launchers";
+import { listRegisteredInvokeChannels } from "./server/invoke-registry";
 import {
   createBrowserWindowMock,
   createCommRouterMock,
@@ -130,6 +133,7 @@ import {
   createModuleManagerMock,
   createModuleWindowManagerMock,
   createProjectManagerMock,
+  resetInvokeRegistry,
   TEST_PDV_VERSION,
 } from "./test-helpers";
 import { QueryRouter } from "./query-router";
@@ -151,11 +155,11 @@ function listExpectedHandlerChannels(): string[] {
 }
 
 /**
- * Channels that are NOT registered by any of the 7 `ipc-register-*` files —
- * instead they are registered inline in `electron/main/index.ts`, or by the
- * MCP subsystem (`mcp:getStatus` by `PdvMcpServer.start()`, `cells:respond`
- * by `CellRpcClient.start()`). Track them here so the meta-test only asserts
- * on what the dedicated register functions own.
+ * Channels that are NOT registered by the standalone `ipc-register-*`
+ * functions exercised here: the autosave/environment registrars need the
+ * full wire-time dependency set, and `mcp:getStatus` / `cells:respond` are
+ * registered directly by `server/wire.ts`. All of them are covered by the
+ * wire test (`server/wire.test.ts`) instead.
  */
 const CHANNELS_REGISTERED_IN_INDEX = [
   ...Object.values(IPC.autosave),
@@ -183,7 +187,7 @@ function setupAll(): void {
   const handlerInvokeTracker = new HandlerInvokeTracker(() => undefined);
 
   registerKernelIpcHandlers({
-    win: win.win,
+    push: win.webContentsSend,
     kernelManager,
     commRouter: commRouter.router,
     queryRouter,
@@ -220,11 +224,10 @@ function setupAll(): void {
     sanitizeScriptName: (n: string) => n,
     ensureScriptFile: async () => undefined,
     ensureLibFile: async () => undefined,
-    buildEditorSpawn: () => ({ file: "", args: [] }),
-    resolveEditorSpawn: (_file: string, _args: string[], _opts?: unknown) => ({ file: "", args: [] }),
   });
   registerModulesIpcHandlers({
-    win: win.win,
+    push: win.webContentsSend,
+    confirm: vi.fn(async () => 0),
     kernelManager,
     commRouter: commRouter.router,
     moduleManager,
@@ -255,18 +258,22 @@ function setupAll(): void {
     clearModuleHealthWarnings: vi.fn(),
     refreshProjectModuleHealth: async () => null,
     runSerializedProjectManifestMutation: async (_dir, fn) => fn(),
-    getMainWindow: () => win.win,
+    push: win.webContentsSend,
     getInterpreterPath: () => "/usr/bin/python3",
     getActiveKernelEnvMeta: () => undefined,
   });
   registerAppStateIpcHandlers({
     win: win.win,
-    configStore: config.store,
-    readConfig: (s) => s.getAll() as PDVConfig,
     themesDir: "/tmp/themes",
     stateDir: "/tmp/state",
     setAllowClose: vi.fn(),
+    updateCheckStamp: {
+      get: vi.fn(async () => undefined),
+      set: vi.fn(async () => undefined),
+    },
   });
+  registerConfigIpcHandlers({ configStore: config.store });
+  registerGuiFilesIpcHandlers({ commRouter: commRouter.router });
   registerModuleWindowIpcHandlers({
     moduleWindowManager: createModuleWindowManagerMock(),
     mainWindow: win.win,
@@ -274,19 +281,18 @@ function setupAll(): void {
   registerGuiEditorIpcHandlers({
     guiEditorWindowManager: createGuiEditorWindowManagerMock(),
     guiViewerWindowManager: createGuiViewerWindowManagerMock(),
-    commRouter: commRouter.router,
   });
   registerLaunchersIpcHandlers({
-    kernelWorkingDirs,
-    getActiveKernelId: () => null,
-    getActiveProjectDir: () => null,
-    getConfig: () => config.store.getAll() as PDVConfig,
-    getMcpStatus: () => null,
+    getLauncherContext: async () => ({ kernelId: null, workingDir: null, projectDir: null }),
+    getConfig: async () => config.store.getAll() as PDVConfig,
+    getMcpStatus: async () => null,
+    resolveTreeFile: async () => null,
   });
 }
 
 beforeEach(() => {
   ipcRegistry.handlers.clear();
+  resetInvokeRegistry();
   vi.clearAllMocks();
 });
 
@@ -300,7 +306,12 @@ describe("IPC channel coverage", () => {
     const expected = listExpectedHandlerChannels().filter(
       (channel) => !CHANNELS_REGISTERED_IN_INDEX.includes(channel as never),
     );
-    const missing = expected.filter((channel) => !ipcRegistry.handlers.has(channel));
+    // Shell registrars land on the (mocked) ipcMain; server registrars land
+    // in the Electron-free invoke registry. Coverage = the union.
+    const invokeChannels = new Set(listRegisteredInvokeChannels());
+    const missing = expected.filter(
+      (channel) => !ipcRegistry.handlers.has(channel) && !invokeChannels.has(channel),
+    );
     expect(missing).toEqual([]);
   });
 

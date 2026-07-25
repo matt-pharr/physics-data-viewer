@@ -22,7 +22,8 @@ import { promisify } from "util";
 import * as path from "path";
 import * as os from "os";
 import * as fs from "fs";
-import { BrowserWindow } from "electron";
+import type { PushSender } from "./server/invoke-registry";
+import { getResourcesRoot } from "./server/server-paths";
 import { sanitizedJuliaEnv } from "./julia-discovery";
 import { coreVersion, getAppVersion } from "./pdv-protocol";
 import { parseMajorMinor } from "./python-versions";
@@ -444,8 +445,9 @@ export class EnvironmentDetector {
    */
   static resolveBundledPDVPath(): string | null {
     // Packaged: pdv-python/ is copied into the resources directory.
-    if (process.resourcesPath) {
-      const resourcesCandidate = path.join(process.resourcesPath, "pdv-python");
+    const resourcesRoot = getResourcesRoot();
+    if (resourcesRoot) {
+      const resourcesCandidate = path.join(resourcesRoot, "pdv-python");
       if (fs.existsSync(path.join(resourcesCandidate, "pyproject.toml"))) {
         return resourcesCandidate;
       }
@@ -482,8 +484,9 @@ export class EnvironmentDetector {
         return null;
       }
     };
-    if (process.resourcesPath) {
-      const packaged = findWheel(path.join(process.resourcesPath, "pdv-python-wheel"));
+    const resourcesRoot = getResourcesRoot();
+    if (resourcesRoot) {
+      const packaged = findWheel(path.join(resourcesRoot, "pdv-python-wheel"));
       if (packaged) {
         return packaged;
       }
@@ -587,16 +590,16 @@ export class EnvironmentDetector {
 
   /**
    * Install ``pdv-python`` from the bundled source into a Python environment,
-   * streaming pip output to a BrowserWindow via a push channel.
+   * streaming pip output to the renderer via a push channel.
    *
    * @param pythonPath - Target Python executable.
-   * @param win - BrowserWindow to stream output chunks to (optional).
+   * @param push - Push sender to stream output chunks through (optional).
    * @param pushChannel - IPC channel name for output chunks.
    * @returns Install result with success flag and full output.
    */
   static installPDVFromBundle(
     pythonPath: string,
-    win?: BrowserWindow,
+    push?: PushSender,
     pushChannel?: string
   ): Promise<EnvironmentInstallResult> {
     const bundledPath = EnvironmentDetector.resolveBundledPDVPath();
@@ -644,8 +647,8 @@ export class EnvironmentDetector {
 
       const sendChunk = (stream: "stdout" | "stderr", data: string): void => {
         chunks.push(data);
-        if (win && pushChannel) {
-          win.webContents.send(pushChannel, { stream, data } as InstallOutputChunk);
+        if (push && pushChannel) {
+          push(pushChannel, { stream, data } as InstallOutputChunk);
         }
       };
 

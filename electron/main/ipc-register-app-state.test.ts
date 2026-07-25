@@ -3,7 +3,7 @@
  *
  * Covers all 19 channels in the registration: thin pass-throughs to dialog/
  * menu/auto-updater/shell are verified for delegation; behavior tests focus
- * on `config:set` (callback wiring, partial merge), `themes:save` (filesystem
+ * on `themes:save` (filesystem
  * write), `chrome:getInfo` (platform detection), and the close-confirmation
  * flow.
  */
@@ -92,11 +92,9 @@ vi.mock("./app", () => appLifecycleMocks);
 
 import { app } from "electron";
 import { IPC } from "./ipc";
-import type { PDVConfig } from "./config";
 import { registerAppStateIpcHandlers } from "./ipc-register-app-state";
 import {
   createBrowserWindowMock,
-  createConfigStoreMock,
   type InvokeHandler,
 } from "./test-helpers";
 
@@ -106,41 +104,29 @@ function getHandler(channel: string): InvokeHandler {
   return h;
 }
 
-function makeConfig(): PDVConfig {
-  return {
-    showPrivateVariables: false,
-    showModuleVariables: false,
-    showCallableVariables: false,
-    autoRefreshNamespace: false,
-  };
-}
-
 interface Harness {
   win: ReturnType<typeof createBrowserWindowMock>;
-  config: ReturnType<typeof createConfigStoreMock<PDVConfig>>;
   setAllowClose: ReturnType<typeof vi.fn>;
-  onConfigChanged: ReturnType<typeof vi.fn>;
   themesDir: string;
   stateDir: string;
 }
 
 function setup(): Harness {
   const win = createBrowserWindowMock();
-  const config = createConfigStoreMock<PDVConfig>(makeConfig());
   const setAllowClose = vi.fn();
-  const onConfigChanged = vi.fn();
   const themesDir = path.join(os.tmpdir(), "pdv-test-themes");
   const stateDir = path.join(os.tmpdir(), "pdv-test-state");
   registerAppStateIpcHandlers({
     win: win.win,
-    configStore: config.store,
-    readConfig: (store) => store.getAll() as PDVConfig,
     themesDir,
     stateDir,
     setAllowClose,
-    onConfigChanged,
+    updateCheckStamp: {
+      get: vi.fn(async () => undefined),
+      set: vi.fn(async () => undefined),
+    },
   });
-  return { win, config, setAllowClose, onConfigChanged, themesDir, stateDir };
+  return { win, setAllowClose, themesDir, stateDir };
 }
 
 beforeEach(() => {
@@ -154,77 +140,6 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks();
-});
-
-describe("config:get / config:set", () => {
-  it("config:get returns a fresh snapshot from the store", async () => {
-    const { config } = setup();
-    config.state.showPrivateVariables = true;
-    const result = await getHandler(IPC.config.get)({});
-    expect(result).toMatchObject({ showPrivateVariables: true });
-  });
-
-  it("config:set merges partial updates and triggers onConfigChanged with prev/next", async () => {
-    const { onConfigChanged } = setup();
-    await getHandler(IPC.config.set)({}, { autoRefreshNamespace: true });
-    expect(onConfigChanged).toHaveBeenCalledTimes(1);
-    const [prev, next] = onConfigChanged.mock.calls[0] as [PDVConfig, PDVConfig];
-    expect(prev.autoRefreshNamespace).toBe(false);
-    expect(next.autoRefreshNamespace).toBe(true);
-  });
-
-  it("config:set skips undefined keys and only writes defined ones", async () => {
-    const { config } = setup();
-    await getHandler(IPC.config.set)({}, {
-      autoRefreshNamespace: true,
-      pythonPath: undefined,
-    });
-    expect(config.set).toHaveBeenCalledWith("autoRefreshNamespace", true);
-    expect(config.set).not.toHaveBeenCalledWith("pythonPath", undefined);
-  });
-
-  it("config:set deep-merges the `mcp` subtree to preserve main-only fields", async () => {
-    // Simulate the main-side bearer-token persistence: the server has
-    // written `authToken` into `mcp`, and the renderer later writes a
-    // partial `mcp` block (no `authToken`) to flip a toggle. Without the
-    // deep-merge, a full replace would silently wipe `authToken` and
-    // break every connected agent on the next toggle.
-    const { config } = setup();
-    (config.state as unknown as Record<string, unknown>).mcp = {
-      authToken: "secret-token",
-      defaultPort: 7391,
-    };
-
-    await getHandler(IPC.config.set)({}, {
-      mcp: { mutatingToolsEnabled: true },
-    } as Partial<PDVConfig>);
-
-    expect((config.state as unknown as Record<string, unknown>).mcp).toMatchObject({
-      authToken: "secret-token",
-      defaultPort: 7391,
-      mutatingToolsEnabled: true,
-    });
-  });
-
-  it("config:set deep-merges the `launchers` subtree to preserve sibling slots", async () => {
-    // A partial `launchers` update (just the agent slot) must not wipe the
-    // previously-saved `terminal` / `editor` slots.
-    const { config } = setup();
-    (config.state as unknown as Record<string, unknown>).launchers = {
-      terminal: { preset: "alacritty" },
-      editor: { fileCommand: "nvim {}" },
-    };
-
-    await getHandler(IPC.config.set)({}, {
-      launchers: { agent: { command: "claude" } },
-    } as Partial<PDVConfig>);
-
-    expect((config.state as unknown as Record<string, unknown>).launchers).toMatchObject({
-      terminal: { preset: "alacritty" },
-      editor: { fileCommand: "nvim {}" },
-      agent: { command: "claude" },
-    });
-  });
 });
 
 describe("themes:get / themes:save / themes:openDir", () => {

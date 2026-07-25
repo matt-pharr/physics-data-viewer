@@ -91,7 +91,8 @@ function makeCtx(opts: CtxOpts = {}): McpToolContext {
       write: opts.cellWriteSpy ?? vi.fn(),
       list: vi.fn(),
     } as unknown as McpToolContext["cellRpc"],
-    getRendererWindow: () => null,
+    push: () => undefined,
+    confirm: async () => 0,
     getSessionGeneration: () => 0,
     recordCellRead: vi.fn((_sessionId, tabId, code) => {
       opts.cellReadHashes?.set(tabId, hashCellCode(code));

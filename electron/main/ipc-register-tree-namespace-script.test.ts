@@ -34,16 +34,6 @@ const fsMocks = vi.hoisted(() => ({
   stat: vi.fn(async () => ({ isDirectory: () => true })),
 }));
 
-const childProcessMocks = vi.hoisted(() => ({
-  spawn: vi.fn(() => {
-    const child: { on: ReturnType<typeof vi.fn>; unref: ReturnType<typeof vi.fn> } = {
-      on: vi.fn(),
-      unref: vi.fn(),
-    };
-    return child;
-  }),
-}));
-
 vi.mock("electron", () => ({
   ipcMain: {
     handle: ipcRegistry.ipcHandle,
@@ -52,7 +42,6 @@ vi.mock("electron", () => ({
 }));
 
 vi.mock("fs/promises", () => fsMocks);
-vi.mock("child_process", () => childProcessMocks);
 
 import { HandlerInvokeTracker } from "./handler-invoke-tracker";
 import { IPC } from "./ipc";
@@ -66,14 +55,14 @@ import {
   makeKernelInfo,
   makeOkResponse,
   type InvokeHandler,
+  getInvokeHandler,
+  resetInvokeRegistry,
 } from "./test-helpers";
 import { QueryRouter } from "./query-router";
 import type { PDVConfig } from "./config";
 
 function getHandler(channel: string): InvokeHandler {
-  const h = ipcRegistry.handlers.get(channel);
-  if (!h) throw new Error(`Channel not registered: ${channel}`);
-  return h;
+  return getInvokeHandler(channel);
 }
 
 interface Harness {
@@ -122,8 +111,6 @@ function setup(initial: { knownAliases?: Set<string> } = {}): Harness {
       `${n.replace(/\s+/g, "_")}.${language === "julia" ? "jl" : "py"}`,
     ensureScriptFile: async () => undefined,
     ensureLibFile: async () => undefined,
-    buildEditorSpawn: (_cmd, file) => ({ file: "code", args: [file] }),
-    resolveEditorSpawn: (file, args, _opts) => ({ file, args }),
   });
 
   return {
@@ -141,6 +128,7 @@ function setup(initial: { knownAliases?: Set<string> } = {}): Harness {
 
 beforeEach(() => {
   ipcRegistry.handlers.clear();
+  resetInvokeRegistry();
   vi.clearAllMocks();
 });
 
@@ -456,35 +444,6 @@ describe("tree:print", () => {
         origin: { kind: "unknown" },
       }),
     ).rejects.toThrow(/Kernel not found/);
-  });
-});
-
-describe("script:edit", () => {
-  it("returns success:false when the kernel cannot resolve a file path", async () => {
-    const harness = setup();
-    harness.commRouter.request.mockResolvedValueOnce(makeOkResponse({}));
-    const result = (await getHandler(IPC.script.edit)({}, "k1", "missing.script")) as {
-      success: boolean;
-      error?: string;
-    };
-    expect(result.success).toBe(false);
-    expect(result.error).toMatch(/Could not resolve/);
-  });
-
-  it("spawns the editor process with resolved path and detached child handles", async () => {
-    const harness = setup();
-    harness.commRouter.request.mockResolvedValueOnce(
-      makeOkResponse({ file_path: "/tmp/wd/scripts/demo.py" }),
-    );
-    const result = (await getHandler(IPC.script.edit)({}, "k1", "scripts.demo")) as {
-      success: boolean;
-    };
-    expect(result.success).toBe(true);
-    expect(childProcessMocks.spawn).toHaveBeenCalledWith(
-      "code",
-      ["/tmp/wd/scripts/demo.py"],
-      expect.objectContaining({ detached: true, stdio: "ignore" }),
-    );
   });
 });
 

@@ -60,6 +60,27 @@ export function handleIpc(channel: string, handler: IpcInvokeHandler): void {
 }
 
 /**
+ * Register an `ipcMain.handle` listener WITHOUT the error-normalization
+ * wrapper, recording its channel for teardown like {@link handleIpc}.
+ *
+ * Used only by the server bridge (`shell/server-bridge.ts`) for its
+ * `SERVER_CHANNELS` forwarders: the pdv-server's `dispatchInvoke` already
+ * logged and normalized the error before it crossed the transport, so
+ * wrapping again here would double-log every failure and alter the
+ * renderer-visible message. All other registrations keep using
+ * {@link handleIpc}.
+ *
+ * @param channel - IPC channel name (a constant from `ipc.ts`).
+ * @param handler - Invoke handler, exactly as `ipcMain.handle` accepts.
+ * @throws Error if `ipcMain` already has a handler for `channel`
+ *   (propagated from Electron).
+ */
+export function handleIpcRaw(channel: string, handler: IpcInvokeHandler): void {
+  ipcMain.handle(channel, handler);
+  registeredChannels.add(channel);
+}
+
+/**
  * Remove every handler registered through {@link handleIpc} and clear
  * the record. Called by `unregisterIpcHandlers()` before the handlers
  * are registered anew (e.g. macOS window re-creation on activate).

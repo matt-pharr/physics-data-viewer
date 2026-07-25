@@ -14,8 +14,8 @@
 
 import * as fs from "fs/promises";
 import * as path from "path";
-import { BrowserWindow, dialog } from "electron";
-import { handleIpc } from "./ipc-registry";
+import type { ConfirmFn } from "./server/confirm";
+import { handleInvoke, type PushSender } from "./server/invoke-registry";
 
 import { CommRouter } from "./comm-router";
 import {
@@ -58,7 +58,10 @@ import { ProjectManager, type ProjectModuleImport } from "./project-manager";
 type ProjectManifest = Awaited<ReturnType<typeof ProjectManager.readManifest>>;
 
 interface RegisterModulesIpcHandlersOptions {
-  win: BrowserWindow;
+  /** Renderer-push sender (no-op once the window is gone). */
+  push: PushSender;
+  /** Native confirmation dialog (injected — see server/confirm.ts). */
+  confirm: ConfirmFn;
   kernelManager: KernelManager;
   commRouter: CommRouter;
   moduleManager: ModuleManager;
@@ -88,7 +91,8 @@ export function registerModulesIpcHandlers(
   options: RegisterModulesIpcHandlersOptions
 ): void {
   const {
-    win,
+    push,
+    confirm,
     kernelManager,
     commRouter,
     moduleManager,
@@ -104,26 +108,26 @@ export function registerModulesIpcHandlers(
     runWithProjectManifestWriteLock,
   } = options;
 
-  handleIpc(
+  handleInvoke(
     IPC.modules.listInstalled,
     async (): Promise<ModuleDescriptor[]> => moduleManager.listInstalled()
   );
 
-  handleIpc(
+  handleInvoke(
     IPC.modules.install,
-    async (_event, request: ModuleInstallRequest): Promise<ModuleInstallResult> =>
+    async (_ctx, request: ModuleInstallRequest): Promise<ModuleInstallResult> =>
       moduleManager.install(request)
   );
 
-  handleIpc(
+  handleInvoke(
     IPC.modules.checkUpdates,
-    async (_event, moduleId: string): Promise<ModuleUpdateResult> =>
+    async (_ctx, moduleId: string): Promise<ModuleUpdateResult> =>
       moduleManager.checkUpdates(moduleId)
   );
 
-  handleIpc(
+  handleInvoke(
     IPC.modules.importToProject,
-    async (_event, request: ModuleImportRequest): Promise<ModuleImportResult> => {
+    async (_ctx, request: ModuleImportRequest): Promise<ModuleImportResult> => {
       const installedModules = await moduleManager.listInstalled();
       const installed = installedModules.find((entry) => entry.id === request.moduleId);
       if (!installed) {
@@ -227,7 +231,7 @@ export function registerModulesIpcHandlers(
           await commRouter.request(PDVMessageType.MODULES_SETUP, setupPayload);
         }
       }
-      win.webContents.send(IPC.push.treeChanged, {
+      push(IPC.push.treeChanged, {
         changed_paths: [baseAlias],
         change_type: "updated",
       });
@@ -240,9 +244,9 @@ export function registerModulesIpcHandlers(
     }
   );
 
-  handleIpc(
+  handleInvoke(
     IPC.modules.createEmpty,
-    async (_event, request: ModuleCreateEmptyRequest): Promise<ModuleCreateEmptyResult> => {
+    async (_ctx, request: ModuleCreateEmptyRequest): Promise<ModuleCreateEmptyResult> => {
       // Normalize and validate the requested id. Collision detection mirrors
       // the importToProject flow: any existing on-disk OR pending module alias
       // blocks creation and the response suggests the next available id.
@@ -371,7 +375,7 @@ export function registerModulesIpcHandlers(
         if (idx >= 0) pendingImports.splice(idx, 1);
       }
 
-      win.webContents.send(IPC.push.treeChanged, {
+      push(IPC.push.treeChanged, {
         changed_paths: [baseAlias],
         change_type: "updated",
       });
@@ -380,9 +384,9 @@ export function registerModulesIpcHandlers(
     },
   );
 
-  handleIpc(
+  handleInvoke(
     IPC.modules.updateMetadata,
-    async (_event, request: ModuleUpdateMetadataRequest): Promise<ModuleUpdateMetadataResult> => {
+    async (_ctx, request: ModuleUpdateMetadataRequest): Promise<ModuleUpdateMetadataResult> => {
       if (!request?.alias) {
         return { success: false, error: "alias is required" };
       }
@@ -403,7 +407,7 @@ export function registerModulesIpcHandlers(
           version?: string;
           description?: string;
         };
-        win.webContents.send(IPC.push.treeChanged, {
+        push(IPC.push.treeChanged, {
           changed_paths: [request.alias],
           change_type: "updated",
         });
@@ -423,9 +427,9 @@ export function registerModulesIpcHandlers(
     },
   );
 
-  handleIpc(
+  handleInvoke(
     IPC.modules.exportFromProject,
-    async (_event, request: ModuleExportRequest): Promise<ModuleExportResult> => {
+    async (_ctx, request: ModuleExportRequest): Promise<ModuleExportResult> => {
       if (!request?.alias) {
         return { success: false, status: "error", error: "alias is required" };
       }
@@ -495,7 +499,7 @@ export function registerModulesIpcHandlers(
         // destination doesn't exist yet — fresh publish, no prompt needed.
       }
       if (destExists && !request.overwrite) {
-        const confirmResult = await dialog.showMessageBox(win, {
+        const confirmResponse = await confirm({
           type: "question",
           buttons: ["Overwrite", "Cancel"],
           defaultId: 0,
@@ -507,7 +511,7 @@ export function registerModulesIpcHandlers(
             `import this module will pick up the changes on their next ` +
             `import. Bundled example modules cannot be overwritten here.`,
         });
-        if (confirmResult.response !== 0) {
+        if (confirmResponse !== 0) {
           return { success: false, status: "cancelled" };
         }
       }
@@ -552,7 +556,7 @@ export function registerModulesIpcHandlers(
     },
   );
 
-  handleIpc(
+  handleInvoke(
     IPC.modules.listImported,
     async (): Promise<ImportedModuleDescriptor[]> => {
       if (!getActiveKernelId()) return [];
@@ -618,9 +622,9 @@ export function registerModulesIpcHandlers(
     }
   );
 
-  handleIpc(
+  handleInvoke(
     IPC.modules.saveSettings,
-    async (_event, request: ModuleSettingsRequest): Promise<ModuleSettingsResult> => {
+    async (_ctx, request: ModuleSettingsRequest): Promise<ModuleSettingsResult> => {
       if (!request.values || typeof request.values !== "object" || Array.isArray(request.values)) {
         return {
           success: false,
@@ -675,9 +679,9 @@ export function registerModulesIpcHandlers(
     }
   );
 
-  handleIpc(
+  handleInvoke(
     IPC.modules.runAction,
-    async (_event, request: ModuleActionRequest): Promise<ModuleActionResult> => {
+    async (_ctx, request: ModuleActionRequest): Promise<ModuleActionResult> => {
       if (!kernelManager.getKernel(request.kernelId)) {
         return {
           success: false,
@@ -740,9 +744,9 @@ export function registerModulesIpcHandlers(
     }
   );
 
-  handleIpc(
+  handleInvoke(
     IPC.modules.removeImport,
-    async (_event, moduleAlias: string): Promise<ModuleSettingsResult> => {
+    async (_ctx, moduleAlias: string): Promise<ModuleSettingsResult> => {
       const pendingImports = getPendingModuleImports();
       const pendingIndex = pendingImports.findIndex((entry) => entry.alias === moduleAlias);
       if (pendingIndex >= 0) {
@@ -783,15 +787,15 @@ export function registerModulesIpcHandlers(
     }
   );
 
-  handleIpc(
+  handleInvoke(
     IPC.modules.uninstall,
-    async (_event, moduleId: string): Promise<ModuleUninstallResult> =>
+    async (_ctx, moduleId: string): Promise<ModuleUninstallResult> =>
       moduleManager.uninstall(moduleId)
   );
 
-  handleIpc(
+  handleInvoke(
     IPC.modules.update,
-    async (_event, moduleId: string): Promise<ModuleInstallResult> =>
+    async (_ctx, moduleId: string): Promise<ModuleInstallResult> =>
       moduleManager.update(moduleId)
   );
 }
