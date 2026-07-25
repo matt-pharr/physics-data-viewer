@@ -6,7 +6,14 @@
  * does, assembles the server core via `wireServer()`, and serves the
  * invoke registry over the stdio RPC transport (`transport/rpc-server.ts`).
  *
- * Invocation: `pdv-server serve --stdio`, with the environment contract:
+ * Invocations:
+ * - `pdv-server serve --stdio` — serve a session over stdio RPC.
+ * - `pdv-server self-check`    — verify this bundle works on this host and
+ *   print one JSON verdict line. The one mode where stdout is *not* the
+ *   protocol channel; it ships inside the bundle so it is version-locked to
+ *   the code it vouches for.
+ *
+ * Environment contract for `serve`:
  * - `PDV_APP_VERSION`   (required) — unified app version for the hello push.
  * - `PDV_USER_DATA_DIR` (required) — Electron userData equivalent
  *   (consumed by `server-paths.ts`).
@@ -47,6 +54,7 @@ import { QueryRouter } from "../query-router";
 import { setAppVersion } from "../pdv-protocol";
 import { RPC_CHANNELS } from "../transport/protocol";
 import { RpcServer } from "../transport/rpc-server";
+import { runSelfCheck } from "./self-check";
 import { ShellConfirmBroker } from "./shell-confirm";
 import { getWiredCellRpc, getWiredMcpServer, unwireServer, wireServer, type WireHandle } from "./wire";
 
@@ -59,8 +67,23 @@ import { getWiredCellRpc, getWiredMcpServer, unwireServer, wireServer, type Wire
  */
 export function serverMain(): void {
   const args = process.argv.slice(2);
-  if (args[0] !== "serve" || !args.includes("--stdio")) {
-    console.error("usage: pdv-server serve --stdio");
+  const subcommand = args[0];
+
+  if (subcommand === "self-check") {
+    // Deliberately before every environment requirement below: a self-check
+    // exists to diagnose a host, and refusing to run it because the session
+    // variables are unset would withhold the diagnosis exactly when it is
+    // needed. It also must not construct any manager — the point is to test
+    // the *bundle*, not to start a session.
+    void runSelfCheck().then((report) => {
+      process.stdout.write(JSON.stringify(report) + "\n");
+      process.exit(report.ok ? 0 : 1);
+    });
+    return;
+  }
+
+  if (subcommand !== "serve" || !args.includes("--stdio")) {
+    console.error("usage: pdv-server serve --stdio | pdv-server self-check");
     process.exit(2);
   }
 
