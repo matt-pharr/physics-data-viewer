@@ -22,9 +22,18 @@ export type ConnectionState =
 export interface SessionSlice {
   connectionState: ConnectionState;
   setConnectionState: (state: ConnectionState) => void;
+  /**
+   * SSH alias backing this session, or null when it runs on this machine.
+   * Recents are qualified with it so the same path on two hosts stays two
+   * distinct projects.
+   */
+  remoteHost: string | null;
+  setRemoteHost: (host: string | null) => void;
 }
 
 export const createSessionSlice: AppSlice<SessionSlice> = (set) => ({
   connectionState: 'local',
   setConnectionState: (connectionState) => set({ connectionState }),
+  remoteHost: null,
+  setRemoteHost: (remoteHost) => set({ remoteHost }),
 });

@@ -176,12 +176,25 @@ export interface CodeCellData {
   activeTabId: number;
 }
 
+/** One entry in the recent-projects list. */
+export interface RecentProjectEntry {
+  /** SSH host alias, or null when the project is on this machine. */
+  host: string | null;
+  /** Absolute project directory path, interpreted on `host`. */
+  path: string;
+}
+
 /** File-menu action event payload emitted by `menu.onAction`. */
 export interface MenuActionPayload {
   /** Discriminated menu action identifier. */
   action: "project:new" | "project:open" | "project:openRecent" | "project:save" | "project:saveAs" | "recentProjects:clear" | "modules:import" | "modules:newEmpty" | "settings:open";
   /** Optional path argument for path-bearing menu actions. */
   path?: string;
+  /**
+   * Host the open-recent `path` lives on: an SSH alias, or null for this
+   * machine. Absent for every other action.
+   */
+  host?: string | null;
 }
 
 /** Partial map of menu item IDs to enabled/disabled state. */
@@ -384,8 +397,12 @@ export interface Config {
   cwd?: string;
   /** Whether current project is trusted for script execution. */
   trusted?: boolean;
-  /** Most-recent project paths for menu quick access. */
-  recentProjects?: string[];
+  /**
+   * Most-recent projects for menu quick access, most recent first. Each is
+   * qualified by the host it lives on (`host: null` for this machine), so
+   * the same path on two machines stays two distinct projects.
+   */
+  recentProjects?: RecentProjectEntry[];
   /** Python executable configured by user. */
   pythonPath?: string;
   /** Julia executable configured by user. */
@@ -1323,7 +1340,7 @@ export interface PDVApi {
     pickDirectory(defaultPath?: string): Promise<string | null>;
   };
   menu: {
-    updateRecentProjects(paths: string[]): Promise<boolean>;
+    updateRecentProjects(entries: RecentProjectEntry[]): Promise<boolean>;
     updateEnabled(state: MenuEnabledState): Promise<boolean>;
     getModel(): Promise<AppMenuTopLevel[]>;
     popup(menuId: AppMenuTopLevel["id"], x: number, y: number): Promise<boolean>;

@@ -191,8 +191,10 @@ export function registerAppStateIpcHandlers(
     return shell.openPath(themesDir);
   });
 
-  handleIpc(IPC.menu.updateRecentProjects, async (_event, paths: string[]) => {
-    updateRecentProjectsMenu(Array.isArray(paths) ? paths : []);
+  handleIpc(IPC.menu.updateRecentProjects, async (_event, entries: unknown) => {
+    // Normalization (including tolerating the legacy `string[]` form) happens
+    // inside updateRecentProjectsMenu, which is also what a non-array reaches.
+    updateRecentProjectsMenu(entries);
     return true;
   });
 

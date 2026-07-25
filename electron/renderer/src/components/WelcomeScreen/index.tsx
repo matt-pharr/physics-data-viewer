@@ -14,6 +14,12 @@ import React from 'react';
 /** Entry in the recent projects list with optional language and name metadata. */
 export interface RecentProject {
   path: string;
+  /**
+   * SSH alias the project lives on, or null for this machine. Remote entries
+   * carry no manifest metadata: reading it means connecting to the host
+   * first, which is not something the welcome screen should do on its own.
+   */
+  host?: string | null;
   language?: "python" | "julia";
   /** Project name from the manifest (falls back to folder name when absent). */
   name?: string;
@@ -225,13 +231,20 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
             </div>
             <ul className="welcome-recent-list">
               {recentProjects.map((entry) => (
-                <li key={entry.path}>
+                // Keyed on host + path: the same path on two machines is two
+                // different projects, so path alone would collide.
+                <li key={`${entry.host ?? ''}:${entry.path}`}>
                   <button
                     className="welcome-recent-item"
                     onClick={() => onOpenRecent(entry.path, entry.language)}
-                    title={entry.path}
+                    title={entry.host ? `${entry.host}:${entry.path}` : entry.path}
                   >
-                    <span className="welcome-recent-badge">[{languageBadge(entry.language)}]</span>
+                    {/* A remote entry's manifest is not read from here, so its
+                        language is genuinely unknown — show the host rather
+                        than defaulting to a language we would be guessing. */}
+                    <span className="welcome-recent-badge">
+                      [{entry.host ?? languageBadge(entry.language)}]
+                    </span>
                     <span className="welcome-recent-name">{entry.name ?? projectName(entry.path)}</span>
                     <span className="welcome-recent-path">{projectDir(entry.path)}</span>
                   </button>

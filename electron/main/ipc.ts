@@ -36,14 +36,14 @@ import type {
  * of truth via type-only imports.
  */
 export type { NodeDescriptor } from "./pdv-protocol";
-import type { PDVConfig } from "./config";
+import type { PDVConfig, RecentProjectEntry } from "./config";
 import type {
   EnvironmentInfo,
   EnvironmentInstallResult,
   InstallOutputChunk,
 } from "./environment-detector";
 
-export type { PDVConfig } from "./config";
+export type { PDVConfig, RecentProjectEntry } from "./config";
 /**
  * Re-export the launcher types so renderer-facing type files can consume
  * them via `types/pdv.d.ts` without importing across the main↔renderer
@@ -1290,6 +1290,11 @@ export interface MenuActionPayload {
     | "settings:open";
   /** Project directory path for open-recent actions. */
   path?: string;
+  /**
+   * Host the open-recent `path` lives on: an SSH alias, or null for this
+   * machine. Absent for every other action.
+   */
+  host?: string | null;
 }
 
 /**
@@ -3047,12 +3052,13 @@ export interface PDVApi {
   /** App menu integration. */
   menu: {
     /**
-     * Push the latest recent-project paths into the File → Open Recent submenu.
+     * Push the latest recent projects into the File → Open Recent submenu.
      *
-     * @param paths - Recent project directories (most recent first).
+     * @param entries - Recent projects (most recent first), each qualified
+     *   by the host it lives on (`host: null` for this machine).
      * @returns True when the menu was updated.
      */
-    updateRecentProjects(paths: string[]): Promise<boolean>;
+    updateRecentProjects(entries: RecentProjectEntry[]): Promise<boolean>;
     /**
      * Update enabled/disabled state for File-menu items.
      *

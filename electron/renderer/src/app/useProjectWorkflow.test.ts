@@ -23,6 +23,7 @@ import type {
 import type { ProgressPayload } from "../types/pdv";
 import { useProjectWorkflow } from "./useProjectWorkflow";
 import { MAX_RECENT_PROJECTS } from "./constants";
+import type { RecentProjectEntry } from "../types";
 
 type KernelStatus = "idle" | "starting" | "ready" | "error";
 
@@ -400,9 +401,11 @@ describe("useProjectWorkflow recent-projects bookkeeping", () => {
       { length: MAX_RECENT_PROJECTS },
       (_, i) => `/projects/old-${i}`,
     );
+    // Seeded in the legacy `string[]` form on purpose: an existing install's
+    // list must survive host-qualification rather than appear empty.
     const { setters } = createState({
       currentProjectDir: "/projects/x",
-      config: { recentProjects: initialRecents } as Config,
+      config: { recentProjects: initialRecents } as unknown as Config,
     });
     const setMock = vi.fn(async (cfg) => cfg as never);
     const { result, pdv } = renderHookWithPdv(
@@ -410,7 +413,7 @@ describe("useProjectWorkflow recent-projects bookkeeping", () => {
         useProjectWorkflow({
           ...setters,
           currentProjectDir: "/projects/x",
-          config: { recentProjects: initialRecents } as Config,
+          config: { recentProjects: initialRecents } as unknown as Config,
         }),
       {
         pdvOverrides: {
@@ -430,10 +433,14 @@ describe("useProjectWorkflow recent-projects bookkeeping", () => {
     });
     expect(pdv.config.set).toHaveBeenCalledTimes(1);
     const { recentProjects } = (pdv.config.set as ReturnType<typeof vi.fn>).mock
-      .calls[0][0] as { recentProjects: string[] };
+      .calls[0][0] as { recentProjects: RecentProjectEntry[] };
     // The newly saved dir is at the front, no duplicates, length capped.
-    expect(recentProjects[0]).toBe("/projects/x");
-    expect(new Set(recentProjects).size).toBe(recentProjects.length);
+    // A local session records host: null.
+    expect(recentProjects[0]).toEqual({ host: null, path: "/projects/x" });
+    // Legacy string entries survived the upgrade as local ones.
+    expect(recentProjects[1]).toEqual({ host: null, path: "/projects/old-0" });
+    const keys = recentProjects.map((e) => `${e.host ?? ""} ${e.path}`);
+    expect(new Set(keys).size).toBe(keys.length);
     expect(recentProjects.length).toBeLessThanOrEqual(MAX_RECENT_PROJECTS);
   });
 });

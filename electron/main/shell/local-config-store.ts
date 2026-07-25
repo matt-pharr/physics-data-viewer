@@ -33,7 +33,7 @@ import * as fs from "fs";
 import * as path from "path";
 
 import { atomicWriteFileSync } from "../atomic-write";
-import type { PDVConfig } from "../config";
+import { normalizeRecentProjects, type PDVConfig } from "../config";
 
 /**
  * Config keys owned by the shell rather than the session's server.
@@ -118,11 +118,10 @@ function parseLocalConfig(obj: Record<string, unknown>): Partial<LocalConfig> {
   if (typeof obj.lastUpdateCheck === "number") {
     out.lastUpdateCheck = obj.lastUpdateCheck;
   }
-  if (
-    Array.isArray(obj.recentProjects) &&
-    obj.recentProjects.every((entry) => typeof entry === "string")
-  ) {
-    out.recentProjects = obj.recentProjects;
+  if (Array.isArray(obj.recentProjects)) {
+    // Tolerates the legacy `string[]` form written before recents were
+    // host-qualified, so an existing list survives the upgrade.
+    out.recentProjects = normalizeRecentProjects(obj.recentProjects);
   }
   return out as Partial<LocalConfig>;
 }

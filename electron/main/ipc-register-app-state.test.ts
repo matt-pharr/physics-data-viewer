@@ -166,16 +166,22 @@ describe("themes:get / themes:save / themes:openDir", () => {
 });
 
 describe("menu:* delegations", () => {
-  it("menu:updateRecentProjects forwards array values", async () => {
+  it("menu:updateRecentProjects forwards entries verbatim", async () => {
+    // Normalization (and legacy-shape tolerance) belongs to the menu module,
+    // so the registrar must not pre-filter and lose the host qualifier.
     setup();
-    await getHandler(IPC.menu.updateRecentProjects)({}, ["/a", "/b"]);
-    expect(menuMocks.updateRecentProjectsMenu).toHaveBeenCalledWith(["/a", "/b"]);
+    const entries = [
+      { host: null, path: "/a" },
+      { host: "flux", path: "/scratch/b" },
+    ];
+    await getHandler(IPC.menu.updateRecentProjects)({}, entries);
+    expect(menuMocks.updateRecentProjectsMenu).toHaveBeenCalledWith(entries);
   });
 
-  it("menu:updateRecentProjects coerces non-array input to []", async () => {
+  it("menu:updateRecentProjects passes non-array input through for the menu to reject", async () => {
     setup();
     await getHandler(IPC.menu.updateRecentProjects)({}, null);
-    expect(menuMocks.updateRecentProjectsMenu).toHaveBeenCalledWith([]);
+    expect(menuMocks.updateRecentProjectsMenu).toHaveBeenCalledWith(null);
   });
 
   it("menu:popup delegates with menuId, x, y", async () => {
