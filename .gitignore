@@ -47,3 +47,7 @@ pdv-icon.iconset
 site/
 # Julia package manager artifacts (pdv-julia is a library; the manifest is machine-local)
 pdv-julia/Manifest.toml
+
+# A literal `$HOME` directory is always a bug — a shell path that was
+# single-quoted somewhere and so never expanded. Never intentional.
+$HOME/

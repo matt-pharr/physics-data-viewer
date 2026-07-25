@@ -17,6 +17,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { installBundle, probeHost, sha256File, uploadFile } from "./bootstrap";
 import type { SshControl } from "./ssh-mux";
+import { TEST_PDV_VERSION } from "../test-helpers";
 
 const FAKE_SSH = path.join(__dirname, "__fixtures__", "fake-ssh.cjs");
 const control: SshControl = { host: "feyn", controlPath: "/tmp/pdv-bootstrap-test.sock" };
@@ -32,7 +33,7 @@ function setEnv(key: string, value: string | undefined): void {
 }
 
 function opts(extra: Record<string, unknown> = {}) {
-  return { sshPath: FAKE_SSH, version: "0.2.0", timeoutMs: 60_000, ...extra };
+  return { sshPath: FAKE_SSH, version: TEST_PDV_VERSION, timeoutMs: 60_000, ...extra };
 }
 
 /**
@@ -88,15 +89,15 @@ describe("probeHost", () => {
 
   it("reports an install as absent until a self-check is cached", async () => {
     expect((await probeHost(control, opts())).installed).toBe(false);
-    fs.mkdirSync(path.join(home, ".pdv-server", "0.2.0"), { recursive: true });
-    fs.writeFileSync(path.join(home, ".pdv-server", "0.2.0", ".selfcheck.json"), "{}");
+    fs.mkdirSync(path.join(home, ".pdv-server", TEST_PDV_VERSION), { recursive: true });
+    fs.writeFileSync(path.join(home, ".pdv-server", TEST_PDV_VERSION, ".selfcheck.json"), "{}");
     expect((await probeHost(control, opts())).installed).toBe(true);
   }, 30_000);
 
   it("does not treat an unpacked-but-unverified directory as installed", async () => {
     // The directory exists but never passed a check. Believing it would skip
     // the install and fail later, opaquely.
-    fs.mkdirSync(path.join(home, ".pdv-server", "0.2.0"), { recursive: true });
+    fs.mkdirSync(path.join(home, ".pdv-server", TEST_PDV_VERSION), { recursive: true });
     expect((await probeHost(control, opts())).installed).toBe(false);
   }, 30_000);
 
@@ -144,11 +145,11 @@ describe("installBundle", () => {
     );
     expect(result.ok).toBe(true);
     // Shell-expandable by design — later steps interpolate it into commands.
-    expect(result.installDir).toBe("$HOME/.pdv-server/0.2.0");
-    expect(fs.existsSync(path.join(home, ".pdv-server", "0.2.0", "pdv-server.cjs"))).toBe(true);
+    expect(result.installDir).toBe(`$HOME/.pdv-server/${TEST_PDV_VERSION}`);
+    expect(fs.existsSync(path.join(home, ".pdv-server", TEST_PDV_VERSION, "pdv-server.cjs"))).toBe(true);
     // The cached verdict is what lets a later connect confirm the install in
     // one round trip instead of re-running everything.
-    expect(fs.existsSync(path.join(home, ".pdv-server", "0.2.0", ".selfcheck.json"))).toBe(true);
+    expect(fs.existsSync(path.join(home, ".pdv-server", TEST_PDV_VERSION, ".selfcheck.json"))).toBe(true);
     expect(stages).toEqual(expect.arrayContaining(["uploading", "verifying", "installing", "checking"]));
   }, 60_000);
 
@@ -168,7 +169,7 @@ describe("installBundle", () => {
     expect(result.message).toMatch(/checksum/i);
     // Nothing may be installed from an unverified transfer, and the partial
     // upload must not be left to be mistaken for a good one later.
-    expect(fs.existsSync(path.join(home, ".pdv-server", "0.2.0"))).toBe(false);
+    expect(fs.existsSync(path.join(home, ".pdv-server", TEST_PDV_VERSION))).toBe(false);
     expect(fs.readdirSync(path.join(home, ".pdv-server"))).toEqual([]);
   }, 60_000);
 
@@ -180,19 +181,19 @@ describe("installBundle", () => {
     // that is the actual thing the user has to act on.
     expect(result.message).toMatch(/messaging library|do not run/i);
     // No cached verdict: a failed check must never look like a good install.
-    expect(fs.existsSync(path.join(home, ".pdv-server", "0.2.0", ".selfcheck.json"))).toBe(false);
+    expect(fs.existsSync(path.join(home, ".pdv-server", TEST_PDV_VERSION, ".selfcheck.json"))).toBe(false);
   }, 60_000);
 
   it("replaces an existing install without leaving it half-written", async () => {
     const { tarball, sha256 } = makeBundle();
     await installBundle(control, tarball, sha256, opts());
-    const marker = path.join(home, ".pdv-server", "0.2.0", "stale-file");
+    const marker = path.join(home, ".pdv-server", TEST_PDV_VERSION, "stale-file");
     fs.writeFileSync(marker, "from the previous version");
 
     const second = await installBundle(control, tarball, sha256, opts());
     expect(second.ok).toBe(true);
     // The directory was swapped wholesale, not merged into.
     expect(fs.existsSync(marker)).toBe(false);
-    expect(fs.existsSync(path.join(home, ".pdv-server", "0.2.0.old"))).toBe(false);
+    expect(fs.existsSync(path.join(home, `.pdv-server`, `${TEST_PDV_VERSION}.old`))).toBe(false);
   }, 60_000);
 });
