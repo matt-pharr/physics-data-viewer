@@ -2,10 +2,12 @@
 /**
  * fake-ssh.cjs — Stand-in for the `ssh` binary in remote-layer tests.
  *
- * Emulates the surface `ssh-mux.ts` actually uses: `-o key=value` flags, the
- * `-O check` / `-O stop` control commands, and `ssh <host> <command>`. In its
- * default exec mode it really runs the command through `/bin/sh` on this
- * machine, so the exit sentinel, banner tolerance and exit-code plumbing are
+ * Emulates the surface `ssh-mux.ts` and `ssh-pty.ts` actually use: `-o
+ * key=value` flags, the `-O check` / `-O stop` control commands, master
+ * establishment (`-f -N -M`), and `ssh <host> <command>`. In its default exec
+ * mode it really runs the command through `/bin/sh` on this machine, and in
+ * its prompting auth modes it really reads from the terminal, so the exit
+ * sentinel, banner tolerance, exit-code plumbing and pty round trip are all
  * exercised end to end rather than mocked — the only thing missing is the
  * network.
  *
@@ -27,6 +29,17 @@
  * - FAKE_SSH_EXEC=exit255   — run nothing, print nothing, exit 255 *with* a
  *   sentinel claiming the remote command exited 255, i.e. the ambiguous case.
  *
+ * Master establishment (`-N`) is selected by FAKE_SSH_AUTH:
+ *
+ * - FAKE_SSH_AUTH=ok      — authenticate silently and exit 0 (default).
+ * - FAKE_SSH_AUTH=prompt  — ask for a password on the terminal and read the
+ *   reply, so a real pty round trip is exercised. Accepts FAKE_SSH_PASSWORD
+ *   (default "hunter2").
+ * - FAKE_SSH_AUTH=duo     — Duo's stateful two-stage menu, to prove a
+ *   multi-prompt exchange works without PDV modelling any of it.
+ * - FAKE_SSH_AUTH=fail    — refuse immediately, the way a rejected key does.
+ * - FAKE_SSH_AUTH=hang    — never exit, for deadline tests.
+ *
  * - FAKE_SSH_LOG — when set, append one JSON line of argv per invocation, so
  *   tests can assert which flags were passed.
  */
@@ -43,6 +56,7 @@ if (process.env.FAKE_SSH_LOG) {
 // Parse the subset of ssh's argv grammar this fixture needs.
 const options = {};
 let controlCommand = null;
+let createMaster = false;
 const positional = [];
 for (let i = 0; i < argv.length; i++) {
   const arg = argv[i];
@@ -52,7 +66,10 @@ for (let i = 0; i < argv.length; i++) {
     if (eq > 0) options[pair.slice(0, eq)] = pair.slice(eq + 1);
   } else if (arg === "-O") {
     controlCommand = argv[++i] || "";
-  } else if (arg === "-T" || arg === "-t" || arg === "-q") {
+  } else if (arg === "-N") {
+    // No remote command: this invocation exists to create a master.
+    createMaster = true;
+  } else if (arg === "-T" || arg === "-t" || arg === "-q" || arg === "-f" || arg === "-M") {
     // no-op flags
   } else {
     positional.push(arg);
@@ -99,6 +116,63 @@ if (controlCommand) {
     process.exit(0);
   }
   die(`Invalid multiplex command: ${controlCommand}`, 255);
+}
+
+// --- master establishment (-N, the interactive auth path) ------------------
+// Selected by FAKE_SSH_AUTH:
+//   ok      — authenticate silently and exit 0 (default).
+//   prompt  — ask for a password on the terminal and read the reply, so a
+//             real pty round trip is exercised. Accepts FAKE_SSH_PASSWORD
+//             (default "hunter2"), rejects anything else with exit 5.
+//   duo     — like `prompt`, but with Duo's two-stage menu, to prove a
+//             stateful multi-prompt exchange works.
+//   fail    — refuse immediately, the way a rejected key does.
+//   hang    — never exit, for deadline tests.
+if (createMaster) {
+  const authMode = process.env.FAKE_SSH_AUTH || "ok";
+  const expected = process.env.FAKE_SSH_PASSWORD || "hunter2";
+
+  if (authMode === "ok") process.exit(0);
+  if (authMode === "hang") { setInterval(() => {}, 1000); return; }
+  if (authMode === "fail") {
+    die("Permission denied (publickey,keyboard-interactive).", 255);
+  }
+
+  // Read one line at a time from the terminal.
+  const ask = (question, cb) => {
+    process.stdout.write(question);
+    let buf = "";
+    const onData = (d) => {
+      buf += d.toString();
+      const nl = buf.indexOf("\n");
+      if (nl < 0) return;
+      process.stdin.removeListener("data", onData);
+      process.stdin.pause();
+      cb(buf.slice(0, nl).replace(/\r$/, ""));
+    };
+    process.stdin.resume();
+    process.stdin.on("data", onData);
+  };
+
+  if (authMode === "duo") {
+    process.stdout.write("Duo two-factor login for mpharr\n\n");
+    ask("Passcode or option (1-3): ", (choice) => {
+      if (choice.trim() !== "1") die("Invalid option", 255);
+      process.stdout.write("Pushed a login request to your device...\n");
+      ask("Password: ", (answer) => {
+        if (answer !== expected) die("Permission denied, please try again.", 255);
+        process.stdout.write("Success. Logging you in...\n");
+        process.exit(0);
+      });
+    });
+    return;
+  }
+
+  ask("mpharr@flux.pppl.gov's password: ", (answer) => {
+    if (answer !== expected) die("Permission denied, please try again.", 255);
+    process.exit(0);
+  });
+  return;
 }
 
 // --- exec channel ----------------------------------------------------------

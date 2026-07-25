@@ -44,10 +44,21 @@ files:
 # node_modules/zeromq/node_modules/, so the zeromq glob already covers it and
 # this pattern matches nothing at the top level. Kept so a future hoist that
 # moves it up cannot quietly strand it inside the asar.
+# node-pty is unpacked for two reasons: its prebuilt pty.node is a native
+# binary, and on macOS/Linux UnixTerminal execs a sibling `spawn-helper`
+# executable by path — neither can be loaded or exec'd from inside an asar.
+# The helper's executable bit is restored at install time by
+# scripts/fix-node-pty-perms.mjs (node-pty ships it 644); electron-builder
+# copies whatever mode it finds, so that fix has to happen before packaging
+# or the packaged app fails with `posix_spawnp failed.`
+#
+# node-pty is shell-only. It must never reach the pdv-server bundle, which
+# runs as plain Node on a remote host that has no such binary.
 asarUnpack:
   - "node_modules/zeromq/**"
   - "node_modules/cmake-ts/**"
   - "node_modules/node-addon-api/**"
+  - "node_modules/node-pty/**"
 
 # pdv-python source is placed into the app's Resources directory
 # (Contents/Resources/ on macOS, resources/ on Linux).

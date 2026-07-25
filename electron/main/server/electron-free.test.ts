@@ -35,6 +35,17 @@ const ELECTRON_IMPORT_RE =
 const STDOUT_ACCESS_RE = /process\.stdout/;
 const STDOUT_ALLOWED = new Set(["server/server-main.ts"]);
 
+/**
+ * Matches any reach into the shell-only remote layer.
+ *
+ * `main/remote/` drives the *client* side of an ssh connection and depends
+ * on node-pty, a native module built for this machine. The pdv-server runs
+ * as plain Node on the remote host, where no such binary exists — and where
+ * the concept makes no sense anyway, since the server is the far end of the
+ * connection rather than the thing establishing it.
+ */
+const REMOTE_IMPORT_RE = /["'](?:\.\.?\/)*remote\/[a-z-]+["']|["']node-pty["']/;
+
 describe("server-destined files are Electron-free", () => {
   it("every listed file exists (list is not stale)", () => {
     const missing = SERVER_DESTINED_FILES.filter(
@@ -51,6 +62,18 @@ describe("server-destined files are Electron-free", () => {
       .filter(({ line }) => ELECTRON_IMPORT_RE.test(line));
     expect(offending).toEqual([]);
   });
+
+  it.each([...SERVER_DESTINED_FILES])(
+    "%s does not pull in the shell-only remote/ssh layer",
+    (rel) => {
+      const source = fs.readFileSync(path.join(MAIN_DIR, rel), "utf8");
+      const offending = source
+        .split("\n")
+        .map((line, i) => ({ line, n: i + 1 }))
+        .filter(({ line }) => REMOTE_IMPORT_RE.test(line));
+      expect(offending).toEqual([]);
+    },
+  );
 
   it.each([...SERVER_DESTINED_FILES])(
     "%s never writes to process.stdout (protocol channel)",
