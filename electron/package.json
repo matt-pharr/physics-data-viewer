@@ -2,6 +2,7 @@
   "name": "physics-data-viewer",
   "version": "0.2.0",
   "uvVersion": "0.11.6",
+  "remoteNodeVersion": "v22.23.1",
   "remoteNodeAbi": "127",
   "private": true,
   "author": {
@@ -32,6 +33,8 @@
     "build:renderer": "cd renderer && node ../node_modules/vite/bin/vite.js build",
     "build:main": "node ./node_modules/typescript/bin/tsc -p tsconfig.json",
     "build:server": "node scripts/build-server.mjs",
+    "build:server-bundle": "node scripts/build-server-bundle.mjs",
+    "fetch:remote-node": "node scripts/fetch-remote-node.mjs",
     "verify:server-bundle": "node scripts/verify-server-bundle.mjs",
     "build:e2e": "npm run build",
     "test:e2e": "node ./node_modules/@playwright/test/cli.js test --config=playwright.config.ts",
