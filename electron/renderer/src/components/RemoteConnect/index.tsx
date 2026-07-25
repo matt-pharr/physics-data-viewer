@@ -32,6 +32,7 @@ export const RemoteConnect: React.FC<RemoteConnectProps> = ({ onClose }) => {
   const log = useStore((s) => s.remoteLog);
   const secret = useStore((s) => s.remoteSecret);
   const message = useStore((s) => s.remoteMessage);
+  const progress = useStore((s) => s.remoteProgress);
   const clearRemoteLog = useStore((s) => s.clearRemoteLog);
 
   const [hosts, setHosts] = useState<RemoteHostAlias[]>([]);
@@ -45,7 +46,7 @@ export const RemoteConnect: React.FC<RemoteConnectProps> = ({ onClose }) => {
   const logRef = useRef<HTMLPreElement>(null);
   const replyRef = useRef<HTMLInputElement>(null);
 
-  const busy = phase === 'connecting' || phase === 'prompting';
+  const busy = phase === 'connecting' || phase === 'prompting' || phase === 'preparing';
   const connected = phase === 'connected';
   // A reopened dialog shows what it is connected to rather than an empty box.
   const target = typed ?? host ?? '';
@@ -141,7 +142,20 @@ export const RemoteConnect: React.FC<RemoteConnectProps> = ({ onClose }) => {
           <div className="remote-subtitle">
             {phase === 'prompting'
               ? `${host} is asking for something — answer below.`
-              : `Contacting ${host}… this can take a while if it needs approval on your phone or in your password manager.`}
+              : phase === 'preparing'
+                ? message ?? `Setting up ${host}…`
+                : `Contacting ${host}… this can take a while if it needs approval on your phone or in your password manager.`}
+          </div>
+        )}
+
+        {/* Only while a transfer is actually running: a probe or a checksum
+            is over before a progress bar would mean anything. */}
+        {phase === 'preparing' && progress && progress.total > 0 && (
+          <div className="remote-progress">
+            <div
+              className="remote-progress-fill"
+              style={{ width: `${Math.round((progress.transferred / progress.total) * 100)}%` }}
+            />
           </div>
         )}
 

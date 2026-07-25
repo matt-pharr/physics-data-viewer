@@ -106,3 +106,18 @@
   justify-content: flex-end;
   gap: 8px;
 }
+
+/* Upload progress. Shown only while bytes are moving — see RemoteConnect. */
+.remote-progress {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  overflow: hidden;
+}
+
+.remote-progress-fill {
+  height: 100%;
+  background: var(--accent);
+  transition: width 120ms linear;
+}

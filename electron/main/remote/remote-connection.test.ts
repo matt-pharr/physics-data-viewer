@@ -37,6 +37,25 @@ function makeManager(overrides: Record<string, unknown> = {}): RemoteConnectionM
   });
 }
 
+/**
+ * Make the local machine answer the probe like a linux x86_64 host.
+ *
+ * The fixture executes the probe script here, so `uname` reports this Mac
+ * and the probe rightly refuses it. Shadowing `uname` on PATH is the
+ * smallest way to exercise the bootstrap paths that only run on a supported
+ * host, without weakening the platform check itself.
+ */
+function fakeLinuxHost(): void {
+  const bin = path.join(dir, "fakebin");
+  fs.mkdirSync(bin, { recursive: true });
+  fs.writeFileSync(
+    path.join(bin, "uname"),
+    '#!/bin/sh\ncase "$1" in\n  -m) echo x86_64 ;;\n  *) echo Linux ;;\nesac\n',
+    { mode: 0o755 },
+  );
+  setEnv("PATH", `${bin}:${process.env.PATH ?? ""}`);
+}
+
 /** The sequence of phases observed, for order assertions. */
 function phases(): string[] {
   return statuses.map((s) => s.phase);
@@ -184,6 +203,61 @@ describe("connect", () => {
     const result = await manager.connect("   ");
     // Whitespace is trimmed to nothing; the manager must not spawn anything.
     expect(result.ok).toBe(false);
+  }, 30_000);
+});
+
+describe("bootstrap", () => {
+  it("refuses a host PDV cannot run on, before trying to install anything", async () => {
+    setEnv("FAKE_SSH_MASTER", "alive");
+    const bundleDir = path.join(dir, "bundles");
+    fs.mkdirSync(bundleDir, { recursive: true });
+    fs.writeFileSync(path.join(bundleDir, "index.json"), JSON.stringify({ bundles: [] }));
+    const manager = makeManager({ appVersion: "9.9.9", bundleDir });
+    const result = await manager.connect("flux");
+    // The probe runs on this Mac, so it reports Darwin — which is exactly
+    // the rejection a user on an unsupported host should see.
+    expect(result.ok).toBe(false);
+    expect(result.message).toMatch(/only run a remote session on Linux/);
+  }, 30_000);
+
+  it("connects without bootstrapping when no bundles are built", async () => {
+    setEnv("FAKE_SSH_MASTER", "alive");
+    const manager = makeManager({ appVersion: "9.9.9" });
+    // A checkout with no built bundles must still connect. Refusing would
+    // block a flow that works, over a missing build artifact.
+    await expect(manager.connect("flux")).resolves.toMatchObject({ ok: true });
+    expect(phases()).not.toContain("preparing");
+  }, 30_000);
+
+  it("reports a clear error when the host needs components that were never built", async () => {
+    setEnv("FAKE_SSH_MASTER", "alive");
+    fakeLinuxHost();
+    const bundleDir = path.join(dir, "bundles");
+    fs.mkdirSync(bundleDir, { recursive: true });
+    fs.writeFileSync(path.join(bundleDir, "index.json"), JSON.stringify({ bundles: [] }));
+    const manager = makeManager({ appVersion: "9.9.9", bundleDir });
+    const result = await manager.connect("flux");
+    expect(result.ok).toBe(false);
+    expect(result.failure).toBe("bootstrap");
+    expect(result.message).toMatch(/build:server-bundle/);
+    expect(phases()).toContain("preparing");
+  }, 30_000);
+
+  it("skips the install when the host already has this version", async () => {
+    setEnv("FAKE_SSH_MASTER", "alive");
+    fakeLinuxHost();
+    const fakeHome = path.join(dir, "home");
+    fs.mkdirSync(path.join(fakeHome, ".pdv-server", "9.9.9"), { recursive: true });
+    fs.writeFileSync(path.join(fakeHome, ".pdv-server", "9.9.9", ".selfcheck.json"), "{}");
+    setEnv("HOME", fakeHome);
+    const bundleDir = path.join(dir, "bundles");
+    fs.mkdirSync(bundleDir, { recursive: true });
+    fs.writeFileSync(path.join(bundleDir, "index.json"), JSON.stringify({ bundles: [] }));
+
+    const manager = makeManager({ appVersion: "9.9.9", bundleDir });
+    // The probe finds a cached verdict, so no bundle is needed even though
+    // none exists — this is the second-connect path, and it must be cheap.
+    await expect(manager.connect("flux")).resolves.toMatchObject({ ok: true });
   }, 30_000);
 });
 

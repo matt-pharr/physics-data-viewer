@@ -14,7 +14,7 @@
  *   the connection a remote session is reached through.
  */
 
-import { type BrowserWindow } from "electron";
+import { app, type BrowserWindow } from "electron";
 
 import { IPC, type RemoteConnectResult, type RemoteHostAlias, type RemoteStatus } from "./ipc";
 import { handleIpc } from "./ipc-registry";
@@ -35,6 +35,12 @@ export interface RegisterRemoteIpcOptions {
    * hashed socket name is appended to this.
    */
   controlDir: string;
+  /**
+   * Directory holding the built remote bundles (`index.json` + tarballs).
+   * Omitting it connects without bootstrapping, which is what a build with
+   * no bundles should do rather than refusing to connect at all.
+   */
+  bundleDir?: string;
   /** Injected for tests; production uses the real ssh binary and node-pty. */
   manager?: RemoteConnectionManager;
 }
@@ -61,6 +67,8 @@ export function registerRemoteIpcHandlers(
     new RemoteConnectionManager({
       controlDir: options.controlDir,
       onStatus: pushStatus,
+      appVersion: app.getVersion(),
+      bundleDir: options.bundleDir,
     });
 
   handleIpc(IPC.remote.listHosts, async (): Promise<RemoteHostAlias[]> => manager.listHosts());

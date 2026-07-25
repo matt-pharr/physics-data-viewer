@@ -37,6 +37,8 @@ export interface RemoteSlice {
   remoteMessage: string | null;
   /** Identifies the attempt, so a late push cannot drive a newer one. */
   remoteAttemptId: string | null;
+  /** Byte counts while the server bundle uploads, or null between transfers. */
+  remoteProgress: { transferred: number; total: number } | null;
 
   /** Fold a pushed status into the slice. */
   applyRemoteStatus: (status: RemoteStatus) => void;
@@ -52,6 +54,7 @@ export const createRemoteSlice: AppSlice<RemoteSlice> = (set) => ({
   remoteSecret: false,
   remoteMessage: null,
   remoteAttemptId: null,
+  remoteProgress: null,
 
   applyRemoteStatus: (status) =>
     set((state) => {
@@ -68,6 +71,9 @@ export const createRemoteSlice: AppSlice<RemoteSlice> = (set) => ({
         remoteSecret: status.secret ?? false,
         remoteMessage: status.message ?? (isNewAttempt ? null : state.remoteMessage),
         remoteAttemptId: status.attemptId,
+        // Cleared whenever a push carries none, so a finished upload does not
+        // leave a bar frozen at its last value while a later stage runs.
+        remoteProgress: status.progress ?? null,
       };
     }),
 

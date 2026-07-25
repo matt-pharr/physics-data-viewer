@@ -33,8 +33,11 @@
  */
 
 import * as crypto from "crypto";
+import * as fs from "fs";
+import * as path from "path";
 
 import type { RemoteConnectResult, RemoteHostAlias, RemoteStatus } from "../ipc";
+import { installBundle, probeHost, sha256File, type BootstrapProgress } from "./bootstrap";
 import { listSshHostAliases } from "./ssh-config";
 import {
   checkMaster,
@@ -68,6 +71,21 @@ export interface RemoteConnectionOptions {
   overallTimeoutMs?: number;
   /** Path to the ssh config to harvest aliases from. Defaults to `~/.ssh/config`. */
   sshConfigPath?: string;
+  /**
+   * App version, which names the install directory on the host so several
+   * PDV versions can coexist there.
+   */
+  appVersion?: string;
+  /**
+   * Directory holding `index.json` and the per-arch tarballs built by
+   * `scripts/build-server-bundle.mjs`.
+   *
+   * Injected rather than discovered so this class stays free of Electron
+   * path lookups. Omitting it skips the bootstrap entirely and connects
+   * anyway — useful while the session cannot move to the host yet, and the
+   * honest behaviour when no bundle has been built.
+   */
+  bundleDir?: string;
 }
 
 /**
@@ -101,6 +119,91 @@ export class RemoteConnectionManager {
     // finished conversation as though it were live.
     const { output: _output, ...rest } = this.status;
     return { ...rest };
+  }
+
+  /**
+   * Locate the tarball for a host's architecture.
+   *
+   * Reads the `index.json` the bundle builder writes, which is also where
+   * the sha256 comes from — the digest is produced at build time and
+   * verified on the host, so a corrupted transfer cannot be mistaken for a
+   * good one.
+   *
+   * @param arch - Architecture the host reported.
+   * @returns The tarball and its digest, or null when none is available.
+   */
+  private resolveBundle(arch: string): { path: string; sha256: string } | null {
+    const dir = this.options.bundleDir;
+    if (!dir) return null;
+    const indexPath = path.join(dir, "index.json");
+    if (!fs.existsSync(indexPath)) return null;
+    try {
+      const index = JSON.parse(fs.readFileSync(indexPath, "utf8")) as {
+        bundles?: Array<{ arch?: string; file?: string; sha256?: string }>;
+      };
+      const entry = index.bundles?.find((b) => b.arch === arch);
+      if (!entry?.file) return null;
+      const tarball = path.join(dir, entry.file);
+      if (!fs.existsSync(tarball)) return null;
+      // Prefer the recorded digest; fall back to hashing so a hand-placed
+      // bundle still installs rather than failing on a missing field.
+      return { path: tarball, sha256: entry.sha256 ?? sha256File(tarball) };
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Make sure the host has a working pdv-server before reporting `connected`.
+   *
+   * Skipped when no bundle directory is configured: connecting is still
+   * useful on its own, and claiming a failure because a build artifact is
+   * missing would block a flow that otherwise works.
+   *
+   * @param host - ssh destination, for messages.
+   * @param attemptId - The attempt these updates belong to.
+   * @param control - The live control socket.
+   * @returns An error message when the host cannot be prepared, else null.
+   */
+  private async prepareHost(
+    host: string,
+    attemptId: string,
+    control: SshControl,
+  ): Promise<string | null> {
+    const version = this.options.appVersion;
+    if (!this.options.bundleDir || !version) return null;
+
+    const onProgress = (progress: BootstrapProgress): void => {
+      this.emit({
+        phase: "preparing",
+        host,
+        attemptId,
+        message: progress.message,
+        ...(progress.total !== undefined && progress.transferred !== undefined
+          ? { progress: { transferred: progress.transferred, total: progress.total } }
+          : {}),
+      });
+    };
+
+    const probe = await probeHost(control, { ...this.muxOptions(), version, onProgress });
+    if (!probe.ok) return probe.problem ?? `PDV could not inspect ${host}.`;
+    if (probe.installed) return null;
+    if (!probe.arch) return `PDV has no components for ${probe.machine ?? "this architecture"}.`;
+
+    const bundle = this.resolveBundle(probe.arch);
+    if (!bundle) {
+      return (
+        `PDV has no remote components for linux-${probe.arch} to install. ` +
+        "Build them with `npm run build:server-bundle`."
+      );
+    }
+
+    const result = await installBundle(control, bundle.path, bundle.sha256, {
+      ...this.muxOptions(),
+      version,
+      onProgress,
+    });
+    return result.ok ? null : result.message;
   }
 
   /** Host aliases for the connect picker. Never throws. */
@@ -173,6 +276,8 @@ export class RemoteConnectionManager {
     if (masterState === "alive") {
       this.activeControl = control;
       const node = await this.resolveNode(control);
+      const problem = await this.prepareHost(host, attemptId, control);
+      if (problem) return this.fail(host, attemptId, "bootstrap", problem);
       this.emit({
         phase: "connected",
         host,
@@ -234,6 +339,8 @@ export class RemoteConnectionManager {
     this.activeControl = { host, controlPath };
     this.master = session;
     const node = await this.resolveNode(this.activeControl);
+    const problem = await this.prepareHost(host, attemptId, this.activeControl);
+    if (problem) return this.fail(host, attemptId, "bootstrap", problem);
     this.emit({ phase: "connected", host, attemptId, node, message: result.message });
     return { ok: true, failure: null, message: result.message };
   }

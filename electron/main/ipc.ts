@@ -619,7 +619,14 @@ export type RemotePhase =
   | "connecting"
   /** ssh is waiting on the user — a passphrase, a Duo choice, a push. */
   | "prompting"
-  /** A ControlMaster is up and usable. */
+  /**
+   * Signed in, and now getting PDV's components onto the host — probing,
+   * uploading, installing, verifying. Distinct from `connected` because the
+   * connection is up but nothing can use it yet, and on a first connect this
+   * is by far the longest wait.
+   */
+  | "preparing"
+  /** A ControlMaster is up and the host is ready to run a session. */
   | "connected"
   /** The attempt ended without a usable connection. */
   | "failed";
@@ -658,6 +665,12 @@ export interface RemoteStatus {
   secret?: boolean;
   /** Human-readable explanation, set on `connected` and `failed`. */
   message?: string;
+  /**
+   * Byte counts while uploading during `preparing`. Absent for stages that
+   * have no meaningful measure — a probe or a checksum is over before a
+   * progress bar would mean anything.
+   */
+  progress?: { transferred: number; total: number };
 }
 
 /** Result of {@link PDVApi.remote.connect}. */

@@ -121,7 +121,13 @@ export async function registerIpcHandlers(
   // Connection control only. Establishing an ssh connection and running a
   // session over it are separate steps: nothing here swaps the active
   // ServerHandle, so local mode is unaffected by its presence.
-  registerRemoteIpcHandlers({ win, controlDir: path.join(userDataDir, "ssh-control") });
+  registerRemoteIpcHandlers({
+    win,
+    controlDir: path.join(userDataDir, "ssh-control"),
+    // Built by `npm run build:server-bundle`. Absent in a checkout that has
+    // not built them, which simply skips the bootstrap.
+    bundleDir: path.join(__dirname, "..", "remote-bundles"),
+  });
 
   registerModuleWindowIpcHandlers({
     moduleWindowManager,
