@@ -1403,6 +1403,8 @@ export interface MenuActionPayload {
     | "project:save"
     | "project:saveAs"
     | "recentProjects:clear"
+    // Opens the connect dialog. Shell-side only until the session can move.
+    | "remote:connect"
     | "modules:import"
     | "modules:newEmpty"
     | "settings:open";

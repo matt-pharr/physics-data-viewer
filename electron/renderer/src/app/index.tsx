@@ -34,6 +34,7 @@ import { SaveAsDialog } from '../components/SaveAsDialog';
 import { NewProjectDialog } from '../components/NewProjectDialog';
 import { NewJuliaProjectDialog } from '../components/NewJuliaProjectDialog';
 import { UnsavedChangesDialog } from '../components/UnsavedChangesDialog';
+import { RemoteConnect } from '../components/RemoteConnect';
 import { WelcomeScreen } from '../components/WelcomeScreen';
 import { EnvSyncModal } from '../components/EnvSyncModal';
 import type {
@@ -58,6 +59,7 @@ import { useLayoutState } from './useLayoutState';
 import { useNoteTabs } from './useNoteTabs';
 import { useProjectWorkflow } from './useProjectWorkflow';
 import { useKernelSubscriptions } from './useKernelSubscriptions';
+import { useRemoteConnection } from './useRemoteConnection';
 import { useWelcomeState } from './useWelcomeState';
 import { useThemeManager } from './useThemeManager';
 import { useTreeAction } from '../hooks/useTreeAction';
@@ -404,6 +406,8 @@ const App: React.FC = () => {
           setProjectDirty(false);
           setForceWelcome(true);
         });
+      } else if (payload.action === 'remote:connect') {
+        setActiveDialog({ kind: 'remoteConnect' });
       } else if (payload.action === 'recentProjects:clear') {
         handleClearRecentsRef.current?.();
       }
@@ -484,6 +488,9 @@ const App: React.FC = () => {
     }
     setPendingDirtyAction({ label, run: action });
   }, [projectDirty]);
+
+  // An ssh connection outlives any one kernel, so this is not kernel-keyed.
+  useRemoteConnection();
 
   useKernelSubscriptions({
     currentKernelId,
@@ -1852,6 +1859,9 @@ const App: React.FC = () => {
          refreshToken={modulesRefreshToken}
          onClose={closeDialog}
        />
+       {activeDialog?.kind === 'remoteConnect' && (
+         <RemoteConnect onClose={closeDialog} />
+       )}
        {activeDialog?.kind === 'saveAs' && (
          <SaveAsDialog
            defaultLocation={currentProjectDir

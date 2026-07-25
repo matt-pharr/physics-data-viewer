@@ -97,6 +97,20 @@ function buildTemplate(): MenuItemConstructorOptions[] {
           label: "Open Recent",
           submenu: buildOpenRecentSubmenu(),
         },
+        // Off unless PDV_REMOTE=1. Connecting works end to end, but the
+        // session does not yet move to the host, so a user who found this
+        // would sign in to a cluster and see nothing change. It ships
+        // hidden until running the session over the connection lands.
+        ...(process.env.PDV_REMOTE === "1"
+          ? ([
+              { type: "separator" },
+              {
+                id: "remote:connect",
+                label: "Connect to Remote Host…",
+                click: () => sendMenuAction({ action: "remote:connect" }),
+              },
+            ] as Electron.MenuItemConstructorOptions[])
+          : []),
         { type: "separator" },
         {
           id: "project:save",

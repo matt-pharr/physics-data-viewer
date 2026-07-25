@@ -55,6 +55,10 @@ import type {
   TerminalPreset,
   ScriptRunResult,
   Theme,
+  RemoteConnectResult,
+  RemoteHostAlias,
+  RemotePhase,
+  RemoteStatus,
   UpdateStatus,
   WindowChromeInfo,
 } from './pdv';
@@ -109,6 +113,10 @@ export type {
   TerminalLauncherConfig,
   TerminalPreset,
   Theme,
+  RemoteConnectResult,
+  RemoteHostAlias,
+  RemotePhase,
+  RemoteStatus,
   UpdateStatus,
   WindowChromeInfo,
 };

@@ -195,7 +195,7 @@ export interface RecentProjectEntry {
 /** File-menu action event payload emitted by `menu.onAction`. */
 export interface MenuActionPayload {
   /** Discriminated menu action identifier. */
-  action: "project:new" | "project:open" | "project:openRecent" | "project:save" | "project:saveAs" | "recentProjects:clear" | "modules:import" | "modules:newEmpty" | "settings:open";
+  action: "project:new" | "project:open" | "project:openRecent" | "project:save" | "project:saveAs" | "recentProjects:clear" | "remote:connect" | "modules:import" | "modules:newEmpty" | "settings:open";
   /** Optional path argument for path-bearing menu actions. */
   path?: string;
   /**

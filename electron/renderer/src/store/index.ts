@@ -15,10 +15,11 @@ import { create } from 'zustand';
 import type { StateCreator } from 'zustand';
 import { createConsoleSlice, type ConsoleSlice } from './consoleSlice';
 import { createDialogSlice, type DialogSlice } from './dialogSlice';
+import { createRemoteSlice, type RemoteSlice } from './remoteSlice';
 import { createSessionSlice, type SessionSlice } from './sessionSlice';
 
 /** Union of all slice shapes; extended as slices land. */
-export type AppStore = ConsoleSlice & DialogSlice & SessionSlice;
+export type AppStore = ConsoleSlice & DialogSlice & RemoteSlice & SessionSlice;
 
 /** Helper type for defining a slice against the full store. */
 export type AppSlice<T> = StateCreator<AppStore, [], [], T>;
@@ -26,5 +27,6 @@ export type AppSlice<T> = StateCreator<AppStore, [], [], T>;
 export const useStore = create<AppStore>()((...args) => ({
   ...createConsoleSlice(...args),
   ...createDialogSlice(...args),
+  ...createRemoteSlice(...args),
   ...createSessionSlice(...args),
 }));
