@@ -255,6 +255,8 @@ if (execMode === "banner") {
   process.stderr.write("Lmod is automatically replacing 'intel' with 'gcc'.\n");
 }
 
-const child = spawn("/bin/sh", ["-c", command], { stdio: ["ignore", "inherit", "inherit"] });
+// stdin is inherited so `cat > file` works: the bundle upload streams its
+// payload over stdin rather than passing it as an argument.
+const child = spawn("/bin/sh", ["-c", command], { stdio: ["inherit", "inherit", "inherit"] });
 child.on("close", (code) => process.exit(code === null ? 255 : code));
 child.on("error", () => process.exit(255));

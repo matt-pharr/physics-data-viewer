@@ -206,11 +206,15 @@ function runSsh(args: string[], options: SshMuxOptions): Promise<RawRun> {
  * run *that* instead of the command PDV asked for, turning a probe into a
  * hung interactive shell.
  *
+ * Exported so the bootstrap's file upload — which needs its own spawn to
+ * stream stdin — reaches the host over the same multiplexed connection with
+ * the same guarantees, rather than opening a second one.
+ *
  * @param control - The host and its control socket.
  * @param options - Timeout and batch-mode preferences.
  * @returns Flags in `-o key=value` form, ready to precede the destination.
  */
-function baseSshArgs(control: SshControl, options: SshMuxOptions): string[] {
+export function baseSshArgs(control: SshControl, options: SshMuxOptions): string[] {
   const args = [
     "-o",
     `ConnectTimeout=${options.connectTimeoutSeconds ?? DEFAULT_CONNECT_TIMEOUT_SECONDS}`,
