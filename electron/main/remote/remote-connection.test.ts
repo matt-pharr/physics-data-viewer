@@ -46,11 +46,27 @@ function makeManager(overrides: Record<string, unknown> = {}): RemoteConnectionM
  * host, without weakening the platform check itself.
  */
 function fakeLinuxHost(): void {
+  shimUname("Linux", "x86_64");
+}
+
+/**
+ * Make the probe see an operating system PDV cannot serve.
+ *
+ * Shimmed rather than relying on the test runner's own OS: an assertion that
+ * only holds on a developer's Mac passes locally and fails in CI, which is
+ * exactly what happened the first time this was written.
+ */
+function fakeUnsupportedHost(): void {
+  shimUname("Darwin", "arm64");
+}
+
+/** Shadow `uname` on PATH so the probe script sees a chosen host. */
+function shimUname(sys: string, machine: string): void {
   const bin = path.join(dir, "fakebin");
   fs.mkdirSync(bin, { recursive: true });
   fs.writeFileSync(
     path.join(bin, "uname"),
-    '#!/bin/sh\ncase "$1" in\n  -m) echo x86_64 ;;\n  *) echo Linux ;;\nesac\n',
+    `#!/bin/sh\ncase "$1" in\n  -m) echo ${machine} ;;\n  *) echo ${sys} ;;\nesac\n`,
     { mode: 0o755 },
   );
   setEnv("PATH", `${bin}:${process.env.PATH ?? ""}`);
@@ -209,19 +225,19 @@ describe("connect", () => {
 describe("bootstrap", () => {
   it("refuses a host PDV cannot run on, before trying to install anything", async () => {
     setEnv("FAKE_SSH_MASTER", "alive");
+    fakeUnsupportedHost();
     const bundleDir = path.join(dir, "bundles");
     fs.mkdirSync(bundleDir, { recursive: true });
     fs.writeFileSync(path.join(bundleDir, "index.json"), JSON.stringify({ bundles: [] }));
     const manager = makeManager({ appVersion: "9.9.9", bundleDir });
     const result = await manager.connect("flux");
-    // The probe runs on this Mac, so it reports Darwin — which is exactly
-    // the rejection a user on an unsupported host should see.
     expect(result.ok).toBe(false);
     expect(result.message).toMatch(/only run a remote session on Linux/);
   }, 30_000);
 
   it("connects without bootstrapping when no bundles are built", async () => {
     setEnv("FAKE_SSH_MASTER", "alive");
+    fakeLinuxHost();
     const manager = makeManager({ appVersion: "9.9.9" });
     // A checkout with no built bundles must still connect. Refusing would
     // block a flow that works, over a missing build artifact.
