@@ -3,14 +3,15 @@
  *
  * Owns BrowserWindow creation/loading and high-level Electron app events.
  * Session/kernel logic lives in the pdv-server process; this module only
- * needs its supervisor handle (async config reads before the window
- * exists, graceful shutdown on quit).
+ * needs a {@link ServerHandle} (async config reads before the window
+ * exists, graceful shutdown on quit) — and never needs to know whether the
+ * server behind it is local or remote.
  *
  * See Also
  * --------
  * ARCHITECTURE.md §4.1, §11.1
  * index.ts — IPC handler registration and push forwarding
- * shell/server-supervisor.ts — pdv-server process lifecycle
+ * shell/server-supervisor.ts — the ServerHandle contract and local implementation
  */
 
 import { BrowserWindow, app, nativeTheme, type BrowserWindowConstructorOptions } from "electron";
@@ -21,7 +22,7 @@ import * as fsSync from "fs";
 import { registerIpcHandlers } from "./index";
 import { initializeAppMenu } from "./menu";
 import { IPC, type PDVConfig } from "./ipc";
-import type { ServerSupervisor } from "./shell/server-supervisor";
+import type { ServerHandle } from "./shell/server-supervisor";
 
 /**
  * Check whether a process with the given PID is currently running.
@@ -123,14 +124,14 @@ async function loadDevUrlWithRetry(
 /**
  * Create and initialize the main BrowserWindow.
  *
- * @param server - Supervised pdv-server handle (already started); used for
+ * @param server - The session's server handle (already started); used for
  *   the pre-window config read and the IPC bridge registration.
  * @returns Created BrowserWindow.
  * @throws {Error} When renderer content cannot be loaded or the server is
  *   unreachable for the initial config read.
  */
 export async function createWindow(
-  server: ServerSupervisor
+  server: ServerHandle
 ): Promise<BrowserWindow> {
   // One config snapshot before any window exists: initial background color
   // and the custom working-dir base for the orphan scan below. The config
@@ -337,12 +338,12 @@ export function clearQuitRequestPending(): void {
 /**
  * Register core Electron app events.
  *
- * @param getServer - Lazy getter for the pdv-server supervisor; drives the
+ * @param getServer - Lazy getter for the session's server handle; drives the
  *   graceful shutdown chain (server stops kernels and MCP) during quit.
  * @returns Nothing.
  */
 export function wireAppEvents(
-  getServer: () => ServerSupervisor | null
+  getServer: () => ServerHandle | null
 ): void {
   app.on("before-quit", () => {
     isQuittingGlobal = true;

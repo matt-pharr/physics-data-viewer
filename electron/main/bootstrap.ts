@@ -6,9 +6,10 @@
  * 2. Request single-instance lock; quit immediately if denied.
  * 3. Wire app lifecycle events (`ready`, `activate`, `second-instance`).
  * 4. On `ready`: start the pdv-server child process via
- *    {@link ServerSupervisor} (spawn + hello handshake), then open the
- *    main `BrowserWindow` via {@link createWindow}, whose IPC wiring
- *    bridges every server channel over the stdio transport.
+ *    {@link LocalServerSupervisor} (spawn + hello handshake), wrap it in a
+ *    {@link SessionRouter}, then open the main `BrowserWindow` via
+ *    {@link createWindow}, whose IPC wiring bridges every server channel
+ *    over the stdio transport.
  * 5. On `second-instance`: focus existing window or open a new one.
  *
  * The shell constructs no session managers: KernelManager, CommRouter,
@@ -22,7 +23,8 @@
  * See Also
  * --------
  * app.ts — BrowserWindow lifecycle and renderer loading
- * shell/server-supervisor.ts — pdv-server process lifecycle
+ * shell/server-supervisor.ts — the ServerHandle contract and local implementation
+ * shell/session-router.ts — the stable handle every consumer is wired to
  * index.ts — IPC handler registration (called from {@link createWindow})
  */
 
@@ -46,7 +48,8 @@ import * as path from "path";
 
 import { createWindow, wireAppEvents } from "./app";
 import { INTERNAL_CHANNELS } from "./ipc";
-import { ServerSupervisor } from "./shell/server-supervisor";
+import { LocalServerSupervisor } from "./shell/server-supervisor";
+import { SessionRouter } from "./shell/session-router";
 
 // Under PDV_E2E, redirect Electron's userData (where the renderer's
 // localStorage and the server's ConfigStore-backed preferences live) to a
@@ -60,7 +63,7 @@ if (process.env.PDV_E2E === "1" && process.env.HOME) {
   app.setPath("userData", path.join(process.env.HOME, ".pdv-e2e-userdata"));
 }
 
-let serverSupervisor: ServerSupervisor | null = null;
+let sessionRouter: SessionRouter | null = null;
 let mainWindow: BrowserWindow | null = null;
 let openingWindow: Promise<void> | null = null;
 
@@ -73,7 +76,7 @@ async function openMainWindow(): Promise<void> {
     return;
   }
   openingWindow = (async () => {
-    const server = serverSupervisor;
+    const server = sessionRouter;
     if (!server) {
       throw new Error("pdv-server is not running");
     }
@@ -102,7 +105,7 @@ const hasSingleInstanceLock = app.requestSingleInstanceLock();
 if (!hasSingleInstanceLock) {
   app.quit();
 } else {
-  wireAppEvents(() => serverSupervisor);
+  wireAppEvents(() => sessionRouter);
   app.on("second-instance", () => {
     if (mainWindow && !mainWindow.isDestroyed()) {
       if (mainWindow.isMinimized()) {
@@ -123,7 +126,7 @@ if (!hasSingleInstanceLock) {
 
     // Start the pdv-server before any window: the window's initial
     // background color and IPC bridge both need it.
-    const supervisor = new ServerSupervisor({
+    const supervisor = new LocalServerSupervisor({
       version: app.getVersion(),
       userDataDir: app.getPath("userData"),
       pdvDir: path.join(os.homedir(), ".PDV"),
@@ -148,12 +151,16 @@ if (!hasSingleInstanceLock) {
       app.exit(1);
       return;
     }
-    serverSupervisor = supervisor;
+    // Everything downstream is wired to the router, never to the supervisor
+    // itself, so the server backing the session can change without any of it
+    // being re-registered.
+    const router = new SessionRouter(supervisor);
+    sessionRouter = router;
 
     // System wake recovery runs next to the kernel connection — forward
-    // the resume event to the server.
+    // the resume event to whichever server currently backs the session.
     powerMonitor.on("resume", () => {
-      void supervisor.invoke(INTERNAL_CHANNELS.systemResumed).catch((err) => {
+      void router.invoke(INTERNAL_CHANNELS.systemResumed).catch((err) => {
         console.error("[PDV] Wake handler error:", err);
       });
     });

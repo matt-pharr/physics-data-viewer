@@ -22,7 +22,10 @@
  *
  * Channels: pdv.rpc.ping, pdv.rpc.shutdown, "echo" (returns args[0]),
  * "boom" (rejects with message "kaboom"), "never" (no response),
- * "lastConfirm" (returns the recorded confirmResponse payload or null).
+ * "lastConfirm" (returns the recorded confirmResponse payload or null),
+ * "whoami" (returns {pid, version} — lets a test tell two fixtures apart),
+ * "emitPush" (pushes {event: args[0], payload: args[1]} on demand, so a
+ * test can assert which server a push came from).
  */
 
 const readline = require("readline");
@@ -106,6 +109,16 @@ rl.on("line", (line) => {
       return;
     case "lastConfirm":
       send({ id: msg.id, result: lastConfirm });
+      return;
+    case "whoami":
+      send({
+        id: msg.id,
+        result: { pid: process.pid, version: process.env.FAKE_VERSION || "0.0.0" },
+      });
+      return;
+    case "emitPush":
+      send({ event: msg.args[0], payload: msg.args[1], seq: seq++ });
+      send({ id: msg.id });
       return;
     case "never":
       return;

@@ -409,6 +409,11 @@ async function setup() {
     closeChildWindows: () => bridge?.closeChildWindows(),
   });
   const server: ServerHandle = {
+    // Wired in-process: there is no child to start or stop, so the
+    // lifecycle half of the interface is inert here.
+    kind: "local",
+    start: async () => undefined,
+    shutdown: async () => undefined,
     invoke: (channel, args = []) =>
       dispatchInvoke(channel, { push: serverPush }, args),
     sessionReset: async () => wire.sessionReset(),

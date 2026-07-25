@@ -1,6 +1,12 @@
 /**
- * server-supervisor.ts — Spawns and supervises the pdv-server child
- * process for local mode.
+ * server-supervisor.ts — The {@link ServerHandle} contract, plus the
+ * local-mode implementation that spawns and supervises the pdv-server
+ * child process.
+ *
+ * {@link ServerHandle} is the only surface shell code uses to reach a
+ * session's server, so where that server runs is not visible to
+ * `bootstrap.ts`, `app.ts` or `index.ts`. {@link LocalServerSupervisor}
+ * implements it for a child process on this machine.
  *
  * Owns the server process lifecycle: spawning `process.execPath` with
  * `ELECTRON_RUN_AS_NODE=1` on the server entry, the hello handshake with
@@ -12,7 +18,7 @@
  *
  * The supervisor outlives any single window: the per-window server bridge
  * (`shell/server-bridge.ts`) plugs its push/confirm/child-window handlers
- * in via {@link ServerSupervisor.setBridgeHandlers} and the supervisor
+ * in via {@link LocalServerSupervisor.setBridgeHandlers} and the supervisor
  * routes traffic to whichever handlers are current.
  *
  * This module does NOT register ipcMain handlers (the bridge does), own
@@ -69,11 +75,34 @@ export interface BridgeHandlers {
 }
 
 /**
- * The narrow surface shell code uses to reach the server. `index.ts` and
- * `app.ts` depend on this interface (tests substitute an in-process fake);
- * `bootstrap.ts` owns the concrete {@link ServerSupervisor}.
+ * Where a session's pdv-server runs. `"local"` is a child process on this
+ * machine; `"remote"` is reserved for a server reached over a network
+ * transport.
+ */
+export type ServerKind = "local" | "remote";
+
+/**
+ * The narrow surface shell code uses to reach the server, regardless of
+ * where that server runs. `index.ts`, `app.ts` and `bootstrap.ts` depend on
+ * this interface only (tests substitute an in-process fake), so an
+ * alternative implementation can be swapped in without touching them.
+ *
+ * Lifecycle contract: `start()` exactly once before use; `shutdown()` at
+ * the end, and it is safe to call on an already-stopped handle.
  */
 export interface ServerHandle {
+  /** Where this handle's server runs. */
+  readonly kind: ServerKind;
+  /**
+   * Bring the server up and complete its handshake.
+   *
+   * @throws {Error} When the server cannot be started, or when this handle
+   *   is not currently stopped — implementations are not required to
+   *   tolerate a second `start()` on a running server.
+   */
+  start(): Promise<void>;
+  /** Shut the server down gracefully. Safe to call when already stopped. */
+  shutdown(): Promise<void>;
   /** Invoke a server channel (an `ipc.ts` constant or `pdv.internal.*`). */
   invoke(channel: string, args?: unknown[]): Promise<unknown>;
   /** Full session reset (`pdv.rpc.sessionReset`), awaited. */
@@ -84,8 +113,8 @@ export interface ServerHandle {
   clearBridgeHandlers(): void;
 }
 
-/** Constructor dependencies for {@link ServerSupervisor}. */
-export interface ServerSupervisorOptions {
+/** Constructor dependencies for {@link LocalServerSupervisor}. */
+export interface LocalServerSupervisorOptions {
   /** Unified app version; the hello must match exactly. */
   version: string;
   /** Electron userData dir, passed as `PDV_USER_DATA_DIR`. */
@@ -176,8 +205,11 @@ function withTimeout<T>(
  * window), then `invoke()` freely; `await shutdown()` on quit. A crash
  * mid-run rejects pending invokes and shows a Restart/Quit dialog.
  */
-export class ServerSupervisor implements ServerHandle {
-  private readonly opts: ServerSupervisorOptions;
+export class LocalServerSupervisor implements ServerHandle {
+  /** @inheritdoc */
+  readonly kind = "local" as const;
+
+  private readonly opts: LocalServerSupervisorOptions;
   private child: ChildProcess | null = null;
   private client: RpcClient | null = null;
   private phase: Phase = "stopped";
@@ -187,9 +219,9 @@ export class ServerSupervisor implements ServerHandle {
 
   /**
    * @param opts - Paths, version, and test overrides; see
-   *   {@link ServerSupervisorOptions}.
+   *   {@link LocalServerSupervisorOptions}.
    */
-  constructor(opts: ServerSupervisorOptions) {
+  constructor(opts: LocalServerSupervisorOptions) {
     this.opts = opts;
   }
 
