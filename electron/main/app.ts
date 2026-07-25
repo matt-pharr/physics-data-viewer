@@ -252,6 +252,13 @@ export async function createWindow(
   // live window's guard has decided whether to block the quit.
   win.on("closed", () => {
     app.removeListener("before-quit", beforeQuitGuard);
+    // Detach the bridge with the window it belongs to. The handlers close
+    // over this BrowserWindow; leaving them attached means a server-side
+    // confirm arriving while no window exists (macOS close-but-don't-quit)
+    // would target a destroyed window instead of taking the supervisor's
+    // safe auto-cancel path. The next window's registerIpcHandlers()
+    // installs a fresh bridge.
+    server.clearBridgeHandlers();
   });
 
   // Reset in-memory project state on every renderer load/reload so that stale

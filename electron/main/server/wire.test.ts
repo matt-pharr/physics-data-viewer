@@ -295,6 +295,36 @@ describe("session state and resets", () => {
     expect(() => h.wire.sessionReset()).not.toThrow();
   });
 
+  it("preserves a working dir holding an autosave snapshot", async () => {
+    // The unsaved-session autosave lives at <workingDir>/.autosave — for a
+    // session with no project dir it is the ONLY copy of the user's work,
+    // and the welcome screen offers it as a recoverable session. Every
+    // server exit path runs this teardown, so deleting it here silently
+    // destroys unsaved work on quit.
+    const h = makeHarness();
+    await startKernel(h);
+    const autosaveDir = path.join(h.workingDir, ".autosave");
+    fsSync.mkdirSync(autosaveDir, { recursive: true });
+    fsSync.writeFileSync(path.join(autosaveDir, "tree-index.json"), "{}", "utf8");
+
+    h.wire.sessionReset();
+
+    expect(fsSync.existsSync(h.workingDir)).toBe(true);
+    expect(fsSync.existsSync(path.join(autosaveDir, "tree-index.json"))).toBe(true);
+  });
+
+  it("removes a working dir whose autosave snapshot is absent", async () => {
+    // An empty .autosave dir (timer armed, nothing written yet) is not a
+    // recoverable session — the orphan scan keys on tree-index.json too.
+    const h = makeHarness();
+    await startKernel(h);
+    fsSync.mkdirSync(path.join(h.workingDir, ".autosave"), { recursive: true });
+
+    h.wire.sessionReset();
+
+    expect(fsSync.existsSync(h.workingDir)).toBe(false);
+  });
+
   it("sessionReset matches what unwire + re-wire produces (kernel maps emptied)", async () => {
     const h = makeHarness();
     await startKernel(h);

@@ -93,6 +93,30 @@ describe("RpcClient ⇄ RpcServer", () => {
     client.close();
   });
 
+  it("rejects a parked waitForHello with the close reason, not the timeout", async () => {
+    // A server that dies before saying hello (missing bundle, bad env,
+    // throw during wiring) must surface that immediately. Dropping the
+    // waiter instead left the caller stalled until the 10 s deadline and
+    // then reported a misleading timeout.
+    const c2s = new PassThrough();
+    const s2c = new PassThrough();
+    const client = new RpcClient(s2c, c2s, { onPush: () => undefined });
+    const parked = client.waitForHello(30_000);
+    client.close("pdv-server exited (code 1, signal null)");
+    await expect(parked).rejects.toThrow(
+      "pdv-server exited (code 1, signal null)"
+    );
+  });
+
+  it("rejects a parked waitForHello when the server stream ends", async () => {
+    const c2s = new PassThrough();
+    const s2c = new PassThrough();
+    const client = new RpcClient(s2c, c2s, { onPush: () => undefined });
+    const parked = client.waitForHello(30_000);
+    s2c.end();
+    await expect(parked).rejects.toThrow("server stream ended");
+  });
+
   it("correlates interleaved responses and dispatches concurrently", async () => {
     const settled: string[] = [];
     const dispatch = async (channel: string): Promise<unknown> => {

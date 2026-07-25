@@ -8,13 +8,21 @@
  *
  * - FAKE_VERSION       — version advertised in the hello push.
  * - FAKE_MODE=normal   — hello, then answer requests (default).
- * - FAKE_MODE=no-hello — never write anything (hello timeout path).
+ * - FAKE_MODE=no-hello — never write to stdout (hello timeout path). Stays
+ *   alive deliberately: the supervisor must kill it rather than orphan it.
  * - FAKE_MODE=crash-after-hello — exit(7) shortly after hello.
  * - FAKE_MODE=ignore-shutdown   — never answer shutdown, swallow SIGTERM
  *   (forces the SIGTERM → SIGKILL escalation).
+ * - FAKE_MODE=confirm  — hello, then push a reverse-RPC confirmRequest and
+ *   record the shell's confirmResponse (readable via the "lastConfirm"
+ *   channel) so the supervisor's dialog glue can be asserted end to end.
+ *
+ * Every mode prints `fixture pid <pid>` on stderr so tests can assert
+ * whether the process was reaped.
  *
  * Channels: pdv.rpc.ping, pdv.rpc.shutdown, "echo" (returns args[0]),
- * "boom" (rejects with message "kaboom"), "never" (no response).
+ * "boom" (rejects with message "kaboom"), "never" (no response),
+ * "lastConfirm" (returns the recorded confirmResponse payload or null).
  */
 
 const readline = require("readline");
@@ -40,6 +48,26 @@ if (mode !== "no-hello") {
 }
 
 console.error("fixture started");
+console.error("fixture pid " + process.pid);
+
+let lastConfirm = null;
+
+if (mode === "confirm") {
+  send({
+    event: "pdv.rpc.confirmRequest",
+    payload: {
+      requestId: "c1",
+      options: {
+        type: "question",
+        message: "Overwrite?",
+        buttons: ["Overwrite", "Cancel"],
+        defaultId: 0,
+        cancelId: 1,
+      },
+    },
+    seq: seq++,
+  });
+}
 
 if (mode === "crash-after-hello") {
   setTimeout(() => process.exit(7), 50);
@@ -71,6 +99,13 @@ rl.on("line", (line) => {
       return;
     case "boom":
       send({ id: msg.id, error: { message: "kaboom", name: "Error" } });
+      return;
+    case "pdv.rpc.confirmResponse":
+      lastConfirm = msg.args[0];
+      send({ id: msg.id });
+      return;
+    case "lastConfirm":
+      send({ id: msg.id, result: lastConfirm });
       return;
     case "never":
       return;

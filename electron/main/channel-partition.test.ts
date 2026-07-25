@@ -13,6 +13,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   BROADCAST_PUSH_CHANNELS,
+  INTERNAL_CHANNELS,
   IPC,
   SERVER_CHANNELS,
   SERVER_PUSH_CHANNELS,
@@ -80,5 +81,28 @@ describe("shell/server channel partition", () => {
     const server = new Set(SERVER_PUSH_CHANNELS);
     const outside = BROADCAST_PUSH_CHANNELS.filter((c) => !server.has(c));
     expect(outside).toEqual([]);
+  });
+
+  it("keeps INTERNAL_CHANNELS disjoint from every renderer-facing channel", () => {
+    // Internal channels are shell→server only: they are absent from
+    // `IPC`, so the preload bridge cannot expose them and the server
+    // bridge (which forwards exactly SERVER_CHANNELS) never puts them on
+    // ipcMain. A name collision with an `IPC` constant would silently
+    // undo that and hand the renderer a channel meant for the shell.
+    const rendererFacing = new Set<string>([
+      ...listAllInvokeChannels(),
+      ...Object.values(IPC.push),
+    ]);
+    const collisions = Object.values(INTERNAL_CHANNELS).filter((c) =>
+      rendererFacing.has(c),
+    );
+    expect(collisions, "internal channels colliding with IPC").toEqual([]);
+
+    // And they must not be smuggled into the renderer partition either.
+    const partitioned = new Set<string>([...SHELL_CHANNELS, ...SERVER_CHANNELS]);
+    const inPartition = Object.values(INTERNAL_CHANNELS).filter((c) =>
+      partitioned.has(c),
+    );
+    expect(inPartition, "internal channels inside the renderer partition").toEqual([]);
   });
 });

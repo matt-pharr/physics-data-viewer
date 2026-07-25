@@ -26,6 +26,7 @@ import * as fsSync from "fs";
 import * as os from "os";
 import * as path from "path";
 
+import { autosaveDirFor } from "../autosave-sidecars";
 import type { CommRouter } from "../comm-router";
 import { ConfigStore, DEFAULT_AUTOSAVE_INTERVAL_S } from "../config";
 import { EnvironmentDetector } from "../environment-detector";
@@ -1113,12 +1114,24 @@ export function registerCommPushForwarding(
 /**
  * Clear per-kernel state: detach crash handlers, remove working
  * directories from disk, and clear the working-dir/env-metadata maps.
+ *
+ * A working directory holding an autosave snapshot is left on disk. For an
+ * unsaved session the autosave lives at `<workingDir>/.autosave` (the
+ * autosave handler falls back to the kernel working dir when there is no
+ * project dir), and that snapshot is the only copy of the user's work —
+ * it is what the welcome screen offers as a "Recoverable Unsaved Session".
+ * `app.ts`'s startup orphan scan applies the same rule and reclaims these
+ * directories once the user picks Recover or Discard.
  */
 function cleanupKernelState(): void {
   for (const [id, dir] of kernelWorkingDirs) {
     const handler = crashHandlers.get(id);
     if (handler) activeKernelManagerRef?.removeListener("kernel:crashed", handler);
     try {
+      if (fsSync.existsSync(path.join(autosaveDirFor(dir), "tree-index.json"))) {
+        console.log(`[pdv] preserving autosaved working dir: ${dir}`);
+        continue;
+      }
       fsSync.rmSync(dir, { recursive: true, force: true });
     } catch (error) {
       console.warn(`[pdv] failed to remove kernel working dir: ${dir}`, error);

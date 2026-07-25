@@ -1,20 +1,27 @@
 /**
  * server-files.ts — The list of server-destined main-process source files.
  *
- * These are the files that move into the Electron-free pdv-server process
- * (remote-mode roadmap, #132). Until then they still run in the Electron
- * main process, but they must not import Electron: their only
- * window/dialog/paths access is through the injected seams (`PushSender`,
- * `ConfirmFn`, `server-paths.ts`, `getAppVersion()`).
+ * These are the files that run inside the Electron-free pdv-server child
+ * process. They must not import Electron: their only window/dialog/paths
+ * access is through the injected seams (`PushSender`, `ConfirmFn`,
+ * `server-paths.ts`, `getAppVersion()`). An Electron import here is not a
+ * type error — it fails at runtime, in the packaged app, when the plain
+ * Node child cannot resolve the Electron module.
  *
  * `electron-free.test.ts` greps every listed file and fails on any
  * `from "electron"` / `require("electron")`, so a rebound coupling is
- * caught at unit-test time instead of when the process split lands.
+ * caught at unit-test time rather than in a packaged build.
+ *
+ * The list must cover the server entry point's whole *value*-import
+ * closure, not just the files conceptually "owned" by the server —
+ * `editor-spawn.ts` is listed because `config.ts` imports
+ * `TERMINAL_PRESET_LIST` from it, which pulls it into the child at
+ * runtime even though the launchers that use it stay in the shell.
  *
  * NOT listed (deliberately, they stay in the shell): window managers, menu,
- * auto-updater, bootstrap/app/index wiring, ipc-registry (the ipcMain
- * mirror), the shell registrars (app-state, launchers, module-windows,
- * gui-editor), and editor-spawn + agent-launcher (local-process launchers).
+ * auto-updater, bootstrap/app/index wiring, ipc-registry, the shell
+ * registrars (app-state, launchers, module-windows, gui-editor), and
+ * agent-launcher.
  */
 
 /** Server-destined source files, relative to `electron/main/`. */
@@ -41,6 +48,8 @@ export const SERVER_DESTINED_FILES: readonly string[] = [
   "kernel-error-parser.ts",
   "process-stats.ts",
   "config.ts",
+  // Pulled in by config.ts (TERMINAL_PRESET_LIST), so it ships in the child.
+  "editor-spawn.ts",
   "project-manager.ts",
   "project-file-sync.ts",
   "autosave-sidecars.ts",

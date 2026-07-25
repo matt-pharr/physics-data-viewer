@@ -134,6 +134,21 @@ export function serverMain(): void {
     startMcp: true,
   });
 
+  // The supervisor escalates to SIGTERM when the graceful shutdown invoke
+  // overruns its budget. Without a handler the default disposition kills
+  // this process instantly, orphaning every kernel child (they are spawned
+  // non-detached with piped stdio, so they survive and are reparented to
+  // init). Reap them synchronously, then exit.
+  process.on("SIGTERM", () => {
+    console.error("[pdv-server] SIGTERM; force-killing kernels and exiting");
+    try {
+      kernelManager.killAllNow();
+    } catch (error) {
+      console.error("[pdv-server] force-kill failed:", error);
+    }
+    process.exit(1);
+  });
+
   // If the shell disappears without a shutdown invoke (crash, SIGKILL),
   // stdin closes — exit rather than lingering as an orphan.
   process.stdin.on("end", () => {

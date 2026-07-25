@@ -1074,6 +1074,41 @@ export class KernelManager extends EventEmitter {
   }
 
   /**
+   * Force-kill every kernel immediately, without the graceful JMP
+   * handshake or the 3 s exit grace period {@link stop} allows.
+   *
+   * Intended for last-resort teardown (a SIGTERM the supervisor sent after
+   * graceful shutdown overran its budget). Kernels are spawned with piped
+   * stdio and are not detached, so a server process that dies without
+   * calling this leaves them reparented to init and running indefinitely.
+   * Synchronous and best-effort: every step is individually guarded so one
+   * unkillable kernel cannot prevent the rest from being reaped.
+   *
+   * @returns Nothing.
+   */
+  killAllNow(): void {
+    for (const [id, managed] of this.kernels) {
+      managed.shuttingDown = true;
+      if (managed.memoryPollHandle !== undefined) {
+        clearInterval(managed.memoryPollHandle);
+        managed.memoryPollHandle = undefined;
+      }
+      try {
+        if (managed.process.exitCode === null) managed.process.kill("SIGKILL");
+      } catch (error) {
+        console.error(`[kernel:${id}] force-kill failed:`, error);
+      }
+      try {
+        fs.unlinkSync(managed.connectionFile);
+      } catch {
+        // Best effort — the connection file may already be gone.
+      }
+    }
+    this.kernels.clear();
+    this.iopubListeners.clear();
+  }
+
+  /**
    * Whether a shell execution with the given msg_id is currently in flight.
    *
    * @param msgId - The `parent_header.msg_id` of an iopub message.

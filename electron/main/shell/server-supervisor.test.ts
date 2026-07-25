@@ -197,14 +197,108 @@ describe("ServerSupervisor", () => {
     warnSpy.mockRestore();
   });
 
-  it("answers reverse-RPC confirm requests with the cancel choice when no bridge is attached", async () => {
-    // Covered end-to-end in server-loopback.test.ts; here just assert the
-    // invoke surface stays alive with no bridge handlers set.
+  it("routes a reverse-RPC confirm through the bridge dialog and answers it", async () => {
+    setFixtureEnv("confirm");
+    const confirm = vi.fn(async () => 0);
     const supervisor = makeSupervisor();
     await supervisor.start();
-    supervisor.clearBridgeHandlers();
-    await expect(supervisor.invoke("echo", ["still-alive"])).resolves.toBe(
-      "still-alive"
+    supervisor.setBridgeHandlers({
+      onPush: vi.fn(),
+      confirm,
+      closeChildWindows: vi.fn(),
+    });
+
+    await vi.waitFor(async () => {
+      expect(await supervisor.invoke("lastConfirm")).toEqual({
+        requestId: "c1",
+        response: 0,
+      });
+    });
+    expect(confirm).toHaveBeenCalledWith(
+      expect.objectContaining({ message: "Overwrite?" })
     );
+  });
+
+  it("answers reverse-RPC confirm requests with the cancel choice when no bridge is attached", async () => {
+    setFixtureEnv("confirm");
+    const supervisor = makeSupervisor();
+    await supervisor.start();
+    // No bridge: there is no window to ask, so the supervisor must answer
+    // with the request's own cancelId rather than leaving the server's
+    // confirm promise parked forever.
+    await vi.waitFor(async () => {
+      expect(await supervisor.invoke("lastConfirm")).toEqual({
+        requestId: "c1",
+        response: 1,
+      });
+    });
+  });
+
+  it("falls back to the cancel choice when the confirm dialog throws", async () => {
+    setFixtureEnv("confirm");
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const supervisor = makeSupervisor();
+    await supervisor.start();
+    supervisor.setBridgeHandlers({
+      onPush: vi.fn(),
+      confirm: vi.fn(async () => {
+        throw new Error("window destroyed");
+      }),
+      closeChildWindows: vi.fn(),
+    });
+
+    await vi.waitFor(async () => {
+      expect(await supervisor.invoke("lastConfirm")).toEqual({
+        requestId: "c1",
+        response: 1,
+      });
+    });
+    errorSpy.mockRestore();
+  });
+
+  it("kills a child that failed its handshake instead of orphaning it", async () => {
+    // The no-hello fixture stays alive. Before the fix, disposeChild() only
+    // dropped the reference: the server kept running, finished wiring, bound
+    // the MCP port and created a working dir, and the retry spawned a second
+    // one alongside it.
+    setFixtureEnv("no-hello");
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const supervisor = makeSupervisor({ helloTimeoutMs: 200 });
+    await expect(supervisor.start()).rejects.toThrow("hello not received");
+
+    const pids = errorSpy.mock.calls
+      .map((c) => /\[pdv-server\] fixture pid (\d+)/.exec(c.join(" "))?.[1])
+      .filter((pid): pid is string => Boolean(pid))
+      .map(Number);
+    errorSpy.mockRestore();
+    expect(pids.length).toBeGreaterThan(0);
+
+    for (const pid of pids) {
+      await vi.waitFor(() => {
+        // ESRCH: no such process — the child was reaped.
+        expect(() => process.kill(pid, 0)).toThrow();
+      });
+    }
+  });
+
+  it("keeps serving after a failed first attempt: the dead child cannot tear down the live one", async () => {
+    // A superseded child's exit event must not touch the current
+    // generation's state. Without the guard, its exit closed the *live*
+    // client and flipped the supervisor to "stopped".
+    setFixtureEnv("no-hello");
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const supervisor = makeSupervisor({ helloTimeoutMs: 200 });
+    const started = supervisor.start();
+    // Attempt 1 already spawned with the no-hello env; flip before its
+    // deadline expires so the immediate retry spawns a healthy child.
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    setFixtureEnv("normal");
+    await started;
+
+    // Give the killed child's exit event time to land after the retry is up.
+    await flush();
+    await expect(supervisor.invoke("echo", ["ok"])).resolves.toBe("ok");
+    expect(electronMocks.showMessageBox).not.toHaveBeenCalled();
+    errorSpy.mockRestore();
   });
 });

@@ -39,8 +39,18 @@ import { RpcClient } from "../transport/rpc-client";
 
 /** How long to wait for the server's hello push before giving up. */
 const HELLO_TIMEOUT_MS = 10_000;
-/** How long the graceful `pdv.rpc.shutdown` invoke may take. */
-const SHUTDOWN_INVOKE_TIMEOUT_MS = 5_000;
+/**
+ * How long the graceful `pdv.rpc.shutdown` invoke may take.
+ *
+ * This budget covers the server's whole exit path: stopping every kernel
+ * (each allows the kernel 3 s to exit before SIGKILL, run in parallel),
+ * stopping MCP, removing working directories, and flushing the transport.
+ * Before the server extraction this ran on `will-quit` with no deadline at
+ * all, so the budget is set generously — overrunning it means SIGTERM,
+ * which force-kills kernels mid-shutdown and can leave a half-removed
+ * working directory behind.
+ */
+const SHUTDOWN_INVOKE_TIMEOUT_MS = 30_000;
 /** How long SIGTERM may take before escalating to SIGKILL. */
 const SIGTERM_TIMEOUT_MS = 3_000;
 
@@ -230,12 +240,17 @@ export class ServerSupervisor implements ServerHandle {
       stdio: ["pipe", "pipe", "pipe"],
     });
     this.child = child;
+    this.stderrRemainder = "";
     child.stderr?.on("data", (chunk: Buffer) => this.relayStderr(chunk));
-    child.on("exit", (code, signal) => this.onChildExit(code, signal));
+    // Every handler below is bound to *this* child. A previous generation
+    // that outlived its dispose (slow hello, killed mid-handshake) must
+    // never mutate the current one's state — see onChildExit.
+    child.on("exit", (code, signal) => this.onChildExit(child, code, signal));
     child.on("error", (err) => {
       // Spawn failure (e.g. missing entry). The exit handler won't fire
-      // with a live client; close() rejects the hello wait below.
+      // with a live client; close() rejects the hello wait.
       console.error("[pdv] pdv-server spawn error:", err);
+      if (this.child !== child) return;
       this.client?.close(`pdv-server spawn error: ${err.message}`);
     });
 
@@ -253,7 +268,8 @@ export class ServerSupervisor implements ServerHandle {
       onUnresponsive: () => {
         console.error("[pdv] pdv-server unresponsive; killing it");
         // SIGKILL trips the exit handler, which runs the crash flow.
-        this.child?.kill("SIGKILL");
+        // Kill the child this client belongs to, not whatever is current.
+        child.kill("SIGKILL");
       },
       pingIntervalMs: this.opts.pingIntervalMs,
     });
@@ -407,8 +423,26 @@ export class ServerSupervisor implements ServerHandle {
     }
   }
 
-  /** Child exit handler: expected during stop, a crash otherwise. */
-  private onChildExit(code: number | null, signal: string | null): void {
+  /**
+   * Child exit handler: expected during stop, a crash otherwise.
+   *
+   * @param child - The process this handler was registered on. Exits from a
+   *   superseded generation are logged and otherwise ignored: without this
+   *   guard, a stale child dying would reject the *current* connection's
+   *   in-flight invokes and drop a healthy server.
+   */
+  private onChildExit(
+    child: ChildProcess,
+    code: number | null,
+    signal: string | null
+  ): void {
+    if (this.child !== child) {
+      console.warn(
+        `[pdv] superseded pdv-server (pid ${String(child.pid)}) exited ` +
+          `(code ${String(code)}, signal ${String(signal)})`
+      );
+      return;
+    }
     const wasRunning = this.phase === "running";
     // During "starting" the hello wait surfaces the failure; during
     // "stopping" the exit is the goal. Either way just settle pending work.
@@ -464,11 +498,23 @@ export class ServerSupervisor implements ServerHandle {
     }
   }
 
-  /** Drop the child/client references and return to "stopped". */
+  /**
+   * Drop the child/client references and return to "stopped".
+   *
+   * Kills the process if it is still alive. Every failure path out of
+   * `startAttempt()` lands here, and a server that merely missed the hello
+   * deadline is still running: it will finish wiring, bind the MCP port and
+   * create a working directory. Leaving it would orphan a second pdv-server
+   * for the life of the app.
+   */
   private disposeChild(): void {
+    const child = this.child;
     this.client?.close("pdv-server supervisor disposed the connection");
     this.client = null;
     this.child = null;
     this.phase = "stopped";
+    if (child && child.exitCode === null && child.signalCode === null) {
+      child.kill("SIGKILL");
+    }
   }
 }

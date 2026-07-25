@@ -106,7 +106,15 @@ export class RpcClient {
   private closed = false;
 
   private helloPayload: RpcHello | null = null;
-  private helloWaiters: Array<(hello: RpcHello) => void> = [];
+  /**
+   * Waiters parked in {@link waitForHello}. Both halves are kept so
+   * {@link close} can reject them with the real reason — a server that dies
+   * before saying hello must surface its exit, not stall until the timeout.
+   */
+  private helloWaiters: Array<{
+    resolve: (hello: RpcHello) => void;
+    reject: (err: Error) => void;
+  }> = [];
 
   private pingTimer: NodeJS.Timeout | null = null;
   /** Pings sent but not yet answered. */
@@ -175,9 +183,15 @@ export class RpcClient {
           new Error(`pdv-server hello not received within ${timeoutMs} ms`)
         );
       }, timeoutMs);
-      const waiter = (hello: RpcHello): void => {
-        clearTimeout(timer);
-        resolve(hello);
+      const waiter = {
+        resolve: (hello: RpcHello): void => {
+          clearTimeout(timer);
+          resolve(hello);
+        },
+        reject: (err: Error): void => {
+          clearTimeout(timer);
+          reject(err);
+        },
       };
       this.helloWaiters.push(waiter);
     });
@@ -253,7 +267,9 @@ export class RpcClient {
     const err = new Error(reason);
     for (const { reject } of this.pending.values()) reject(err);
     this.pending.clear();
+    const helloWaiters = this.helloWaiters;
     this.helloWaiters = [];
+    for (const { reject } of helloWaiters) reject(err);
     this.opts.onClose?.(reason);
   }
 
@@ -266,7 +282,7 @@ export class RpcClient {
         this.helloPayload = hello;
         const waiters = this.helloWaiters;
         this.helloWaiters = [];
-        for (const waiter of waiters) waiter(hello);
+        for (const { resolve } of waiters) resolve(hello);
         return;
       }
       if (isReservedRpcChannel(msg.event)) {
