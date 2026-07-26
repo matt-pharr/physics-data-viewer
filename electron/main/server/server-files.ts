@@ -38,6 +38,8 @@ export const SERVER_DESTINED_FILES: readonly string[] = [
   "server/session-paths.ts",
   "server/session-lock.ts",
   "server/session-host.ts",
+  "server/session-meta.ts",
+  "server/daemonize.ts",
   "server/server-main.ts",
   // Stdio RPC transport
   "transport/protocol.ts",
