@@ -24,6 +24,7 @@ import {
   type RemoteHostAlias,
   type RemoteSessionResult,
   type RemoteStatus,
+  type SessionStatePayload,
 } from "./ipc";
 import { openSessionChannel } from "./remote/remote-channel";
 import { RemoteServerHandle } from "./shell/remote-server";
@@ -139,6 +140,12 @@ export function registerRemoteIpcHandlers(
 
     const sessionId = options.sessionId ?? defaultSessionId();
     const open = options.openChannel ?? openSessionChannel;
+    const host = manager.getStatus().host;
+    const pushSessionState = (payload: SessionStatePayload): void => {
+      if (win.isDestroyed()) return;
+      win.webContents.send(IPC.push.sessionState, payload);
+    };
+
     const handle = new RemoteServerHandle({
       sessionId,
       openChannel: async ({ batchMode }) =>
@@ -149,6 +156,20 @@ export function registerRemoteIpcHandlers(
           create: true,
           muxOptions: { batchMode },
         }),
+      onState: (state) => {
+        if (state === "connecting") return; // Not yet a session state.
+        pushSessionState({ kind: "remote", host, state });
+      },
+      onStale: (reason) => {
+        // The client's view could not be resumed. Query invalidation alone
+        // would leave push-backed state (execution status, kernel status)
+        // stale, so the renderer is told to rebuild everything.
+        console.error(`[remote] session resync required: ${reason}`);
+        pushSessionState({ kind: "remote", host, state: "connected", resync: true });
+      },
+      onReattached: () => {
+        pushSessionState({ kind: "remote", host, state: "connected" });
+      },
     });
 
     try {
@@ -161,6 +182,7 @@ export function registerRemoteIpcHandlers(
     }
 
     const previous = router.swap(handle);
+    pushSessionState({ kind: "remote", host, state: "connected", resync: true });
     // The outgoing local server is shut down, not abandoned: it holds a
     // kernel and a working directory on this machine.
     void previous?.shutdown().catch((err: unknown) => {

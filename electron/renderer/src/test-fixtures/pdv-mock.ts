@@ -206,6 +206,7 @@ function buildBase() {
         message: "not-mocked",
       })),
       onStatus: subStub<PDVApi["remote"]["onStatus"]>(),
+      onSessionState: subStub<PDVApi["remote"]["onSessionState"]>(),
     },
     updater: {
       checkForUpdates: stub<PDVApi["updater"]["checkForUpdates"]>(async () => undefined),

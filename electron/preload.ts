@@ -267,6 +267,7 @@ const api: PDVApi = {
     startSession: () => invoke(IPC.remote.startSession),
     endSession: () => invoke(IPC.remote.endSession),
     onStatus: (cb) => onPush(IPC.push.remoteStatus, cb),
+    onSessionState: (cb) => onPush(IPC.push.sessionState, cb),
   },
   updater: {
     checkForUpdates: () => invoke(IPC.updater.checkForUpdates),

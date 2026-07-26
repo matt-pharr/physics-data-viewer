@@ -293,6 +293,16 @@ export const IPC = {
      * and installing the server bundle) belongs, for the same reason.
      */
     remoteStatus: "pdv.remote.status",
+    /**
+     * Where the session now lives, and whether its connection is healthy.
+     *
+     * Distinct from {@link IPCChannels.push.remoteStatus}, which describes an
+     * ssh *connection* attempt. This describes the *session* — the thing that
+     * owns the kernel and the Tree — so the status bar can say "remote,
+     * reconnecting" instead of leaving the user looking at a UI whose backing
+     * server has quietly moved or gone away.
+     */
+    sessionState: "pdv.session.state",
     requestClose: "pdv.app.requestClose",
     autosaveTrigger: "pdv.autosave.trigger",
     /**
@@ -557,6 +567,7 @@ export const SHELL_PUSH_CHANNELS: readonly string[] = [
   IPC.push.chromeStateChanged,
   IPC.push.updateStatus,
   IPC.push.remoteStatus,
+  IPC.push.sessionState,
   IPC.push.requestClose,
   IPC.push.moduleExecuteRequest,
 ];
@@ -716,6 +727,24 @@ export interface RemoteStatus {
    * progress bar would mean anything.
    */
   progress?: { transferred: number; total: number };
+}
+
+/** Payload of {@link IPCChannels.push.sessionState}. */
+export interface SessionStatePayload {
+  /** Where the session runs now. */
+  kind: "local" | "remote";
+  /** Host the session runs on, or null for local. */
+  host: string | null;
+  /** Health of the connection carrying it. */
+  state: "connected" | "reconnecting" | "auth-required" | "disconnected";
+  /**
+   * True when the client's view could not be resumed and must be rebuilt.
+   *
+   * Push-backed state (execution status, kernel status) is not covered by
+   * query invalidation, so a resync that skipped it would leave a spinner
+   * running forever on an execution that finished while the client was away.
+   */
+  resync?: boolean;
 }
 
 /** Result of {@link PDVApi.remote.startSession} / `endSession`. */
@@ -3099,6 +3128,8 @@ export interface PDVApi {
     startSession(): Promise<RemoteSessionResult>;
     /** Leave the remote session running and return to a local session. */
     endSession(): Promise<RemoteSessionResult>;
+    /** Where the session lives and whether its connection is healthy. */
+    onSessionState(callback: (state: SessionStatePayload) => void): () => void;
     /** Answer the prompt currently on screen. */
     respond(text: string): Promise<void>;
     /** Abandon the in-flight attempt. */

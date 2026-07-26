@@ -1322,6 +1322,10 @@ export interface PDVApi {
     startSession(): Promise<import('../../../main/ipc').RemoteSessionResult>;
     /** Leave the remote session running and return to a local session. */
     endSession(): Promise<import('../../../main/ipc').RemoteSessionResult>;
+    /** Where the session lives and whether its connection is healthy. */
+    onSessionState(
+      callback: (state: import('../../../main/ipc').SessionStatePayload) => void,
+    ): () => void;
     onStatus(
       callback: (status: import('../../../main/ipc').RemoteStatus) => void,
     ): () => void;

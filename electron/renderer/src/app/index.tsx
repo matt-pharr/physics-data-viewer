@@ -60,6 +60,7 @@ import { useNoteTabs } from './useNoteTabs';
 import { useProjectWorkflow } from './useProjectWorkflow';
 import { useKernelSubscriptions } from './useKernelSubscriptions';
 import { useRemoteConnection } from './useRemoteConnection';
+import { useSessionState } from './useSessionState';
 import { useWelcomeState } from './useWelcomeState';
 import { useThemeManager } from './useThemeManager';
 import { useTreeAction } from '../hooks/useTreeAction';
@@ -491,6 +492,7 @@ const App: React.FC = () => {
 
   // An ssh connection outlives any one kernel, so this is not kernel-keyed.
   useRemoteConnection();
+  useSessionState(currentKernelId);
 
   useKernelSubscriptions({
     currentKernelId,

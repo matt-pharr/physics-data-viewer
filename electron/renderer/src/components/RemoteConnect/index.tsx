@@ -48,6 +48,25 @@ export const RemoteConnect: React.FC<RemoteConnectProps> = ({ onClose }) => {
 
   const busy = phase === 'connecting' || phase === 'prompting' || phase === 'preparing';
   const connected = phase === 'connected';
+  const [starting, setStarting] = useState(false);
+  const [sessionError, setSessionError] = useState<string | null>(null);
+  const sessionRunning = useStore((s) => s.connectionState !== 'local');
+
+  /** Move the session onto the connected host. */
+  const startSession = async (): Promise<void> => {
+    setStarting(true);
+    setSessionError(null);
+    try {
+      const result = await window.pdv.remote.startSession();
+      // A failure here leaves the local session working and the connection
+      // open, so the dialog stays put and says why rather than closing.
+      if (!result.ok) setSessionError(result.message ?? 'Could not start the session.');
+    } catch (err) {
+      setSessionError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setStarting(false);
+    }
+  };
   // A reopened dialog shows what it is connected to rather than an empty box.
   const target = typed ?? host ?? '';
 
@@ -132,9 +151,12 @@ export const RemoteConnect: React.FC<RemoteConnectProps> = ({ onClose }) => {
               {node && node !== host && <span className="remote-node"> ({node})</span>}
             </div>
             <div className="remote-subtitle">
-              This session still runs on your computer. Connecting here keeps the
-              link open; running the session on {host} comes later.
+              {sessionRunning
+                ? `Your session is running on ${host ?? 'this host'}.`
+                : 'This session still runs on your computer. Run it on ' +
+                  `${host ?? 'this host'} to use its data and compute.`}
             </div>
+            {sessionError && <div className="remote-error">{sessionError}</div>}
           </div>
         )}
 
@@ -188,6 +210,15 @@ export const RemoteConnect: React.FC<RemoteConnectProps> = ({ onClose }) => {
           {busy && (
             <button className="btn btn-secondary" onClick={() => void window.pdv.remote.cancel()}>
               Cancel
+            </button>
+          )}
+          {connected && !sessionRunning && (
+            <button
+              className="btn btn-primary"
+              disabled={starting}
+              onClick={() => void startSession()}
+            >
+              {starting ? 'Starting…' : 'Run session here'}
             </button>
           )}
           {connected && (
