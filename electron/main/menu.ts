@@ -97,10 +97,13 @@ function buildTemplate(): MenuItemConstructorOptions[] {
           label: "Open Recent",
           submenu: buildOpenRecentSubmenu(),
         },
-        // Off unless PDV_REMOTE=1. Connecting works end to end, but the
-        // session does not yet move to the host, so a user who found this
-        // would sign in to a cluster and see nothing change. It ships
-        // hidden until running the session over the connection lands.
+        // Off unless PDV_REMOTE=1. The whole path now works — connect,
+        // bootstrap, and move the session onto the host — but every dialog
+        // that picks a server-side path is still a *native* dialog, so it
+        // browses the laptop's filesystem while the session lives on the
+        // cluster. Opening or saving a project, or choosing an interpreter,
+        // would silently point at the wrong machine. It stays hidden until
+        // the remote path picker lands.
         ...(process.env.PDV_REMOTE === "1"
           ? ([
               { type: "separator" },
