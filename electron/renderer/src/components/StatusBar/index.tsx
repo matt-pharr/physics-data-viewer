@@ -238,14 +238,21 @@ export const StatusBar: React.FC<StatusBarProps> = ({
 };
 
 /**
- * Remote-session indicator (roadmap Phase 3). Subscribes to the store's
- * connection state and renders nothing for local sessions, so today's UI is
- * unchanged while the surface the SSH state machine will drive already
- * exists.
+ * Remote-session indicator. Renders nothing for a local session, so the
+ * local UI is unchanged.
+ *
+ * Names the host rather than saying only "SSH": the whole point of the
+ * indicator is *where* the kernel and Tree live, and with more than one
+ * window open a bare protocol label cannot answer that.
  */
 const ConnectionSegment: React.FC = () => {
   const connectionState = useStore((s) => s.connectionState);
+  const remoteHost = useStore((s) => s.remoteHost);
   if (connectionState === 'local') return null;
   const { text, className } = CONNECTION_LABELS[connectionState];
-  return <span className={className}>{text}</span>;
+  return (
+    <span className={className}>
+      {remoteHost ? `${text}: ${remoteHost}` : text}
+    </span>
+  );
 };

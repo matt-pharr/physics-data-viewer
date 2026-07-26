@@ -71,15 +71,27 @@ for (let i = 0; i < argv.length; i++) {
     const pair = argv[++i] || "";
     const eq = pair.indexOf("=");
     if (eq > 0) {
-      // Strip surrounding double quotes exactly as real ssh does when it
-      // parses an -o value as config-file syntax. PDV quotes ControlPath
-      // because Electron's userData path contains a space on macOS, and a
-      // fixture that kept the quotes would not be reproducing ssh.
-      const value = pair.slice(eq + 1);
-      options[pair.slice(0, eq)] =
-        value.length > 1 && value.startsWith('"') && value.endsWith('"')
-          ? value.slice(1, -1)
-          : value;
+      const keyword = pair.slice(0, eq);
+      const raw = pair.slice(eq + 1);
+      // Reproduce ssh's own parsing of an -o value, not just its effect.
+      // ssh reads the value as config-file syntax: an unquoted value is
+      // split on whitespace and anything after the first token is an error.
+      // A fixture that skipped this accepted a ControlPath that real ssh
+      // rejects — and did so on the one path that matters, since Electron's
+      // userData contains a space on macOS.
+      if (raw.startsWith('"')) {
+        if (!raw.endsWith('"') || raw.length < 2) {
+          die(`command-line line 0: no matching "" found`, 255);
+        }
+        options[keyword] = raw.slice(1, -1);
+      } else if (/\s/.test(raw)) {
+        die(
+          `command-line line 0: keyword ${keyword.toLowerCase()} extra arguments at end of line`,
+          255,
+        );
+      } else {
+        options[keyword] = raw;
+      }
     }
   } else if (arg === "-O") {
     controlCommand = argv[++i] || "";

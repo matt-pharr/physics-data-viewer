@@ -108,6 +108,22 @@ describe("controlPathFor", () => {
     expect(result.startsWith(userData)).toBe(false);
   });
 
+  it("survives a control directory containing a space, end to end", async () => {
+    // Not hypothetical: Electron's userData on macOS is
+    // `~/Library/Application Support/<app>`. ssh parses an -o value as
+    // config-file syntax and splits it on whitespace, so an unquoted path
+    // makes the whole option unparseable and no connection is possible.
+    // fake-ssh reproduces that parsing, so this fails if the quoting is lost.
+    const spacey = path.join(dir, "Application Support", "pdv");
+    fs.mkdirSync(spacey, { recursive: true });
+    const control = { host: "testhost", controlPath: path.join(spacey, "m-1") };
+
+    const result = await execViaSsh(control, "echo hello", opts());
+
+    expect(result.failure).toBeNull();
+    expect(result.stdout).toContain("hello");
+  }, 15_000);
+
   it("gives different control directories different fallback sockets", () => {
     // Keying the fallback on the host alone would collapse every control
     // directory onto one socket, so two PDV profiles (or two tests) would

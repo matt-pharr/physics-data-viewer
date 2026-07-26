@@ -85,13 +85,27 @@ export function registerRemoteIpcHandlers(
     win.webContents.send(IPC.push.remoteStatus, status);
   };
 
+  // Two env seams, both for testing the remote path without a cluster. They
+  // mirror the existing PDV_ZEROMQ_PATH / PYTHON_PATH convention: absent in
+  // any normal run, and inert unless deliberately set.
+  //
+  // Without these the remote path can only be exercised by hand against a
+  // real host — which is how three shipped bugs (an unquoted ControlPath, a
+  // sun_path budget that ignored ssh's temp suffix, and a stale bundle) were
+  // found by a human rather than by CI.
+  const sshPath = process.env.PDV_SSH_PATH;
+  const serverCommandOverride = process.env.PDV_REMOTE_SERVER_COMMAND;
+
   const manager =
     options.manager ??
     new RemoteConnectionManager({
       controlDir: options.controlDir,
       onStatus: pushStatus,
       appVersion: app.getVersion(),
-      bundleDir: options.bundleDir,
+      // An override supplies the server directly, so there is nothing to
+      // bootstrap and probing a host that has no bundle would only fail.
+      bundleDir: serverCommandOverride ? undefined : options.bundleDir,
+      sshPath,
     });
 
   handleIpc(IPC.remote.listHosts, async (): Promise<RemoteHostAlias[]> => manager.listHosts());
@@ -127,7 +141,7 @@ export function registerRemoteIpcHandlers(
       return { ok: false, message: "This build cannot run remote sessions." };
     }
     const control = manager.control;
-    const serverCommand = manager.serverCommand;
+    const serverCommand = serverCommandOverride ?? manager.serverCommand;
     if (!control || !serverCommand) {
       return {
         ok: false,
@@ -154,6 +168,7 @@ export function registerRemoteIpcHandlers(
           sessionId,
           serverCommand,
           create: true,
+          sshPath,
           muxOptions: { batchMode },
         }),
       onState: (state) => {
