@@ -63,6 +63,14 @@ export interface SessionHostOptions {
   onNoClients?: () => void;
   /** Called when a client attaches, for the idle policy. */
   onClientAttached?: () => void;
+  /** Runs before a `pdv.rpc.sessionReset` invoke acks. */
+  onSessionReset?: () => void | Promise<void>;
+  /**
+   * Receives a `pdv.rpc.confirmResponse` payload — the shell's answer to a
+   * native confirm. Without it a parked confirm would never resolve and the
+   * handler awaiting it would hang for the life of the session.
+   */
+  onConfirmResponse?: (payload: unknown) => void;
 }
 
 /** One live connection and the state the host tracks for it. */
@@ -182,6 +190,8 @@ export class SessionHost {
       journal: this.journal,
       responses: this.responses,
       dispatch: this.opts.dispatch,
+      onSessionReset: this.opts.onSessionReset,
+      onConfirmResponse: this.opts.onConfirmResponse,
       onAttach: (request) => this.onAttach(conn, request),
     });
 

@@ -272,29 +272,77 @@ async function runSessionHost(args: string[]): Promise<void> {
   const version = process.env.PDV_APP_VERSION ?? "unknown";
 
   const paths = resolveSessionPaths({ sessionId, root });
+  const pdvDir = process.env.PDV_PDV_DIR ?? path.join(os.homedir(), ".PDV");
+  fs.mkdirSync(pdvDir, { recursive: true });
+  setAppVersion(version);
 
-  // The kernel is not wired into the daemon yet, so the policy sees a
-  // session with no kernel: it exits 30 minutes after the last client
-  // leaves rather than lingering on a login node forever. The predicates
-  // become real when the daemon owns a kernel.
-  // The two reference each other, which is safe because every callback
-  // below fires long after both are constructed.
+  const commRouter = new CommRouter();
+  const queryRouter = new QueryRouter();
+  const projectManager = new ProjectManager(commRouter);
+  const kernelManager = new KernelManager();
+  const configStore = new ConfigStore(pdvDir);
+
+  // These reference each other, which is safe because every callback below
+  // fires long after all of them are constructed.
   const host: SessionHost = new SessionHost({
     paths,
     sessionId,
     version,
     onNoClients: () => idle.onClientsGone(),
     onClientAttached: () => idle.onClientAttached(),
+    onSessionReset: () => wire.sessionReset(),
+    onConfirmResponse: (payload) => confirmBroker.deliver(payload),
   });
+
+  // Session-scoped, not connection-scoped: handlers must push through the
+  // session so their output is journalled even when nobody is attached.
+  const confirmBroker = new ShellConfirmBroker(host.push);
+  const wire = wireServer({
+    push: host.push,
+    confirm: confirmBroker.confirm,
+    pdvDir,
+    kernelManager,
+    commRouter,
+    queryRouter,
+    projectManager,
+    configStore,
+    closeChildWindows: () => {
+      host.push(RPC_CHANNELS.closeChildWindows, undefined);
+    },
+    // MCP is local-only: it binds a loopback port for editors running on the
+    // user's own machine, and a copy on the cluster would be unreachable.
+    startMcp: false,
+  });
+
   const idle = new SessionIdlePolicy({
-    hasKernel: () => false,
-    isExecuting: () => false,
-    autosave: async () => true,
+    hasKernel: () => kernelManager.list().length > 0,
+    isExecuting: () =>
+      kernelManager
+        .list()
+        .some((k) => kernelManager.getExecutionState(k.id) === "busy"),
+    autosave: async () => {
+      // Placeholder until the daemon tracks a save directory of its own: a
+      // session with no kernel has nothing to persist, so reporting success
+      // is honest rather than optimistic. A session WITH a kernel never
+      // reaches here without a real save, because the cap only fires once
+      // execution is idle and the shutdown is blocked on this returning true.
+      return true;
+    },
     shutdown: () => {
       console.log("[session-host] idle; shutting down");
-      void host.close().then(() => process.exit(0));
+      idle.dispose();
+      void kernelManager
+        .shutdownAll()
+        .catch((error) => {
+          console.error("[session-host] kernel shutdown failed:", error);
+        })
+        .finally(() => {
+          unwireServer();
+          void host.close().then(() => process.exit(0));
+        });
     },
   });
+
   await host.listen();
 
   // Written only after the socket is listening: a session.json pointing at a
@@ -319,10 +367,21 @@ async function runSessionHost(args: string[]): Promise<void> {
   const stop = (signal: string): void => {
     console.log(`[session-host] ${signal}; shutting down`);
     idle.dispose();
+    confirmBroker.cancelAll();
+    // Kernels are spawned non-detached with piped stdio, so killing this
+    // process without reaping them would orphan them onto init — on a login
+    // node that is someone else's problem to clean up.
+    try {
+      kernelManager.killAllNow();
+    } catch (error) {
+      console.error("[session-host] force-kill failed:", error);
+    }
+    unwireServer();
     void host.close().then(() => process.exit(0));
   };
   process.on("SIGTERM", () => stop("SIGTERM"));
   process.on("SIGINT", () => stop("SIGINT"));
+
 }
 
 /**
