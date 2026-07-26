@@ -99,6 +99,16 @@ export class SessionHost {
   private readonly connections = new Set<HostConnection>();
   /** The connection currently serving the client, if any. */
   private active: HostConnection | null = null;
+  /**
+   * Requests being dispatched anywhere in this session.
+   *
+   * Tracked here rather than per connection because the connection that
+   * dispatched a request is routinely gone before the handler finishes —
+   * that is the entire premise of the daemon. Asking only the current
+   * connection would report running work as unknown, and the client would
+   * be told a script it is waiting on may never have happened.
+   */
+  private readonly sessionInFlight = new Set<string>();
   private closed = false;
 
   /**
@@ -193,6 +203,11 @@ export class SessionHost {
       onSessionReset: this.opts.onSessionReset,
       onConfirmResponse: this.opts.onConfirmResponse,
       onAttach: (request) => this.onAttach(conn, request),
+      onDispatch: (id) => this.sessionInFlight.add(id),
+      onSettle: (id, frame) => {
+        this.sessionInFlight.delete(id);
+        this.deliverSettlement(conn, frame);
+      },
     });
 
     const conn: HostConnection = {
@@ -219,6 +234,24 @@ export class SessionHost {
     server.start();
   }
 
+  /**
+   * Make sure a settlement reaches a live client.
+   *
+   * A handler dispatched on one connection can finish long after that
+   * connection died — that is the point of the daemon. Its own writer wrote
+   * the frame into a closed socket, so if the session has since moved to a
+   * different connection, the frame is written there instead. Without this
+   * the caller waits forever on work that has already completed.
+   *
+   * @param from - The connection the handler was dispatched on.
+   * @param frame - The encoded settlement.
+   */
+  private deliverSettlement(from: HostConnection, frame: Buffer): void {
+    const active = this.active;
+    if (!active || active === from) return;
+    active.server.writeFrames([frame]);
+  }
+
   /** Serve one attach request, superseding whoever held the session. */
   private onAttach(
     conn: HostConnection,
@@ -227,7 +260,10 @@ export class SessionHost {
     const plan = planAttach({
       request,
       journal: this.journal,
-      reconcile: (id) => conn.server.reconcile(id),
+      reconcile: (id) => {
+        if (this.sessionInFlight.has(id)) return "in-flight";
+        return this.responses.get(id) ? "completed" : "unknown";
+      },
     });
 
     if (plan.outcome === "rejected") return plan;
@@ -241,6 +277,19 @@ export class SessionHost {
     const previous = this.active;
     this.active = conn;
     if (previous && previous !== conn) this.supersede(previous);
+
+    // Hand back settlements that completed while this client was away. The
+    // verdicts alone are not enough: "completed" is only useful with the
+    // result attached.
+    const retained: Buffer[] = [];
+    for (const [id, verdict] of Object.entries(plan.result.pending)) {
+      if (verdict !== "completed") continue;
+      const entry = this.responses.get(id);
+      if (entry) retained.push(entry.frame);
+    }
+    if (retained.length > 0) {
+      setImmediate(() => conn.server.writeFrames(retained));
+    }
     // Cancels any idle countdown: somebody is watching again.
     this.opts.onClientAttached?.();
 

@@ -102,6 +102,18 @@ export interface RpcServerOptions {
    * a local server has no sessions to (re)join and rejects the channel.
    */
   onAttach?: (request: RpcAttachRequest) => AttachPlan;
+  /**
+   * Called with every settlement frame after it is recorded. A session uses
+   * this to re-route a late settlement to whichever connection is now
+   * active — the one that dispatched it may be long gone.
+   */
+  onSettle?: (id: string, frame: Buffer) => void;
+  /**
+   * Called when a request begins dispatching. A session uses this to track
+   * in-flight work at session scope: this connection may be gone by the
+   * time the handler finishes, and its own record dies with it.
+   */
+  onDispatch?: (id: string) => void;
 }
 
 /** Serialize a rejection for the wire, preserving the visible message. */
@@ -304,6 +316,7 @@ export class RpcServer {
   private async handleRequest(request: RpcRequest): Promise<void> {
     const { id, channel, args } = request;
     this.inFlight.add(id);
+    this.opts.onDispatch?.(id);
     try {
       const result = await this.dispatchChannel(channel, args);
       const response: RpcResponse =
@@ -327,6 +340,10 @@ export class RpcServer {
   private settle(response: RpcResponse): void {
     const entry = this.responses.record(response, this.journal.lastSeq);
     this.writer.writeFrame(entry.frame);
+    // The session may need to deliver this elsewhere: if this connection
+    // died while the handler ran, the frame above went to a dead socket and
+    // the only live copy is the one just recorded.
+    this.opts.onSettle?.(response.id, entry.frame);
   }
 
   /** Handle reserved channels inline; everything else goes to dispatch. */

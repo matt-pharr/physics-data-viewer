@@ -197,15 +197,37 @@ export class RpcClient {
    *   before the response arrives.
    */
   invoke(channel: string, args: unknown[] = []): Promise<unknown> {
+    return this.invokeTracked(channel, args).promise;
+  }
+
+  /**
+   * Invoke a channel and expose the request id it was sent under.
+   *
+   * A caller that must survive this connection needs the id: it is what the
+   * attach handshake reconciles against, so an owner tracking work across
+   * reconnects cannot use {@link invoke}, whose id is invisible.
+   *
+   * @param channel - IPC channel name.
+   * @param args - Arguments.
+   * @returns The wire id and the settling promise.
+   */
+  invokeTracked(
+    channel: string,
+    args: unknown[] = []
+  ): { id: string; promise: Promise<unknown> } {
     if (this.closed) {
-      return Promise.reject(new Error("RPC connection closed"));
+      return {
+        id: "",
+        promise: Promise.reject(new Error("RPC connection closed")),
+      };
     }
     const id = `${this.idEpoch}-${++this.nextId}`;
     const request: RpcRequest = { id, channel, args };
-    return new Promise<unknown>((resolve, reject) => {
+    const promise = new Promise<unknown>((resolve, reject) => {
       this.pending.set(id, { resolve, reject });
       this.writer.write(request);
     });
+    return { id, promise };
   }
 
   /**
@@ -308,6 +330,27 @@ export class RpcClient {
    */
   get parkedIds(): string[] {
     return [...this.parked.keys()];
+  }
+
+  /**
+   * Wait for a response under an id this connection did not issue.
+   *
+   * A reattaching owner carries request ids from the previous connection;
+   * their settlements arrive here, on the new one. Without adoption the
+   * client would discard them as late responses to nothing, and the caller
+   * would wait forever for work that has already finished.
+   *
+   * @param id - A request id from an earlier connection.
+   * @returns A promise settling when that response arrives.
+   */
+  adopt(id: string): Promise<unknown> {
+    return new Promise<unknown>((resolve, reject) => {
+      if (this.closed) {
+        reject(new Error("RPC connection closed"));
+        return;
+      }
+      this.pending.set(id, { resolve, reject });
+    });
   }
 
   /**

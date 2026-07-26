@@ -581,6 +581,38 @@ export const BROADCAST_PUSH_CHANNELS: readonly string[] = [
  *   distinct names means "the config the session's host owns" and "the
  *   config the user sees" never get confused for each other.
  */
+/**
+ * Channels a reconnecting client may safely re-issue when the session cannot
+ * say whether the original ran.
+ *
+ * Strictly reads, and strictly ones whose result depends only on current
+ * state. Everything absent from this list is treated as unsafe to retry, and
+ * that default is deliberate: re-issuing a mutation whose fate is unknown
+ * could run the same script twice against one kernel, with both writes
+ * landing in the Tree. Silent corruption is exactly what the reconnect
+ * design exists to prevent, so an unknown mutation is surfaced to the user
+ * instead ("the result of this operation is unknown — check the Tree").
+ *
+ * Adding a channel here is a claim that calling it twice is indistinguishable
+ * from calling it once. Verify that before adding one.
+ */
+export const IDEMPOTENT_CHANNELS: readonly string[] = [
+  IPC.tree.list,
+  IPC.tree.get,
+  IPC.namespace.query,
+  IPC.kernels.list,
+];
+
+/**
+ * Whether a channel may be transparently re-issued after a reconnect.
+ *
+ * @param channel - Channel name to classify.
+ * @returns True only for channels in {@link IDEMPOTENT_CHANNELS}.
+ */
+export function isIdempotentChannel(channel: string): boolean {
+  return IDEMPOTENT_CHANNELS.includes(channel);
+}
+
 export const INTERNAL_CHANNELS = {
   launcherContext: "pdv.internal.launcherContext",
   resolveTreeFile: "pdv.internal.resolveTreeFile",
