@@ -149,6 +149,85 @@ describe("SessionIdlePolicy", () => {
     it("defaults to twelve hours", () => {
       expect(DEFAULT_IDLE_CAP_HOURS).toBe(12);
     });
+
+    it("suspends the cap when execution starts after it was armed", async () => {
+      // Work can *begin* with nobody attached — a scheduled callback, a
+      // computation kicked off just before the detach. The armed cap must
+      // not race it to the kill.
+      let executing = false;
+      const { policy, shutdown } = makePolicy({
+        idleCapHours: 12,
+        isExecuting: () => executing,
+      });
+      policy.onClientsGone();
+      await vi.advanceTimersByTimeAsync(REATTACH_GRACE_MS + HOUR);
+
+      executing = true;
+      policy.onExecutionBusy();
+      await vi.advanceTimersByTimeAsync(20 * HOUR);
+      expect(shutdown).not.toHaveBeenCalled();
+
+      // ...and the cap resumes, full length, once the work ends.
+      executing = false;
+      policy.onExecutionIdle();
+      await vi.advanceTimersByTimeAsync(12 * HOUR + 10);
+      expect(shutdown).toHaveBeenCalledOnce();
+    });
+
+    it("keeps the literal clock running under capCountsExecution", async () => {
+      // In literal mode a busy transition must NOT reset or suspend the
+      // countdown — that is the whole meaning of the flag.
+      const { policy, shutdown } = makePolicy({
+        idleCapHours: 12,
+        isExecuting: () => true,
+        capCountsExecution: true,
+      });
+      policy.onClientsGone();
+      await vi.advanceTimersByTimeAsync(REATTACH_GRACE_MS + 6 * HOUR);
+      policy.onExecutionBusy();
+
+      await vi.advanceTimersByTimeAsync(6 * HOUR + 10);
+      expect(shutdown).toHaveBeenCalledOnce();
+    });
+
+    it("does not shut down when the timer fires mid-execution", async () => {
+      // The race the event wiring can lose: execution starts and the timer
+      // fires before the busy event lands. The final check in finish() is
+      // the backstop — never kill running work.
+      let executing = false;
+      const { policy, shutdown, autosave } = makePolicy({
+        idleCapHours: 12,
+        isExecuting: () => executing,
+      });
+      policy.onClientsGone();
+      await vi.advanceTimersByTimeAsync(REATTACH_GRACE_MS + 11 * HOUR);
+
+      executing = true; // busy event never delivered
+      await vi.advanceTimersByTimeAsync(2 * HOUR);
+      expect(autosave).not.toHaveBeenCalled();
+      expect(shutdown).not.toHaveBeenCalled();
+
+      executing = false;
+      policy.onExecutionIdle();
+      await vi.advanceTimersByTimeAsync(12 * HOUR + 10);
+      expect(shutdown).toHaveBeenCalledOnce();
+    });
+
+    it("lets the grace window decide when transitions land inside it", () => {
+      // An execution-state event ten seconds after a disconnect must not
+      // replace the 90-second grace timer with an hours-long cap — or with
+      // nothing.
+      const { policy } = makePolicy({ idleCapHours: 12 });
+      policy.onClientsGone();
+      vi.advanceTimersByTime(1000);
+
+      policy.onExecutionIdle();
+      policy.onExecutionBusy();
+      expect(policy.isCountingDown).toBe(true); // still the grace timer
+
+      vi.advanceTimersByTime(REATTACH_GRACE_MS);
+      expect(policy.isCountingDown).toBe(true); // now the cap
+    });
   });
 
   describe("autosave", () => {

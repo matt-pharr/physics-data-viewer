@@ -2139,9 +2139,19 @@ after 30 minutes; an idle kernel survives up to `idleCapHours` (default 12,
 0 = forever). A reattach within a 90-second grace window is not a detach at
 all. The cap measures *idle* time, not elapsed time — a literal reading
 would SIGKILL a 20-hour simulation with the laptop shut, the exact loss this
-feature exists to prevent (`idleCapCountsExecution` restores it). A failed
-autosave blocks the shutdown and retries, because exiting then destroys the
-work the autosave protects.
+feature exists to prevent (`idleCapCountsExecution` restores it). The policy
+is only as good as what drives it, so `wireSessionIdle` (`server-main.ts`)
+owns the coupling: the kernel manager's `kernel:executionState` events
+suspend the cap on busy and re-arm it — full length — on idle, and a final
+`isExecuting` check before the shutdown catches a timer that fired in the
+race window. Before stopping, the daemon takes a real snapshot through the
+same `performAutosave` core the timer and pre-restart paths use
+(`autosaveForShutdown` in `ipc-register-autosave.ts`), with code cells from
+the working dir's `code-cells.json` mirror since no client is attached to
+supply live ones. A failed snapshot blocks the shutdown and retries,
+because exiting then destroys the work the autosave protects; a session
+with no kernel, or a dead one, has nothing preservable left and shuts down
+without blocking — a dead kernel must not pin a login node forever.
 
 **Moving a session onto a host.** Connecting and *running the session there*
 are separate steps (`IPC.remote.connect` then `IPC.remote.startSession`) with

@@ -33,6 +33,10 @@
 // emit preserves statement order relative to imports, mirroring the
 // timestamp installer in bootstrap.ts). stdout carries only RPC frames.
 (function rebindConsoleToStderr(): void {
+  // Under vitest the global console is an intercepting shim with no Console
+  // constructor; there the rebind is impossible and also pointless (nothing
+  // parses the test process's stdout as RPC frames), so leave it alone.
+  if (typeof console.Console !== "function") return;
   const stderrConsole = new console.Console({
     stdout: process.stderr,
     stderr: process.stderr,
@@ -254,6 +258,60 @@ function defaultRoot(): string {
   return path.join(os.homedir(), ".pdv-server");
 }
 
+/** Dependencies for {@link wireSessionIdle}. */
+export interface WireSessionIdleOptions {
+  /** The daemon's kernel manager (source of execution-state events). */
+  kernelManager: KernelManager;
+  /** Persist before shutdown; false blocks the shutdown and retries. */
+  autosave: () => Promise<boolean>;
+  /** Stop the session. Called only after a successful autosave. */
+  shutdown: () => void;
+  /** Timer factory, injected by tests. */
+  setTimer?: (fn: () => void, ms: number) => NodeJS.Timeout;
+  /** Timer canceller, injected by tests. */
+  clearTimer?: (handle: NodeJS.Timeout) => void;
+}
+
+/**
+ * Build the daemon's idle policy and connect it to the kernel manager.
+ *
+ * The connection is the point: `SessionIdlePolicy` is only as good as what
+ * drives it, and a policy whose `onExecutionIdle` nobody calls silently
+ * degrades "the cap counts idle time" into "no cap at all while executing".
+ * This function owns that coupling — the `kernel:executionState` event
+ * feeds both hooks, and the predicates read the live kernel list — so it
+ * can be tested as a unit (`server-main.test.ts`) instead of trusting the
+ * policy's own tests to vouch for wiring they never see.
+ *
+ * @param opts - Kernel manager, autosave gate, and shutdown action.
+ * @returns The armed policy; the caller drives attach/detach transitions.
+ */
+export function wireSessionIdle(opts: WireSessionIdleOptions): SessionIdlePolicy {
+  const { kernelManager } = opts;
+  const idle = new SessionIdlePolicy({
+    hasKernel: () => kernelManager.list().length > 0,
+    isExecuting: () =>
+      kernelManager
+        .list()
+        .some((k) => kernelManager.getExecutionState(k.id) === "busy"),
+    autosave: opts.autosave,
+    shutdown: opts.shutdown,
+    setTimer: opts.setTimer,
+    clearTimer: opts.clearTimer,
+  });
+  // Any kernel's transition re-evaluates the aggregate: the policy's
+  // predicates re-check every kernel, so a spurious call is harmless while
+  // a missed one would let the cap fire mid-run or never re-arm.
+  kernelManager.on(
+    "kernel:executionState",
+    (_kernelId: string, state: "idle" | "busy") => {
+      if (state === "idle") idle.onExecutionIdle();
+      else idle.onExecutionBusy();
+    },
+  );
+  return idle;
+}
+
 /**
  * Serve one session until the process is told to stop.
  *
@@ -314,20 +372,11 @@ async function runSessionHost(args: string[]): Promise<void> {
     startMcp: false,
   });
 
-  const idle = new SessionIdlePolicy({
-    hasKernel: () => kernelManager.list().length > 0,
-    isExecuting: () =>
-      kernelManager
-        .list()
-        .some((k) => kernelManager.getExecutionState(k.id) === "busy"),
-    autosave: async () => {
-      // Placeholder until the daemon tracks a save directory of its own: a
-      // session with no kernel has nothing to persist, so reporting success
-      // is honest rather than optimistic. A session WITH a kernel never
-      // reaches here without a real save, because the cap only fires once
-      // execution is idle and the shutdown is blocked on this returning true.
-      return true;
-    },
+  const idle = wireSessionIdle({
+    kernelManager,
+    // Real snapshot through the same performAutosave core the timer and
+    // pre-restart paths use; false blocks the shutdown and retries.
+    autosave: () => wire.autosaveForShutdown(),
     shutdown: () => {
       console.log("[session-host] idle; shutting down");
       idle.dispose();

@@ -74,7 +74,8 @@ export interface SessionIdlePolicyOptions {
  *
  * Drive it from the host: {@link onClientsGone} when the last client
  * detaches, {@link onClientAttached} when one arrives, and
- * {@link onExecutionIdle} when the kernel stops executing.
+ * {@link onExecutionIdle} / {@link onExecutionBusy} when the kernel stops
+ * and starts executing.
  */
 export class SessionIdlePolicy {
   private readonly opts: SessionIdlePolicyOptions;
@@ -83,6 +84,14 @@ export class SessionIdlePolicy {
   private timer: NodeJS.Timeout | null = null;
   private clientsGone = false;
   private stopped = false;
+  /**
+   * True once the reattach grace window has elapsed with no client. The
+   * execution-state hooks act only in this phase: during grace the grace
+   * timer alone decides what happens next, so a kernel going idle ten
+   * seconds after a disconnect cannot replace the 90-second grace timer
+   * with a countdown.
+   */
+  private graceDone = false;
 
   /**
    * @param opts - Predicates, actions, and injectable timers.
@@ -110,6 +119,7 @@ export class SessionIdlePolicy {
   onClientsGone(): void {
     if (this.stopped) return;
     this.clientsGone = true;
+    this.graceDone = false;
     // Grace first: a reconnect within the window cancels everything, so a
     // dropped VPN never even starts a shutdown clock.
     this.arm(this.opts.reattachGraceMs ?? REATTACH_GRACE_MS, () =>
@@ -124,6 +134,7 @@ export class SessionIdlePolicy {
    */
   onClientAttached(): void {
     this.clientsGone = false;
+    this.graceDone = false;
     this.disarm();
   }
 
@@ -133,8 +144,26 @@ export class SessionIdlePolicy {
    * @returns Nothing.
    */
   onExecutionIdle(): void {
-    if (this.stopped || !this.clientsGone) return;
+    if (this.stopped || !this.clientsGone || !this.graceDone) return;
     this.armCap();
+  }
+
+  /**
+   * The kernel started executing; suspend the cap until it is idle again.
+   *
+   * Without this, work that *starts* after the cap was armed — a scheduled
+   * callback, a computation kicked off just before the client detached —
+   * would race the countdown, and the timer could fire mid-run. Under
+   * `capCountsExecution` the clock deliberately keeps running (the literal
+   * reading), so this is a no-op there.
+   *
+   * @returns Nothing.
+   */
+  onExecutionBusy(): void {
+    if (this.stopped || !this.clientsGone || !this.graceDone) return;
+    if (this.opts.capCountsExecution) return;
+    // The cap re-arms from onExecutionIdle when the work finishes.
+    this.disarm();
   }
 
   /**
@@ -149,6 +178,7 @@ export class SessionIdlePolicy {
 
   /** After the grace window: decide which countdown applies. */
   private afterGrace(): void {
+    this.graceDone = true;
     if (!this.opts.hasKernel()) {
       // Nothing to preserve, so no autosave is required to justify exiting.
       this.arm(this.opts.noKernelIdleMs ?? NO_KERNEL_IDLE_MS, () =>
@@ -178,6 +208,12 @@ export class SessionIdlePolicy {
   /** Autosave, then shut down — but only if the autosave succeeded. */
   private finish(): void {
     this.timer = null;
+    if (this.opts.isExecuting() && !this.opts.capCountsExecution) {
+      // The timer fired in the window before an execution-busy event could
+      // disarm it. Killing running work is the loss this policy exists to
+      // prevent; the cap re-arms from onExecutionIdle when the work ends.
+      return;
+    }
     void this.opts
       .autosave()
       .then((saved) => {

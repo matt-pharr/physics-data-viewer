@@ -138,3 +138,119 @@ describe("recoverUnsavedSession environment preservation (review M2)", () => {
     expect(await fs.readFile(path.join(orphanDir, "Project.toml"), "utf8")).toBe("[deps]\n");
   });
 });
+
+describe("autosaveForShutdown (the session daemon's idle-shutdown gate)", () => {
+  // The question is "may the session shut down without losing work" — so a
+  // live kernel demands a real snapshot, while no kernel / a dead kernel
+  // must answer true rather than block a daemon on a login node forever.
+
+  let baseDir: string;
+  let workingDir: string;
+
+  beforeEach(async () => {
+    baseDir = await fs.mkdtemp(path.join(os.tmpdir(), "pdv-shutdown-save-"));
+    workingDir = path.join(baseDir, "working");
+    await fs.mkdir(workingDir, { recursive: true });
+  });
+
+  afterEach(async () => {
+    ipcRegistry.handlers.clear();
+    resetInvokeRegistry();
+    vi.clearAllMocks();
+    await fs.rm(baseDir, { recursive: true, force: true });
+  });
+
+  function makeController(opts: {
+    activeKernelId: string | null;
+    kernelManager?: Parameters<typeof registerAutosaveIpcHandlers>[0]["kernelManager"];
+    projectManager?: Parameters<typeof registerAutosaveIpcHandlers>[0]["projectManager"];
+  }): AutosaveController {
+    return registerAutosaveIpcHandlers({
+      push: vi.fn(),
+      kernelManager: opts.kernelManager ?? createKernelManagerMock(),
+      commRouter: createCommRouterMock().router,
+      projectManager: opts.projectManager ?? createProjectManagerMock(),
+      moduleManager: createModuleManagerMock(),
+      configStore: {} as unknown as ConfigStore,
+      kernelWorkingDirs: new Map([["k1", workingDir]]),
+      readConfig: () => ({ workingDirBase: baseDir }) as unknown as PDVConfig,
+      getActiveKernelId: () => opts.activeKernelId,
+      getActiveProjectDir: () => null,
+      getPendingModuleImports: () => [],
+      getPendingModuleSettings: () => ({}),
+      setPendingModuleState: vi.fn(),
+    });
+  }
+
+  /** A kernel manager whose one kernel is alive and idle. */
+  function liveKernelManager() {
+    return createKernelManagerMock({
+      getKernelProcessState: vi.fn(() => ({ exitCode: null, killed: false })),
+      getExecutionState: vi.fn(() => "idle" as const),
+    } as never);
+  }
+
+  it("returns true with no active kernel and never touches the kernel", async () => {
+    const projectManager = createProjectManagerMock();
+    const controller = makeController({ activeKernelId: null, projectManager });
+
+    await expect(controller.autosaveForShutdown()).resolves.toBe(true);
+    expect(projectManager.autosave).not.toHaveBeenCalled();
+  });
+
+  it("returns true for a dead kernel instead of retrying forever", async () => {
+    // The Tree died with the kernel; a false here would keep the daemon
+    // alive indefinitely for work that is already gone.
+    const projectManager = createProjectManagerMock();
+    const controller = makeController({
+      activeKernelId: "k1",
+      kernelManager: createKernelManagerMock({
+        getKernelProcessState: vi.fn(() => ({ exitCode: 1, killed: false })),
+      } as never),
+      projectManager,
+    });
+
+    await expect(controller.autosaveForShutdown()).resolves.toBe(true);
+    expect(projectManager.autosave).not.toHaveBeenCalled();
+  });
+
+  it("snapshots a live kernel with the mirrored code cells", async () => {
+    const cells = { tabs: [{ id: 1, code: "x = 1" }], activeTabId: 1 };
+    await fs.writeFile(
+      path.join(workingDir, "code-cells.json"),
+      JSON.stringify(cells),
+      "utf8",
+    );
+    const projectManager = createProjectManagerMock({
+      autosave: vi.fn(async () => ({
+        checksum: "abc",
+        nodeCount: 1,
+        moduleOwnedFiles: [],
+        moduleManifests: [],
+      })),
+    } as never);
+    const controller = makeController({
+      activeKernelId: "k1",
+      kernelManager: liveKernelManager(),
+      projectManager,
+    });
+
+    await expect(controller.autosaveForShutdown()).resolves.toBe(true);
+    expect(projectManager.autosave).toHaveBeenCalledWith(
+      path.join(workingDir, ".autosave"),
+      cells,
+      { timeoutMs: 60_000 },
+    );
+  });
+
+  it("returns false — blocking the shutdown — when the snapshot fails", async () => {
+    // createProjectManagerMock's autosave resolves null = kernel-side
+    // save failure. False is what makes the idle policy stay alive.
+    const controller = makeController({
+      activeKernelId: "k1",
+      kernelManager: liveKernelManager(),
+    });
+
+    await expect(controller.autosaveForShutdown()).resolves.toBe(false);
+  });
+});
