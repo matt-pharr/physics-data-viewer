@@ -56,6 +56,9 @@ function connect(): {
   reserved: Array<{ event: string; payload: unknown }>;
 } {
   const socket = net.connect(paths.sockPath);
+  // Teardown destroys these; without a handler the reset surfaces as an
+  // unhandled 'error' and fails the run after every test has passed.
+  socket.on("error", () => undefined);
   sockets.push(socket);
   const pushes: Array<{ event: string; seq: number }> = [];
   const reserved: Array<{ event: string; payload: unknown }> = [];
@@ -169,6 +172,7 @@ describe("SessionHost", () => {
       });
       await shortHost.listen();
       const socket = net.connect(path.join(workDir, "short.sock"));
+      socket.on("error", () => undefined);
       sockets.push(socket);
 
       await delay(200);

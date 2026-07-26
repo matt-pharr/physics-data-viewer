@@ -130,6 +130,7 @@ function register(over: Partial<Parameters<typeof registerRemoteIpcHandlers>[0]>
     sessionId: SESSION,
     openChannel: (() => {
       const socket = net.connect(paths.sockPath);
+      socket.on("error", () => undefined);
       sockets.push(socket);
       return {
         readable: socket,
@@ -167,6 +168,7 @@ describe("remote:startSession", () => {
     register({
       openChannel: (() => {
         const socket = net.connect(path.join(workDir, "nothing-here.sock"));
+        socket.on("error", () => undefined);
         sockets.push(socket);
         return {
           readable: socket,

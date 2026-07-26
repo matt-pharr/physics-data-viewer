@@ -18,6 +18,7 @@ import * as path from "path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
+  controlPathOption,
   checkMaster,
   controlPathFor,
   ensureControlDir,
@@ -58,6 +59,23 @@ afterEach(() => {
     delete savedEnv[key];
   }
   fs.rmSync(dir, { recursive: true, force: true });
+});
+
+describe("controlPathOption", () => {
+  it("quotes the path so a space survives ssh's parser", () => {
+    // Regression: Electron's userData on macOS is
+    // `~/Library/Application Support/...`, so the space is present on every
+    // macOS install. Unquoted, ssh rejects the whole option with
+    // "keyword controlpath extra arguments at end of line" and no
+    // connection is possible at all. Found by driving the real UI.
+    expect(controlPathOption("/Users/x/Library/Application Support/pdv/m-1")).toBe(
+      'ControlPath="/Users/x/Library/Application Support/pdv/m-1"',
+    );
+  });
+
+  it("quotes a path without spaces too, which ssh accepts", () => {
+    expect(controlPathOption("/tmp/pdv/m-1")).toBe('ControlPath="/tmp/pdv/m-1"');
+  });
 });
 
 describe("controlPathFor", () => {
@@ -266,7 +284,9 @@ describe("execViaSsh", () => {
     // ControlMaster=no: a stale socket must surface through the failure
     // ladder, never as a silent new connection (and an approval prompt).
     expect(exec).toContain("ControlMaster=no");
-    expect(exec).toContain("ControlPath=/tmp/pdv-test-sock");
+    // Quoted: ssh splits an -o value on whitespace, and PDV's socket lives
+    // under a userData path that contains spaces on macOS.
+    expect(exec).toContain('ControlPath="/tmp/pdv-test-sock"');
     expect(exec).toContain("RequestTTY=no");
   });
 

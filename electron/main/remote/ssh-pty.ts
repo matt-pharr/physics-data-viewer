@@ -46,7 +46,11 @@
  * remote/ssh-mux.ts — everything that happens after the master exists
  */
 
-import { checkMaster, type SshMuxOptions } from "./ssh-mux";
+import {
+  checkMaster,
+  controlPathOption,
+  type SshMuxOptions,
+} from "./ssh-mux";
 
 /**
  * Default ceiling on the whole interactive attempt.
@@ -269,7 +273,7 @@ function buildMasterArgs(options: EstablishMasterOptions): string[] {
     "-N",
     "-M",
     "-o",
-    `ControlPath=${options.controlPath}`,
+    controlPathOption(options.controlPath),
     "-o",
     "ControlPersist=no",
     "-o",

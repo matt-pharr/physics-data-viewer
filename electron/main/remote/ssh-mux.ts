@@ -227,7 +227,7 @@ export function baseSshArgs(control: SshControl, options: SshMuxOptions): string
     args.push("-o", "BatchMode=yes");
   }
   if (control.controlPath) {
-    args.push("-o", `ControlPath=${control.controlPath}`);
+    args.push("-o", controlPathOption(control.controlPath));
   }
   return args;
 }
@@ -254,6 +254,26 @@ export function controlPathFor(host: string, controlDir: string): string {
   // user names, redirected profiles). Falling back keeps the connection
   // working; the socket is per-uid and recreated on demand either way.
   return path.join(os.tmpdir(), `pdv-${process.getuid?.() ?? 0}-${name}`);
+}
+
+/**
+ * Build the `-o ControlPath=…` argument for a socket path.
+ *
+ * ssh parses an `-o` value as config-file syntax and splits it on
+ * whitespace, so an unquoted path containing a space is rejected outright:
+ *
+ *   command-line line 0: keyword controlpath extra arguments at end of line
+ *
+ * That is not an exotic case. PDV's control sockets live under Electron's
+ * userData directory, which on macOS is `~/Library/Application Support/…` —
+ * so every macOS install hits it. Quoting is what ssh_config specifies for
+ * values containing spaces, and is harmless for values without.
+ *
+ * @param controlPath - Absolute path to the control socket.
+ * @returns The option string, quoted so spaces survive ssh's parser.
+ */
+export function controlPathOption(controlPath: string): string {
+  return `ControlPath="${controlPath}"`;
 }
 
 /**

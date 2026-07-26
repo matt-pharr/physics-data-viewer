@@ -40,6 +40,10 @@ afterEach(async () => {
 /** Stand in for a running daemon by listening on the session socket. */
 function fakeDaemon(sockPath: string): Promise<net.Server> {
   const server = net.createServer((socket) => {
+    // A client destroyed in teardown resets this end. Without a handler the
+    // ECONNRESET is an unhandled 'error' event, which fails the whole run
+    // *after* every test has passed — a green suite with a red exit code.
+    socket.on("error", () => undefined);
     socket.write('{"event":"pdv.rpc.hello","payload":{},"seq":-1}\n');
   });
   servers.push(server);
@@ -52,6 +56,7 @@ describe("attachToSession", () => {
     await fakeDaemon(paths.sockPath);
 
     const result = await attachToSession({ sessionId: SESSION, root, create: false });
+    result.socket.on("error", () => undefined);
     sockets.push(result.socket);
 
     expect(result.created).toBe(false);
@@ -144,7 +149,10 @@ describe("tryConnect", () => {
     const live = path.join(workDir, "live.sock");
     await fakeDaemon(live);
     const socket = await tryConnect(live);
-    if (socket) sockets.push(socket);
+    if (socket) {
+      socket.on("error", () => undefined);
+      sockets.push(socket);
+    }
     expect(socket).not.toBeNull();
   });
 });

@@ -65,6 +65,7 @@ function makeHandle(
     sessionId: SESSION,
     openChannel: async () => {
       const socket = net.connect(paths.sockPath);
+      socket.on("error", () => undefined);
       openSockets.push(socket);
       await new Promise<void>((resolve, reject) => {
         socket.once("connect", resolve);
@@ -259,6 +260,7 @@ describe("RemoteServerHandle", () => {
         sessionId: SESSION,
         openChannel: async () => {
           const socket = net.connect(path.join(workDir, "confirm.sock"));
+          socket.on("error", () => undefined);
           openSockets.push(socket);
           await new Promise<void>((resolve, reject) => {
             socket.once("connect", resolve);

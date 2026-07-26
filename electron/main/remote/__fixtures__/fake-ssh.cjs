@@ -70,7 +70,17 @@ for (let i = 0; i < argv.length; i++) {
   if (arg === "-o") {
     const pair = argv[++i] || "";
     const eq = pair.indexOf("=");
-    if (eq > 0) options[pair.slice(0, eq)] = pair.slice(eq + 1);
+    if (eq > 0) {
+      // Strip surrounding double quotes exactly as real ssh does when it
+      // parses an -o value as config-file syntax. PDV quotes ControlPath
+      // because Electron's userData path contains a space on macOS, and a
+      // fixture that kept the quotes would not be reproducing ssh.
+      const value = pair.slice(eq + 1);
+      options[pair.slice(0, eq)] =
+        value.length > 1 && value.startsWith('"') && value.endsWith('"')
+          ? value.slice(1, -1)
+          : value;
+    }
   } else if (arg === "-O") {
     controlCommand = argv[++i] || "";
   } else if (arg === "-N") {
