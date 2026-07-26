@@ -36,6 +36,7 @@ import {
   attachDecoder,
   MAX_LINE_BYTES,
 } from "./line-codec";
+import type { AttachPlan } from "./attach";
 import { PushJournal } from "./push-journal";
 import { ResponseStore } from "./response-store";
 import {
@@ -45,6 +46,7 @@ import {
   UNSEQUENCED_SEQ,
   isRpcRequest,
   isUnsequencedChannel,
+  type RpcAttachRequest,
   type RpcError,
   type RpcHello,
   type RpcPingResult,
@@ -95,6 +97,11 @@ export interface RpcServerOptions {
   responses?: ResponseStore;
   /** Session id advertised in the hello push; `null` for local mode. */
   session?: string | null;
+  /**
+   * Serves the `pdv.rpc.attach` invoke. Present only on a session daemon;
+   * a local server has no sessions to (re)join and rejects the channel.
+   */
+  onAttach?: (request: RpcAttachRequest) => AttachPlan;
 }
 
 /** Serialize a rejection for the wire, preserving the visible message. */
@@ -145,8 +152,15 @@ export class RpcServer {
    */
   readonly push: PushSender = (channel, payload) => {
     const { frame } = this.journal.append(channel, payload);
-    this.writer.writeFrame(frame);
+    // While gated the push is still journalled — it is session state and
+    // happened — but not written. Anything produced during the gate reaches
+    // the client through the attach replay instead, which is what keeps the
+    // client's first post-attach frame contiguous with its cursor.
+    if (!this.pushGated) this.writer.writeFrame(frame);
   };
+
+  /** See {@link setPushGate}. Off by default, so local mode is unaffected. */
+  private pushGated = false;
 
   /**
    * @param readable - Client → server stream (e.g. process stdin).
@@ -172,6 +186,32 @@ export class RpcServer {
   reconcile(id: string): "in-flight" | "completed" | "unknown" {
     if (this.inFlight.has(id)) return "in-flight";
     return this.responses.get(id) ? "completed" : "unknown";
+  }
+
+  /**
+   * Hold or release the sequenced push stream for this connection.
+   *
+   * A session daemon gates a fresh connection until its attach completes:
+   * between accept and attach the client has not yet said where its cursor
+   * is, so any push written to it would arrive at an unpredictable seq and
+   * read as a gap on the very first frame of a reconnect.
+   *
+   * @param gated - True to journal without writing; false to resume.
+   * @returns Nothing.
+   */
+  setPushGate(gated: boolean): void {
+    this.pushGated = gated;
+  }
+
+  /**
+   * Write already-encoded frames straight to this connection, bypassing the
+   * journal — they are replays of frames it has already assigned.
+   *
+   * @param frames - Frames from {@link PushJournal.framesSince}.
+   * @returns Nothing.
+   */
+  writeFrames(frames: readonly Buffer[]): void {
+    for (const frame of frames) this.writer.writeFrame(frame);
   }
 
   /**
@@ -316,6 +356,23 @@ export class RpcServer {
       case RPC_CHANNELS.confirmResponse: {
         this.opts.onConfirmResponse?.(args[0]);
         return undefined;
+      }
+      case RPC_CHANNELS.attach: {
+        const handle = this.opts.onAttach;
+        if (!handle) throw new Error("this server does not serve sessions");
+        const plan = handle(args[0] as RpcAttachRequest);
+        if (plan.outcome === "rejected") {
+          this.writeUnsequenced(RPC_CHANNELS.attachError, plan.error);
+          throw new Error(plan.error.message);
+        }
+        // Replay after the response, never before: the client must know
+        // whether it was accepted (and whether it must resync) before frames
+        // start arriving, or it cannot tell replay from live traffic.
+        setImmediate(() => {
+          this.writeFrames(plan.replay);
+          this.setPushGate(false);
+        });
+        return plan.result;
       }
       default: {
         const dispatch = this.opts.dispatch ?? dispatchInvoke;
