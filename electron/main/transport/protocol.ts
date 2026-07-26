@@ -132,6 +132,13 @@ export const RPC_CHANNELS = {
    * the same reason: the connection it addresses is leaving the stream.
    */
   superseded: "pdv.rpc.superseded",
+  /**
+   * Invoke that (re)joins a session: the client states what it last saw and
+   * what it is still waiting on, and the session answers with a replay or a
+   * demand to resync. A request/response on a reserved channel rather than a
+   * new envelope shape, so it rides the existing correlation machinery.
+   */
+  attach: "pdv.rpc.attach",
 } as const;
 
 /**
@@ -221,6 +228,83 @@ export interface RpcHello {
    */
   sessionEpoch: string;
 }
+
+/** Payload of a {@link RPC_CHANNELS.attach} invoke (first arg). */
+export interface RpcAttachRequest {
+  /**
+   * The session incarnation the client believes it is rejoining, or `null`
+   * on a first attach. Any mismatch is stale — see {@link RpcHello.sessionEpoch}.
+   */
+  sessionEpoch: string | null;
+  /**
+   * Highest push seq the client actually received (−1 if none). Authoritative
+   * on the *client*: the server's cursor only records what it handed a
+   * writer, not what crossed the network. This is also what makes a
+   * half-written frame at disconnect safe — the client never counted it, so
+   * the reattach replays it whole.
+   */
+  lastSeq: number;
+  /** Request ids the client is still waiting on, for reconciliation. */
+  pendingRequests: string[];
+  /** {@link RPC_PROTOCOL_VERSION} the client speaks. */
+  protocol: number;
+}
+
+/** How a client's pending request was classified on reattach. */
+export type RpcPendingVerdict = "in-flight" | "completed" | "unknown";
+
+/** Result of a {@link RPC_CHANNELS.attach} invoke. */
+export type RpcAttachResult =
+  | {
+      /** The client is rejoined; missed pushes follow, then parked responses. */
+      status: "ok";
+      /** The session incarnation the client is now attached to. */
+      sessionEpoch: string;
+      /** Verdict per id from {@link RpcAttachRequest.pendingRequests}. */
+      pending: Record<string, RpcPendingVerdict>;
+      /** Highest seq the session has assigned. */
+      lastSeq: number;
+    }
+  | {
+      /**
+       * The client cannot be caught up and must discard its view and
+       * resync from scratch. Distinct from an error: the session is healthy,
+       * only this client's continuity is broken.
+       */
+      status: "stale";
+      /** The session incarnation the client is now attached to. */
+      sessionEpoch: string;
+      /** Why continuity was lost, for the reconnect UX and logs. */
+      reason: RpcStaleReason;
+      /** Verdicts still apply — a blown ring must not lose a settled result. */
+      pending: Record<string, RpcPendingVerdict>;
+      /** Highest seq the session has assigned. */
+      lastSeq: number;
+    };
+
+/**
+ * Payload of an {@link RPC_CHANNELS.attachError} push: the attach was
+ * refused outright, as opposed to accepted-but-stale. The client cannot fix
+ * this by resyncing — the two ends do not speak a common protocol — so the
+ * shell must re-bootstrap the host rather than retry.
+ */
+export interface RpcAttachError {
+  /** Human-readable reason, surfaced in the reconnect UX. */
+  message: string;
+  /** {@link RPC_PROTOCOL_VERSION} of the session. */
+  protocol: number;
+  /** {@link RPC_PROTOCOL_MIN} of the session. */
+  protocolMin: number;
+}
+
+/** Why an attach could not resume the client's stream. */
+export type RpcStaleReason =
+  /** No prior session state — a cold client attaching for the first time. */
+  | "no-cursor"
+  /** The session restarted; the client's seq belongs to a dead incarnation. */
+  | "epoch-mismatch"
+  /** The client's next frame had already been evicted from the replay ring. */
+  | "replay-gap";
 
 /** Result of a {@link RPC_CHANNELS.ping} invoke. */
 export interface RpcPingResult {

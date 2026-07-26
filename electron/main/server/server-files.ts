@@ -41,6 +41,7 @@ export const SERVER_DESTINED_FILES: readonly string[] = [
   "transport/line-codec.ts",
   "transport/push-journal.ts",
   "transport/response-store.ts",
+  "transport/attach.ts",
   "transport/rpc-client.ts",
   "transport/rpc-server.ts",
   // Core managers
