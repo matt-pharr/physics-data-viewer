@@ -262,8 +262,14 @@ function defaultRoot(): string {
 export interface WireSessionIdleOptions {
   /** The daemon's kernel manager (source of execution-state events). */
   kernelManager: KernelManager;
-  /** Persist before shutdown; false blocks the shutdown and retries. */
-  autosave: () => Promise<boolean>;
+  /**
+   * The wire whose `autosaveForShutdown` gates the shutdown. Taken as the
+   * handle — not a bare callback — so THIS function owns the delegation
+   * and its test covers it; a bare callback left the two lines joining the
+   * policy to the real autosave invisible to every test, which is exactly
+   * how the original always-true stub survived 14 green tests.
+   */
+  wire: Pick<WireHandle, "autosaveForShutdown">;
   /** Stop the session. Called only after a successful autosave. */
   shutdown: () => void;
   /** Timer factory, injected by tests. */
@@ -290,11 +296,19 @@ export function wireSessionIdle(opts: WireSessionIdleOptions): SessionIdlePolicy
   const { kernelManager } = opts;
   const idle = new SessionIdlePolicy({
     hasKernel: () => kernelManager.list().length > 0,
+    // A dead kernel's executionState is frozen at whatever it was doing
+    // when it died — a crash mid-run stays "busy" forever. Counting it as
+    // executing would suspend the cap permanently and leak the daemon on
+    // the login node, the exact outcome the policy exists to prevent.
     isExecuting: () =>
       kernelManager
         .list()
-        .some((k) => kernelManager.getExecutionState(k.id) === "busy"),
-    autosave: opts.autosave,
+        .some(
+          (k) =>
+            kernelManager.getExecutionState(k.id) === "busy" &&
+            kernelManager.getKernel(k.id)?.status !== "dead",
+        ),
+    autosave: () => opts.wire.autosaveForShutdown(),
     shutdown: opts.shutdown,
     setTimer: opts.setTimer,
     clearTimer: opts.clearTimer,
@@ -309,6 +323,9 @@ export function wireSessionIdle(opts: WireSessionIdleOptions): SessionIdlePolicy
       else idle.onExecutionBusy();
     },
   );
+  // A kernel dying IS an execution-idle transition as far as the cap is
+  // concerned — no further executionState event will ever arrive from it.
+  kernelManager.on("kernel:crashed", () => idle.onExecutionIdle());
   return idle;
 }
 
@@ -350,6 +367,22 @@ async function runSessionHost(args: string[]): Promise<void> {
     onClientAttached: () => idle.onClientAttached(),
     onSessionReset: () => wire.sessionReset(),
     onConfirmResponse: (payload) => confirmBroker.deliver(payload),
+    // The explicit "Shut Down Remote Session" action: graceful, like the
+    // serve-mode shutdown — kernels get their shutdown sequence (not the
+    // SIGTERM force-kill), then the socket is unlinked and the process ends.
+    onShutdown: async () => {
+      console.log("[session-host] shutdown requested by client");
+      idle.dispose();
+      confirmBroker.cancelAll();
+      try {
+        await kernelManager.shutdownAll();
+      } catch (error) {
+        console.error("[session-host] kernel shutdown failed:", error);
+      }
+      unwireServer();
+      await host.close();
+      process.exit(0);
+    },
   });
 
   // Session-scoped, not connection-scoped: handlers must push through the
@@ -376,7 +409,7 @@ async function runSessionHost(args: string[]): Promise<void> {
     kernelManager,
     // Real snapshot through the same performAutosave core the timer and
     // pre-restart paths use; false blocks the shutdown and retries.
-    autosave: () => wire.autosaveForShutdown(),
+    wire,
     shutdown: () => {
       console.log("[session-host] idle; shutting down");
       idle.dispose();

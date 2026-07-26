@@ -243,6 +243,11 @@ function buildBase() {
       pickExecutable: stub<PDVApi["files"]["pickExecutable"]>(async () => null),
       pickFile: stub<PDVApi["files"]["pickFile"]>(async () => null),
       pickDirectory: stub<PDVApi["files"]["pickDirectory"]>(async () => null),
+      listDir: stub<PDVApi["files"]["listDir"]>(async () => ({
+        path: "/home/user",
+        entries: [],
+        home: "/home/user",
+      })),
     },
     menu: {
       updateRecentProjects: stub<PDVApi["menu"]["updateRecentProjects"]>(async () => true),

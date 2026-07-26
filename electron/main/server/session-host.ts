@@ -71,6 +71,12 @@ export interface SessionHostOptions {
    * handler awaiting it would hang for the life of the session.
    */
   onConfirmResponse?: (payload: unknown) => void;
+  /**
+   * Runs when a client invokes `pdv.rpc.shutdown` — the explicit "Shut Down
+   * Remote Session" action. Without it the daemon acks the invoke and
+   * ignores it, leaving `kill` as the only way to end a session.
+   */
+  onShutdown?: () => void | Promise<void>;
 }
 
 /** One live connection and the state the host tracks for it. */
@@ -202,6 +208,7 @@ export class SessionHost {
       dispatch: this.opts.dispatch,
       onSessionReset: this.opts.onSessionReset,
       onConfirmResponse: this.opts.onConfirmResponse,
+      onShutdown: this.opts.onShutdown,
       onAttach: (request) => this.onAttach(conn, request),
       onDispatch: (id) => this.sessionInFlight.add(id),
       onSettle: (id, frame) => {

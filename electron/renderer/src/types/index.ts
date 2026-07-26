@@ -59,6 +59,8 @@ import type {
   RemoteHostAlias,
   RemotePhase,
   RemoteStatus,
+  ListDirEntry,
+  ListDirResult,
   UpdateStatus,
   WindowChromeInfo,
 } from './pdv';
@@ -117,6 +119,8 @@ export type {
   RemoteHostAlias,
   RemotePhase,
   RemoteStatus,
+  ListDirEntry,
+  ListDirResult,
   UpdateStatus,
   WindowChromeInfo,
 };

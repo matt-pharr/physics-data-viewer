@@ -5,6 +5,7 @@
  */
 
 import React from "react";
+import { pickServerPath } from "../../services/pick-path";
 import type { ModuleInputDescriptor, ModuleInputValue } from "../ModulesPanel/moduleUiHelpers";
 import { captureError } from "../../utils/errors";
 
@@ -151,10 +152,13 @@ export const InputControl: React.FC<InputControlProps> = ({
             className="btn btn-secondary"
             onClick={() =>
               void (async () => {
-                const picked =
-                  input.fileMode === "directory"
-                    ? await window.pdv.files.pickDirectory()
-                    : await window.pdv.files.pickFile();
+                const picked = await pickServerPath({
+                  mode: input.fileMode === "directory" ? "directory" : "file",
+                  title:
+                    input.fileMode === "directory"
+                      ? "Choose a folder"
+                      : "Choose a file",
+                });
                 if (!picked) return;
                 setModuleInputValue(moduleAlias, input.id, picked);
                 await persistInputValues(moduleAlias);

@@ -66,7 +66,7 @@ describe("wireSessionIdle", () => {
     const { km, emitState, setState } = makeKernelWorld();
     const autosave = vi.fn(async () => true);
     const shutdown = vi.fn();
-    const idle = wireSessionIdle({ kernelManager: km, autosave, shutdown });
+    const idle = wireSessionIdle({ kernelManager: km, wire: { autosaveForShutdown: autosave }, shutdown });
 
     setState("busy");
     idle.onClientsGone();
@@ -84,7 +84,7 @@ describe("wireSessionIdle", () => {
     const shutdown = vi.fn();
     const idle = wireSessionIdle({
       kernelManager: km,
-      autosave: async () => true,
+      wire: { autosaveForShutdown: async () => true },
       shutdown,
     });
 
@@ -101,13 +101,59 @@ describe("wireSessionIdle", () => {
     expect(shutdown).toHaveBeenCalledOnce();
   });
 
+  it("a kernel that dies while busy does not suspend the cap forever", async () => {
+    // Process exit never flips executionState off "busy", and dead kernels
+    // stay in list() — counting them as executing would leak the daemon on
+    // a login node permanently, since no further executionState event will
+    // ever arrive from a dead kernel.
+    const { km, setState } = makeKernelWorld();
+    vi.spyOn(km, "getKernel").mockImplementation(
+      () => ({ id: "k1", status: "dead" }) as unknown as ReturnType<KernelManager["getKernel"]>,
+    );
+    const shutdown = vi.fn();
+    const idle = wireSessionIdle({
+      kernelManager: km,
+      wire: { autosaveForShutdown: async () => true },
+      shutdown,
+    });
+
+    setState("busy"); // frozen at "busy" by the crash
+    idle.onClientsGone();
+    await vi.advanceTimersByTimeAsync(REATTACH_GRACE_MS + 12 * HOUR + 10);
+    expect(shutdown).toHaveBeenCalledOnce();
+  });
+
+  it("a crash event re-arms the cap when the death arrives later", async () => {
+    const { km, setState } = makeKernelWorld();
+    const shutdown = vi.fn();
+    const idle = wireSessionIdle({
+      kernelManager: km,
+      wire: { autosaveForShutdown: async () => true },
+      shutdown,
+    });
+
+    setState("busy");
+    idle.onClientsGone();
+    await vi.advanceTimersByTimeAsync(REATTACH_GRACE_MS + HOUR);
+    expect(shutdown).not.toHaveBeenCalled();
+
+    // The kernel dies mid-run: status flips to dead and the crash event
+    // fires — the only signal the policy will ever get from this kernel.
+    vi.spyOn(km, "getKernel").mockImplementation(
+      () => ({ id: "k1", status: "dead" }) as unknown as ReturnType<KernelManager["getKernel"]>,
+    );
+    km.emit("kernel:crashed", "k1");
+    await vi.advanceTimersByTimeAsync(12 * HOUR + 10);
+    expect(shutdown).toHaveBeenCalledOnce();
+  });
+
   it("blocks the shutdown while the injected autosave fails", async () => {
     // The gate is the injected autosave — the daemon passes the real
     // snapshot here, and a false answer must keep the session alive.
     const { km } = makeKernelWorld();
     const autosave = vi.fn(async () => false);
     const shutdown = vi.fn();
-    const idle = wireSessionIdle({ kernelManager: km, autosave, shutdown });
+    const idle = wireSessionIdle({ kernelManager: km, wire: { autosaveForShutdown: autosave }, shutdown });
 
     idle.onClientsGone();
     await vi.advanceTimersByTimeAsync(REATTACH_GRACE_MS + 12 * HOUR + 10);

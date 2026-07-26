@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
+import { pickServerPath } from '../services/pick-path';
 import { invalidateNamespace } from '../queries/invalidation';
 import { useStore } from '../store';
 import type { CellTab, Config, LogEntry, MenuActionPayload, RecentProjectEntry } from '../types';
@@ -203,7 +204,7 @@ export function useProjectWorkflow(options: UseProjectWorkflowOptions) {
         const defaultPath = currentProjectDir
           ? currentProjectDir.replace(/\/[^/]+\/?$/, '')
           : undefined;
-        pickedDir = await window.pdv.files.pickDirectory(defaultPath) ?? undefined;
+        pickedDir = await pickServerPath({ mode: 'directory', title: 'Open a project folder', defaultPath }) ?? undefined;
       }
       if (!pickedDir) {
         return;

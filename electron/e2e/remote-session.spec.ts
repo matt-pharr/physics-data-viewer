@@ -41,8 +41,13 @@ const REPO_ROOT = path.resolve(__dirname, "..");
 const FAKE_SSH = path.join(REPO_ROOT, "main", "remote", "__fixtures__", "fake-ssh.cjs");
 const SERVER_ENTRY = path.join(REPO_ROOT, "dist", "main", "server", "server-main.js");
 
+/** Runtime dirs created per launch; removed in afterEach. */
+const runtimeDirs: string[] = [];
+
 /** Env that makes the remote path reachable with no cluster and no real ssh. */
 function remoteEnv(): Record<string, string> {
+  const runtimeDir = fsSync.mkdtempSync(path.join(os.tmpdir(), "pdv-rt-"));
+  runtimeDirs.push(runtimeDir);
   return {
     PDV_REMOTE: "1",
     // Isolate the session socket per launch. The default runtime dir is
@@ -50,7 +55,7 @@ function remoteEnv(): Record<string, string> {
     // username-stable, so without this every spec run attaches to whatever
     // daemon a PREVIOUS run leaked — old code, old config, very confusing
     // failures (it happened).
-    PDV_SERVER_RUNTIME_DIR: fsSync.mkdtempSync(path.join(os.tmpdir(), "pdv-rt-")),
+    PDV_SERVER_RUNTIME_DIR: runtimeDir,
     // Executable with a `#!/usr/bin/env node` shebang, so it stands in for
     // the ssh binary directly rather than needing an interpreter prefix.
     PDV_SSH_PATH: FAKE_SSH,
@@ -67,6 +72,9 @@ let launched: LaunchedApp | null = null;
 test.afterEach(async () => {
   await launched?.cleanup();
   launched = null;
+  for (const dir of runtimeDirs.splice(0)) {
+    await fs.rm(dir, { recursive: true, force: true }).catch(() => undefined);
+  }
 });
 
 test("connects to a host and moves the session onto it", async () => {
@@ -84,7 +92,7 @@ test("connects to a host and moves the session onto it", async () => {
   // The connect itself must succeed before anything can be run on the host.
   await expect(dialog.getByText(/Connected to/)).toBeVisible({ timeout: 30_000 });
 
-  await dialog.getByRole("button", { name: "Run session here" }).click();
+  await dialog.getByRole("button", { name: /Run session on/ }).click();
 
   // The session is now served by a daemon reached over the (fake) channel.
   await expect(dialog.getByText(/Your session is running on/)).toBeVisible({
@@ -113,7 +121,7 @@ test("keeps the local session working when the host cannot be reached", async ()
   await expect(dialog.locator(".remote-error")).toBeVisible({ timeout: 30_000 });
   // No "Run session here" is offered, because there is nothing to run on.
   await expect(
-    dialog.getByRole("button", { name: "Run session here" }),
+    dialog.getByRole("button", { name: /Run session on/ }),
   ).toHaveCount(0);
 
   await dialog.getByRole("button", { name: "Close" }).click();
@@ -154,7 +162,7 @@ test("surfaces a remote kernel-start failure instead of spinning", async () => {
   await dialog.locator(".remote-host-input").fill("testhost");
   await dialog.getByRole("button", { name: "Connect" }).click();
   await expect(dialog.getByText(/Connected to/)).toBeVisible({ timeout: 30_000 });
-  await dialog.getByRole("button", { name: "Run session here" }).click();
+  await dialog.getByRole("button", { name: /Run session on/ }).click();
   await expect(dialog.getByText(/Your session is running on/)).toBeVisible({
     timeout: 30_000,
   });
@@ -165,23 +173,26 @@ test("surfaces a remote kernel-start failure instead of spinning", async () => {
   await page.getByRole("button", { name: "New Python Project" }).click();
   await page.getByTestId("new-project-create").click();
 
-  // The overlay must land on the failed state with the daemon's error and
-  // a way out — not spin forever.
-  await expect(page.locator(".env-sync-title")).toHaveText(
-    "Session failed to start",
-    { timeout: 120_000 },
-  );
-  await expect(page.locator(".env-sync-error")).toContainText(
-    /uv environment setup failed/,
-  );
-  await expect(page.getByRole("button", { name: "Retry" })).toBeVisible();
-  await fs.rm(scratch, { recursive: true, force: true });
+  try {
+    // The overlay must land on the failed state with the daemon's error and
+    // a way out — not spin forever.
+    await expect(page.locator(".env-sync-title")).toHaveText(
+      "Session failed to start",
+      { timeout: 120_000 },
+    );
+    await expect(page.locator(".env-sync-error")).toContainText(
+      /uv environment setup failed/,
+    );
+    await expect(page.getByRole("button", { name: "Retry" })).toBeVisible();
+  } finally {
+    await fs.rm(scratch, { recursive: true, force: true });
+  }
 });
 
 test("does not offer remote mode unless it is enabled", async () => {
-  // The entry is hidden until the remote path picker lands, because every
-  // server-side file dialog is still native and would browse the laptop
-  // while the session runs on the cluster.
+  // The entry stays gated while remote mode is finished off; the picker
+  // has landed, so the gate is now a release toggle rather than a
+  // correctness requirement.
   launched = await launchPDV({ env: { PDV_REMOTE: "0" } });
   const { app } = launched;
 

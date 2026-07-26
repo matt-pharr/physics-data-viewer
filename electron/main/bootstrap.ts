@@ -50,6 +50,7 @@ import { createWindow, wireAppEvents } from "./app";
 import { INTERNAL_CHANNELS, type PDVConfig } from "./ipc";
 import { LocalConfigStore } from "./shell/local-config-store";
 import { LocalServerSupervisor } from "./shell/server-supervisor";
+import { RemoteServerHandle } from "./shell/remote-server";
 import { SessionRouter } from "./shell/session-router";
 
 // Under PDV_E2E, redirect Electron's userData (where the renderer's
@@ -69,6 +70,31 @@ let localConfigStore: LocalConfigStore | null = null;
 let mainWindow: BrowserWindow | null = null;
 let openingWindow: Promise<void> | null = null;
 
+/**
+ * Build a local pdv-server supervisor with the app's standard options.
+ *
+ * One definition serves both the boot-time server and the fresh local
+ * server that "end remote session" / "disconnect" swap back to — they must
+ * be configured identically or the session the user returns to is subtly
+ * different from the one they left.
+ *
+ * @returns An unstarted supervisor.
+ */
+function makeLocalSupervisor(): LocalServerSupervisor {
+  return new LocalServerSupervisor({
+    version: app.getVersion(),
+    userDataDir: app.getPath("userData"),
+    pdvDir: path.join(os.homedir(), ".PDV"),
+    // Unpackaged, process.resourcesPath points at Electron's OWN Resources
+    // dir (inside node_modules), which holds none of PDV's bundled
+    // resources. Passing null keeps getResourcesRoot()'s contract honest so
+    // server-side resolvers fall through to their __dirname walk instead of
+    // probing a directory that can only ever yield false positives.
+    resourcesRoot: app.isPackaged ? (process.resourcesPath ?? null) : null,
+    getWindow: () => mainWindow,
+  });
+}
+
 async function openMainWindow(): Promise<void> {
   if (mainWindow && !mainWindow.isDestroyed()) {
     return;
@@ -82,7 +108,11 @@ async function openMainWindow(): Promise<void> {
     if (!server || !localConfigStore) {
       throw new Error("pdv-server is not running");
     }
-    const win = await createWindow(server, localConfigStore);
+    const win = await createWindow(server, localConfigStore, async () => {
+      const supervisor = makeLocalSupervisor();
+      await supervisor.start();
+      return supervisor;
+    });
     mainWindow = win;
     win.on("closed", () => {
       if (mainWindow === win) {
@@ -128,18 +158,7 @@ if (!hasSingleInstanceLock) {
 
     // Start the pdv-server before any window: the window's initial
     // background color and IPC bridge both need it.
-    const supervisor = new LocalServerSupervisor({
-      version: app.getVersion(),
-      userDataDir: app.getPath("userData"),
-      pdvDir: path.join(os.homedir(), ".PDV"),
-      // Unpackaged, process.resourcesPath points at Electron's OWN Resources
-      // dir (inside node_modules), which holds none of PDV's bundled
-      // resources. Passing null keeps getResourcesRoot()'s contract honest so
-      // server-side resolvers fall through to their __dirname walk instead of
-      // probing a directory that can only ever yield false positives.
-      resourcesRoot: app.isPackaged ? (process.resourcesPath ?? null) : null,
-      getWindow: () => mainWindow,
-    });
+    const supervisor = makeLocalSupervisor();
     try {
       await supervisor.start();
     } catch (error) {
@@ -180,7 +199,20 @@ if (!hasSingleInstanceLock) {
 
     // System wake recovery runs next to the kernel connection — forward
     // the resume event to whichever server currently backs the session.
+    // For a remote session the server never slept; what broke is the ssh
+    // channel on THIS side, so the resume kicks the transport's reattach
+    // instead (batch mode: succeed silently off the live master or fail
+    // fast — a wake must never fire an interactive auth prompt).
     powerMonitor.on("resume", () => {
+      const active = router.active;
+      if (active instanceof RemoteServerHandle) {
+        if (active.connectionState !== "connected") {
+          void active.retryNow({ batchMode: true }).catch((err: unknown) => {
+            console.error("[PDV] Remote reattach on wake failed:", err);
+          });
+        }
+        return;
+      }
       void router.invoke(INTERNAL_CHANNELS.systemResumed).catch((err) => {
         console.error("[PDV] Wake handler error:", err);
       });

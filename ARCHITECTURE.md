@@ -2181,11 +2181,76 @@ master or fail at once, never silently trigger a Duo push — and a `superseded`
 notice from a *different* client stops the reconnect loop dead, since two
 laptops chasing one session would ping-pong it forever.
 
+**When the backoff gives up** the handle parks in `auth-required` and settles
+every owed promise loudly; nothing automatic runs after that, because the
+missing ingredient is interactive re-authentication. Recovery is
+`RemoteServerHandle.retryNow()`: the connect dialog's "Reconnect to *host*"
+(which is `IPC.remote.startSession` — on a window already fronting a remote
+session that call *means* reattach) after the user re-authenticates, and a
+`powerMonitor` resume kick in batch mode (succeed silently off a live master
+or fail fast — a wake must never fire an auth prompt; locally the resume
+still forwards `systemResumed` to the server instead, since a remote server
+never slept). A handle that can never reattach — superseded, or closed —
+makes `startSession` fall through to a *fresh* handle against the same
+stable session id, so "reconnect" works even after another client visited.
+
+**Three ways out of a remote session, deliberately distinct.**
+*Disconnect* closes the channel and returns the window to a freshly started
+local server; the daemon and its kernel keep running for a later reconnect.
+*Shut Down Remote Session* (`IPC.remote.endSession`) starts the local server
+FIRST — a failure leaves the remote session untouched rather than the window
+with neither — then swaps and tells the daemon to stop (the `SessionHost`
+honors the shutdown invoke: graceful kernel shutdown, socket unlinked). It
+declines while the session is unreachable, because a shutdown invoke on a
+dead channel silently does nothing and "success" would leave the daemon
+running on a login node. *Quitting the app* is disconnect-only for remote
+sessions (`closingForQuit`, `app.ts`): the daemon outliving the client is
+the feature, and Cmd+Q must never end a 20-hour run on the cluster. In all
+three cases the retired handle's state callbacks are gated on it still being
+`SessionRouter.active`, so a farewell "disconnected" push can never
+overwrite the renderer's freshly-landed local state.
+
+**One kernel per session, enforced at the authority.** A fresh client
+attaching to a long-lived daemon has no idea what a previous client left
+running, so `kernels:start` first retires any surviving kernels (their
+working directories are preserved — they hold `.autosave` snapshots the
+welcome screen can recover — and the kernel-results cache is purged so the
+new session's first save cannot silently commit the old kernel's tree). A
+spawn whose handshake fails is likewise stopped rather than leaked.
+
+**Host-qualified recents reconnect.** A recent project carries the host it
+lives on; opening one that lives elsewhere moves the session first (connect
+— with any auth riding the dialog — then `startSession`, then the open
+completes when the connection state says the session arrived). A pending
+open is a click, not a standing order: it expires after two minutes, dies
+with the dialog if the user closes it mid-flow, and is identity-tracked so
+a second click cannot be killed by the first flow's failure.
+
+**The remote path picker.** Every path PDV asks the user for is interpreted
+by the *server*, so in a remote session a native dialog would browse the
+wrong machine. `renderer/src/services/pick-path.ts` routes: local sessions
+keep the native dialogs byte-for-byte; remote sessions (including
+unreachable ones — the session's filesystem is still the remote one) get a
+minimal in-app picker fed by `files:listDir`, the one new server channel
+(`ipc-register-file-browse.ts`: read-only, `~` expansion, dirs-first,
+symlinks reported as their target's kind). The picker is deliberately bare
+— a typed-path field doubling as navigation, an entry list, Home — because
+it is a placeholder for the planned command-palette UI, not a foundation.
+The `SHELL_CHANNELS` partition now enumerates the native `files.*` pickers
+explicitly rather than spreading the namespace, precisely so a new
+`files.*` channel can never again be silently auto-assigned to the shell.
+
 The renderer learns where its session lives from the `sessionState` push,
 distinct from `remoteStatus` (which describes a connection *attempt*). On a
-resync it rebuilds query-backed state and marks the console: output there is
-append-only and genuinely unrecoverable, so the gap is made legible rather
-than papered over.
+resync it rebuilds query-backed state, reloads App-held config (component
+state that a query-cache reset cannot reach — without it a kernel start
+after a swap used the previous machine's interpreter path), lands on the
+welcome screen when the new server has no kernel, and marks the console.
+The marker wording follows the push's `cause`: a deliberate move says
+"session moved to *host*", while a reattach that could not resume says
+output may be missing — that text after an intentional swap read as data
+loss to a real user. Console output is append-only and genuinely
+unrecoverable, so real gaps are made legible rather than papered over.
 
 Within the pdv-server, two routers communicate with the kernel:
 
@@ -2860,9 +2925,9 @@ PDV does not ship a static API reference, which would drift. Instead:
 
 The following features are acknowledged as future work and must not influence the current architecture in ways that complicate the above design:
 
-- **Crash recovery** — working directory is deleted on close; future discussion required
-- **Autosave** — `.pdv-work/autosave/` directory is created but not used
 - **Modules ecosystem hardening** — core module lifecycle is implemented (install from disk/GitHub, import, uninstall, update, bundled examples, project-local storage); deeper registry/trust features are deferred
+- **Remote session completeness** — remote sessions work end to end (§11.7 area above: connect, bootstrap, session daemon, environment provisioning via the bundled uv, path picking); still deferred are the per-host setup script and Slurm-aware kernel launch (interactive analysis on a login node is the sanctioned beta scope), remote Julia sessions (need juliaup on the host), remote→local file export, remote launchers, and the VS Code-style command palette that will replace the placeholder path picker
+- **Local→remote upload import and remote MCP** — explicitly excluded from remote v1
 - **Multiple simultaneous kernels** — architecture supports it (kernels have IDs) but UI exposes only one at a time
 - **R kernel support** — deferred; would follow the `pdv-julia` pattern (a kernel-side package implementing the language-agnostic protocol of §3)
 

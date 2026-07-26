@@ -21,6 +21,7 @@
  */
 
 import { expect, test } from "@playwright/test";
+import * as os from "os";
 
 import { expectKernelReady } from "./helpers/kernel-status";
 import { launchPDV, type LaunchedApp } from "./helpers/launch";
@@ -61,7 +62,7 @@ test.describe(() => {
     });
     await expect(dialog.locator(".remote-error")).toHaveCount(0);
 
-    await dialog.getByRole("button", { name: "Run session here" }).click();
+    await dialog.getByRole("button", { name: /Run session on/ }).click();
 
     await expect(dialog.getByText(/Your session is running on/)).toBeVisible({
       timeout: 60_000,
@@ -101,7 +102,7 @@ test.describe(() => {
     await expect(dialog.getByText(/Connected to/)).toBeVisible({
       timeout: CONNECT_TIMEOUT_MS,
     });
-    await dialog.getByRole("button", { name: "Run session here" }).click();
+    await dialog.getByRole("button", { name: /Run session on/ }).click();
     await expect(dialog.getByText(/Your session is running on/)).toBeVisible({
       timeout: 60_000,
     });
@@ -124,12 +125,33 @@ test.describe(() => {
     // not this laptop.
     const editor = page.getByRole("textbox", { name: "Editor content" });
     await editor.focus();
-    await page.keyboard.type("import socket; print(socket.gethostname())");
+    // A sentinel marker ties the assertion to THIS execute: any stray
+    // stdout line must not satisfy it, and a traceback (stderr) must not
+    // vacuously pass a purely negative check.
+    await page.keyboard.type(
+      'import socket; print("PDV_E2E_HOST=" + socket.gethostname())',
+    );
     await page.getByRole("button", { name: "Execute" }).click();
-    // Not `.first()` — the reconnect marker also renders as a log entry;
-    // the hostname arrives in a later one.
-    await expect(page.locator(".log-stdout").filter({ hasText: /feyn/i })).toBeVisible({
-      timeout: 60_000,
-    });
+    const localHost = os.hostname().split(".")[0].toLowerCase();
+    await expect
+      .poll(
+        async () => {
+          const texts = await page.locator(".log-stdout").allTextContents();
+          const hit = texts
+            .map((t) => /PDV_E2E_HOST=(\S+)/.exec(t)?.[1])
+            .find((h) => h !== undefined);
+          return hit ?? null;
+        },
+        { timeout: 60_000 },
+      )
+      .not.toBeNull();
+    const texts = await page.locator(".log-stdout").allTextContents();
+    const remoteHost = texts
+      .map((t) => /PDV_E2E_HOST=(\S+)/.exec(t)?.[1])
+      .find((h) => h !== undefined)!;
+    // A positive assertion on the captured hostname, without hardcoding
+    // any particular host: it just must not be this laptop.
+    expect(remoteHost.toLowerCase()).not.toBe(localHost);
+    expect(remoteHost.toLowerCase().split(".")[0]).not.toBe(localHost);
   });
 });

@@ -156,4 +156,109 @@ describe("RemoteConnect", () => {
     fireEvent.click(screen.getByText("Close"));
     expect(onClose).toHaveBeenCalled();
   });
+
+  it("shutting the session down takes two clicks, with the warning between", async () => {
+    // One click must never end a session — it kills the remote kernel and
+    // whatever unsaved work lives in it.
+    const endSession = vi.fn(async () => ({ ok: true }));
+    (window as unknown as { pdv: { remote: object } }).pdv = {
+      remote: { ...remote, endSession, startSession: vi.fn() },
+    };
+    push({ phase: "connected", host: "flux" });
+    act(() => {
+      useStore.setState({ connectionState: "remote-connected" });
+    });
+    render(<RemoteConnect onClose={vi.fn()} />);
+
+    fireEvent.click(screen.getByText("Shut Down Remote Session"));
+    expect(endSession).not.toHaveBeenCalled();
+    expect(screen.getByText(/anything unsaved there is lost/)).toBeTruthy();
+
+    fireEvent.click(screen.getByText("Yes, Shut It Down"));
+    await waitFor(() => {
+      expect(endSession).toHaveBeenCalledOnce();
+    });
+  });
+
+  it("a failed shutdown says why instead of pretending nothing happened", async () => {
+    // The UI cousin of "reports success while the daemon keeps running":
+    // the decline message ("unreachable right now…") must reach the user.
+    const endSession = vi.fn(async () => ({ ok: false, message: "still unreachable" }));
+    (window as unknown as { pdv: { remote: object } }).pdv = {
+      remote: { ...remote, endSession },
+    };
+    push({ phase: "connected", host: "flux" });
+    act(() => {
+      useStore.setState({ connectionState: "remote-connected" });
+    });
+    render(<RemoteConnect onClose={vi.fn()} />);
+
+    fireEvent.click(screen.getByText("Shut Down Remote Session"));
+    fireEvent.click(screen.getByText("Yes, Shut It Down"));
+
+    await screen.findByText("still unreachable");
+  });
+
+  it("Reconnect actually starts the session, and Disconnect disarms the shutdown", async () => {
+    const startSession = vi.fn(async () => ({ ok: true, sessionId: "s" }));
+    const disconnect = vi.fn(async () => undefined);
+    (window as unknown as { pdv: { remote: object } }).pdv = {
+      remote: { ...remote, startSession, disconnect },
+    };
+    push({ phase: "connected", host: "flux" });
+    act(() => {
+      useStore.setState({ connectionState: "remote-lost" });
+    });
+    const { unmount } = render(<RemoteConnect onClose={vi.fn()} />);
+    fireEvent.click(screen.getByText("Reconnect to flux"));
+    await waitFor(() => {
+      expect(startSession).toHaveBeenCalledOnce();
+    });
+    unmount();
+
+    // Disarm-on-Disconnect: an armed confirm must not survive the action
+    // that makes it moot.
+    act(() => {
+      useStore.setState({ connectionState: "remote-connected" });
+    });
+    render(<RemoteConnect onClose={vi.fn()} />);
+    fireEvent.click(screen.getByText("Shut Down Remote Session"));
+    expect(screen.getByText(/Shut it down\?/)).toBeTruthy();
+    fireEvent.click(screen.getByText("Disconnect"));
+    expect(disconnect).toHaveBeenCalledOnce();
+    expect(screen.queryByText(/Shut it down\?/)).toBeNull();
+  });
+
+  it("renders a session error raised by flows outside the dialog", () => {
+    // An open-recent flow's startSession failure lands in the store — the
+    // dialog is the surface the user is looking at, so it must show it.
+    push({ phase: "connected", host: "flux" });
+    act(() => {
+      useStore.setState({ connectionState: "local", remoteSessionError: "no session for you" });
+    });
+    render(<RemoteConnect onClose={vi.fn()} />);
+    expect(screen.getByText("no session for you")).toBeTruthy();
+  });
+
+  it("offers Reconnect when the session is lost — and holds back while auto-reconnecting", () => {
+    push({ phase: "connected", host: "flux" });
+    act(() => {
+      useStore.setState({ connectionState: "remote-lost" });
+    });
+    const { unmount } = render(<RemoteConnect onClose={vi.fn()} />);
+    const button = screen.getByText("Reconnect to flux");
+    expect((button as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.getByText(/unreachable right now/)).toBeTruthy();
+    unmount();
+
+    // While the shell's automatic backoff is running, a manual attempt
+    // would race it — the button waits.
+    act(() => {
+      useStore.setState({ connectionState: "remote-reconnecting" });
+    });
+    render(<RemoteConnect onClose={vi.fn()} />);
+    expect(
+      (screen.getByText("Reconnect to flux") as HTMLButtonElement).disabled,
+    ).toBe(true);
+  });
 });

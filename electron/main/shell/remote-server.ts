@@ -145,6 +145,8 @@ export class RemoteServerHandle implements ServerHandle {
   private state: RemoteSessionState = "disconnected";
   private stopped = false;
   private reconnecting = false;
+  /** True while this handle is closing its own client (not a real loss). */
+  private tearingDown = false;
 
   /**
    * @param opts - Session id, channel factory, and reconnect tuning.
@@ -290,7 +292,36 @@ export class RemoteServerHandle implements ServerHandle {
 
   /** Open a channel, attach, and wire the client up. */
   private async connect(opts: { batchMode: boolean }): Promise<void> {
+    try {
+      await this.connectInner(opts);
+    } catch (err) {
+      // A failure between opening the channel and completing the attach
+      // must not leave a half-wired client behind: a stale `this.client`
+      // makes later invokes hang against a never-attached connection, and a
+      // later retryNow's teardown of it would spuriously look like a live
+      // connection dying. It also leaks the ssh channel process.
+      this.teardownChannel();
+      throw err;
+    }
+  }
+
+  /** The body of {@link connect}; failures are cleaned up by the wrapper. */
+  private async connectInner(opts: { batchMode: boolean }): Promise<void> {
     const channel = await this.opts.openChannel(opts);
+    // The attach invoke must FAIL when the channel dies under it, never
+    // park: the park policy exists for session invokes that a later
+    // reattach reconciles, but this client IS the attach attempt — parking
+    // its own attach leaves connect() awaiting forever, which wedges
+    // whoever called it (startSession never resolves; a reconnect-loop
+    // iteration hangs with `reconnecting` stuck true, suppressing every
+    // future recovery).
+    let rejectOnEarlyClose!: (err: Error) => void;
+    const earlyClose = new Promise<never>((_, reject) => {
+      rejectOnEarlyClose = reject;
+    });
+    // Pre-register a catch: after a successful attach the eventual close
+    // still rejects this promise, and nobody is racing it anymore.
+    void earlyClose.catch(() => undefined);
     const client = new RpcClient(channel.readable, channel.writable, {
       onPush: (event, payload, seq) => {
         this.lastSeq = seq;
@@ -306,7 +337,13 @@ export class RemoteServerHandle implements ServerHandle {
         );
         this.opts.onStale?.("sequence-gap");
       },
-      onClose: () => this.onConnectionLost(),
+      // Identity guard: stream close events arrive on later ticks, so a
+      // client this handle already replaced must not report a loss for the
+      // connection that superseded it.
+      onClose: () => {
+        rejectOnEarlyClose(new Error("The channel closed during the attach."));
+        if (this.client === client) this.onConnectionLost();
+      },
     });
 
     this.channel = channel;
@@ -317,6 +354,7 @@ export class RemoteServerHandle implements ServerHandle {
     // not notice until the ping timeout — a minute of a session that looks
     // alive and answers nothing.
     channel.readable.once("close", () => {
+      if (this.client !== client) return; // replaced or torn down on purpose
       client.close("remote channel closed");
       this.onConnectionLost();
     });
@@ -330,8 +368,9 @@ export class RemoteServerHandle implements ServerHandle {
         .filter((id): id is string => id !== null),
       protocol: RPC_PROTOCOL_VERSION,
     };
-    const result = (await client.invoke(RPC_CHANNELS.attach, [
-      request,
+    const result = (await Promise.race([
+      client.invoke(RPC_CHANNELS.attach, [request]),
+      earlyClose,
     ])) as RpcAttachResult;
 
     this.sessionEpoch = result.sessionEpoch;
@@ -429,9 +468,39 @@ export class RemoteServerHandle implements ServerHandle {
     }
   }
 
+  /**
+   * Try to reattach right now — the recovery path out of `auth-required`.
+   *
+   * The automatic backoff deliberately gives up after its schedule (nobody
+   * wants an unasked-for Duo push loop), which used to leave any outage
+   * longer than the schedule unrecoverable without an app restart. This is
+   * the manual re-arm: the user has just re-authenticated (or the machine
+   * woke from sleep), so an interactive attempt is warranted again.
+   *
+   * @param opts - `batchMode` restricts the attempt to the existing master
+   *   (the wake-from-sleep kick, where an interactive prompt nobody asked
+   *   for would be worse than staying lost). Defaults to interactive, for
+   *   the user-driven path where re-auth has just happened.
+   * @returns Resolves once attached.
+   * @throws Error when the attach fails; the state returns to
+   *   `auth-required` so the action can be offered again.
+   */
+  async retryNow(opts: { batchMode?: boolean } = {}): Promise<void> {
+    if (this.stopped) throw new Error("The remote session handle is closed.");
+    if (this.state === "connected" || this.reconnecting) return;
+    this.setState("connecting");
+    this.teardownChannel();
+    try {
+      await this.connect({ batchMode: opts.batchMode ?? false });
+    } catch (err) {
+      this.setState("auth-required");
+      throw err;
+    }
+  }
+
   /** The channel died; decide whether to chase it. */
   private onConnectionLost(): void {
-    if (this.stopped || this.reconnecting) return;
+    if (this.stopped || this.reconnecting || this.tearingDown) return;
     this.setState("reconnecting");
     void this.reconnectLoop();
   }
@@ -488,10 +557,18 @@ export class RemoteServerHandle implements ServerHandle {
 
   /** Drop the current client and channel. */
   private teardownChannel(): void {
-    this.client?.close("remote channel closed");
-    this.client = null;
-    this.channel?.dispose();
-    this.channel = null;
+    // Our own teardown is not a connection loss: without the flag, closing
+    // the client fires its onClose → onConnectionLost → a reconnect loop
+    // that races (and tears down) whatever the caller connects next.
+    this.tearingDown = true;
+    try {
+      this.client?.close("remote channel closed");
+      this.client = null;
+      this.channel?.dispose();
+      this.channel = null;
+    } finally {
+      this.tearingDown = false;
+    }
   }
 
   /** Report a state change once. */

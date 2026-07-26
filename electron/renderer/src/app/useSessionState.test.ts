@@ -81,6 +81,22 @@ describe('useSessionState', () => {
       expect(invalidateAllKernelState).toHaveBeenCalledWith('k1', 'reconnect');
     });
 
+    it('an intentional move gets a move marker, not a data-loss warning', () => {
+      // "output may be missing" right after clicking "Run session on host"
+      // read as data loss to a real user.
+      renderHook(() => useSessionState('k1'));
+      emit({ kind: 'remote', host: 'flux', state: 'connected', resync: true, cause: 'moved' });
+      expect(useStore.getState().logs.at(-1)?.stdout).toBe('── session moved to flux ──');
+
+      emit({ kind: 'local', host: null, state: 'connected', resync: true, cause: 'moved' });
+      expect(useStore.getState().logs.at(-1)?.stdout).toBe(
+        '── session moved back to this computer ──',
+      );
+
+      emit({ kind: 'remote', host: 'flux', state: 'connected', resync: true, cause: 'recovered' });
+      expect(useStore.getState().logs.at(-1)?.stdout).toMatch(/output produced while disconnected/);
+    });
+
     it('invokes the resync callback so App can reload non-query state', () => {
       // App's `config` is component state; the query-cache reset cannot
       // reach it, and stale config after a swap means the next kernel

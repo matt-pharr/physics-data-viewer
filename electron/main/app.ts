@@ -25,6 +25,8 @@ import { IPC } from "./ipc";
 import { readMergedConfig } from "./shell/config-bridge";
 import type { LocalConfigStore } from "./shell/local-config-store";
 import type { ServerHandle } from "./shell/server-supervisor";
+import { RemoteServerHandle } from "./shell/remote-server";
+import { SessionRouter } from "./shell/session-router";
 
 /**
  * Check whether a process with the given PID is currently running.
@@ -134,9 +136,41 @@ async function loadDevUrlWithRetry(
  * @throws {Error} When renderer content cannot be loaded or the server is
  *   unreachable for the initial config read.
  */
+/**
+ * The server-closing action for app quit.
+ *
+ * Quitting must never end a REMOTE session: the daemon and its kernel
+ * outliving the client is the whole feature, and the daemon honors the
+ * shutdown invoke — sending it on quit would gracefully kill a 20-hour run
+ * on the cluster because the user pressed Cmd+Q. Local servers are still
+ * shut down (their kernel dies with this machine anyway); remote handles
+ * just close the channel.
+ *
+ * Exported as a unit so the branch is testable without an Electron app.
+ *
+ * @param server - The handle (usually the SessionRouter) fronting the session.
+ * @returns Resolves when the appropriate close has completed.
+ * @throws {Error} Whatever the underlying disconnect/shutdown throws.
+ */
+export function closingForQuit(server: ServerHandle): Promise<void> {
+  const active = server instanceof SessionRouter ? server.active : server;
+  return active instanceof RemoteServerHandle ? active.disconnect() : server.shutdown();
+}
+
+/**
+ * Create the main window and register its IPC surface.
+ *
+ * @param server - Handle fronting the active session (the SessionRouter).
+ * @param localConfig - This machine's half of the config store.
+ * @param createLocalServer - Starts a fresh local pdv-server; used when a
+ *   remote session ends/disconnects and the window returns to local mode.
+ * @returns The created BrowserWindow.
+ * @throws {Error} When the initial config read or window setup fails.
+ */
 export async function createWindow(
   server: ServerHandle,
-  localConfig: LocalConfigStore
+  localConfig: LocalConfigStore,
+  createLocalServer?: () => Promise<ServerHandle>
 ): Promise<BrowserWindow> {
   // One config snapshot before any window exists: initial background color
   // (shell-owned — appearance follows the user, not the session's host) and
@@ -214,6 +248,7 @@ export async function createWindow(
     path.join(os.homedir(), ".PDV"),
     app.getPath("userData"),
     setAllowClose,
+    createLocalServer,
   );
 
   // Intercept window close (title-bar X, OS close) so the renderer can
@@ -380,8 +415,7 @@ export function wireAppEvents(
     }
     event.preventDefault();
     isShuttingDownGlobal = true;
-    server
-      .shutdown()
+    closingForQuit(server)
       .catch((error: unknown) => {
         console.error("[PDV] Failed to shutdown pdv-server during quit:", error);
       })

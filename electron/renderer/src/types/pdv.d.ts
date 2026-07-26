@@ -36,6 +36,9 @@ export type {
   RemoteStatus,
 } from '../../../main/ipc';
 
+/** Remote path-picker listing types. Canonical: `main/ipc.ts`. */
+export type { ListDirEntry, ListDirResult } from '../../../main/ipc';
+
 /** Tree node descriptor returned by `pdv.tree.list`. Canonical: `pdv-protocol.ts`. */
 export type { NodeDescriptor } from '../../../main/ipc';
 
@@ -1365,6 +1368,8 @@ export interface PDVApi {
     pickExecutable(): Promise<string | null>;
     pickFile(): Promise<string | null>;
     pickDirectory(defaultPath?: string): Promise<string | null>;
+    /** Lists on the session's machine — the remote path picker's source. */
+    listDir(dirPath?: string): Promise<import('../../../main/ipc').ListDirResult>;
   };
   menu: {
     updateRecentProjects(entries: RecentProjectEntry[]): Promise<boolean>;

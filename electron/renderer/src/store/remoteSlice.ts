@@ -39,11 +39,20 @@ export interface RemoteSlice {
   remoteAttemptId: string | null;
   /** Byte counts while the server bundle uploads, or null between transfers. */
   remoteProgress: { transferred: number; total: number } | null;
+  /**
+   * A session-level failure raised OUTSIDE the connect dialog (e.g. an
+   * open-recent flow whose startSession failed). The dialog renders it in
+   * its error slot — its own local error state can't be reached by other
+   * flows, which is how a failure ended up visible nowhere.
+   */
+  remoteSessionError: string | null;
 
   /** Fold a pushed status into the slice. */
   applyRemoteStatus: (status: RemoteStatus) => void;
   /** Clear the log before starting a fresh attempt. */
   clearRemoteLog: () => void;
+  /** Set or clear the session-level failure message. */
+  setRemoteSessionError: (message: string | null) => void;
 }
 
 export const createRemoteSlice: AppSlice<RemoteSlice> = (set) => ({
@@ -55,6 +64,7 @@ export const createRemoteSlice: AppSlice<RemoteSlice> = (set) => ({
   remoteMessage: null,
   remoteAttemptId: null,
   remoteProgress: null,
+  remoteSessionError: null,
 
   applyRemoteStatus: (status) =>
     set((state) => {
@@ -83,5 +93,7 @@ export const createRemoteSlice: AppSlice<RemoteSlice> = (set) => ({
       };
     }),
 
-  clearRemoteLog: () => set({ remoteLog: '', remoteMessage: null }),
+  clearRemoteLog: () => set({ remoteLog: '', remoteMessage: null, remoteSessionError: null }),
+
+  setRemoteSessionError: (message) => set({ remoteSessionError: message }),
 });

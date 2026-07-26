@@ -28,6 +28,7 @@ import {
 } from "./ipc";
 import { openSessionChannel } from "./remote/remote-channel";
 import { RemoteServerHandle } from "./shell/remote-server";
+import type { ServerHandle } from "./shell/server-supervisor";
 import type { SessionRouter } from "./shell/session-router";
 import { handleIpc } from "./ipc-registry";
 import { RemoteConnectionManager } from "./remote/remote-connection";
@@ -66,6 +67,12 @@ export interface RegisterRemoteIpcOptions {
   sessionId?: string;
   /** Opens the ssh channel. Injected by tests. */
   openChannel?: typeof openSessionChannel;
+  /**
+   * Starts a fresh local pdv-server. Ending a remote session (and
+   * disconnecting while one runs) swaps the window back onto it; omitting
+   * this leaves those actions declined rather than half-done.
+   */
+  createLocalServer?: () => Promise<ServerHandle>;
 }
 
 /**
@@ -83,6 +90,45 @@ export function registerRemoteIpcHandlers(
   const pushStatus = (status: RemoteStatus): void => {
     if (win.isDestroyed()) return;
     win.webContents.send(IPC.push.remoteStatus, status);
+  };
+
+  const pushSessionState = (payload: SessionStatePayload): void => {
+    if (win.isDestroyed()) return;
+    win.webContents.send(IPC.push.sessionState, payload);
+  };
+
+  // The handle currently serving this window's remote session. Read from
+  // the ROUTER, not registrar closure state: handlers are re-registered per
+  // window (a macOS reopen builds a fresh closure) while the router and its
+  // active handle live on — closure state would come back null and vacate
+  // the recovery and shutdown guards below.
+  const activeRemoteHandle = (): RemoteServerHandle | null => {
+    const active = options.router?.active;
+    return active instanceof RemoteServerHandle ? active : null;
+  };
+
+  /**
+   * Swap the window back onto a fresh local server.
+   *
+   * Order is the safety property: the local server starts FIRST, so a
+   * failure leaves the remote session untouched rather than the window with
+   * neither. The outgoing remote handle is returned for the caller to
+   * disconnect (session keeps running) or shut down (session ends).
+   */
+  const swapBackToLocal = async (): Promise<ServerHandle | null> => {
+    const router = options.router;
+    const createLocal = options.createLocalServer;
+    if (!router || router.kind !== "remote" || !createLocal) return null;
+    const local = await createLocal();
+    const previous = router.swap(local);
+    pushSessionState({
+      kind: "local",
+      host: null,
+      state: "connected",
+      resync: true,
+      cause: "moved",
+    });
+    return previous;
   };
 
   // Two env seams, both for testing the remote path without a cluster. They
@@ -130,6 +176,35 @@ export function registerRemoteIpcHandlers(
   });
 
   handleIpc(IPC.remote.disconnect, async () => {
+    // Disconnecting while the session runs remotely returns this window to
+    // a fresh local session; the daemon and its kernel keep running on the
+    // host for a later reconnect. Without the swap the window would keep
+    // routing every invoke at a channel that is about to be torn down.
+    if (options.router?.kind === "remote" && !options.createLocalServer) {
+      // Same decline endSession gives: tearing the mux down UNDER the live
+      // session would strand the window with a dead server.
+      throw new Error(
+        "This build cannot return to a local session, so disconnecting " +
+          "while the session runs remotely is not available.",
+      );
+    }
+    try {
+      const previous = await swapBackToLocal();
+      if (previous instanceof RemoteServerHandle) {
+        await previous.disconnect();
+      }
+    } catch (err) {
+      // The local server would not start; leave the remote session as the
+      // active one rather than stranding the window, and keep the ssh
+      // connection up since the session still rides it. The original error
+      // is rethrown (the tsconfig target predates Error's `cause` option),
+      // with the context logged beside it.
+      console.error(
+        "[remote] could not return to a local session; staying on the remote session:",
+        err,
+      );
+      throw err;
+    }
     await manager.disconnect();
   });
 
@@ -149,16 +224,29 @@ export function registerRemoteIpcHandlers(
       };
     }
     if (router.kind === "remote") {
-      return { ok: false, message: "This window already runs a remote session." };
+      // The recovery path: the session is already here but its channel was
+      // lost past the automatic backoff (`auth-required`). The user has just
+      // re-authenticated in this dialog, so an interactive reattach is
+      // exactly what "run session here" should mean now.
+      const current = activeRemoteHandle();
+      if (current && current.connectionState !== "connected") {
+        try {
+          await current.retryNow();
+          return { ok: true, sessionId: options.sessionId ?? defaultSessionId() };
+        } catch (err) {
+          console.error("[remote] reattach via existing handle failed:", err);
+          // Fall through and build a fresh handle: a handle that was
+          // superseded (or closed) can never reattach — "reconnect" must
+          // still work, and the attach protocol makes a fresh handle safe.
+        }
+      } else if (current) {
+        return { ok: false, message: "This window already runs a remote session." };
+      }
     }
 
     const sessionId = options.sessionId ?? defaultSessionId();
     const open = options.openChannel ?? openSessionChannel;
     const host = manager.getStatus().host;
-    const pushSessionState = (payload: SessionStatePayload): void => {
-      if (win.isDestroyed()) return;
-      win.webContents.send(IPC.push.sessionState, payload);
-    };
 
     const handle = new RemoteServerHandle({
       sessionId,
@@ -171,8 +259,15 @@ export function registerRemoteIpcHandlers(
           sshPath,
           muxOptions: { batchMode },
         }),
+      // Every callback is gated on this handle actually fronting the
+      // window. Before the swap the local server still does; after a swap
+      // BACK to local, the retired handle's own disconnect()/shutdown()
+      // fires a final "disconnected" state change — un-gated, that push
+      // arrived after the "local, connected" one and left the renderer
+      // showing a lost remote session while the window ran locally.
       onState: (state) => {
         if (state === "connecting") return; // Not yet a session state.
+        if (router.active !== handle) return;
         pushSessionState({ kind: "remote", host, state });
       },
       onStale: (reason) => {
@@ -181,10 +276,18 @@ export function registerRemoteIpcHandlers(
         // the renderer twice made it print two "output may be missing"
         // markers for one connect, which reads as two lost intervals.
         if (reason === "no-cursor") return;
+        if (router.active !== handle) return;
         console.error(`[remote] session resync required: ${reason}`);
-        pushSessionState({ kind: "remote", host, state: "connected", resync: true });
+        pushSessionState({
+          kind: "remote",
+          host,
+          state: "connected",
+          resync: true,
+          cause: "recovered",
+        });
       },
       onReattached: () => {
+        if (router.active !== handle) return;
         pushSessionState({ kind: "remote", host, state: "connected" });
       },
     });
@@ -199,12 +302,25 @@ export function registerRemoteIpcHandlers(
     }
 
     const previous = router.swap(handle);
-    pushSessionState({ kind: "remote", host, state: "connected", resync: true });
-    // The outgoing local server is shut down, not abandoned: it holds a
-    // kernel and a working directory on this machine.
-    void previous?.shutdown().catch((err: unknown) => {
-      console.error("[remote] local server shutdown failed:", err);
+    pushSessionState({
+      kind: "remote",
+      host,
+      state: "connected",
+      resync: true,
+      cause: "moved",
     });
+    if (previous instanceof RemoteServerHandle) {
+      // The fresh-handle recovery path replaced a dead remote handle. Only
+      // close it locally — a shutdown here would be delivered by the NEW
+      // channel to the very daemon the user just reconnected to.
+      void previous.disconnect().catch(() => undefined);
+    } else if (previous) {
+      // The outgoing local server is shut down, not abandoned: it holds a
+      // kernel and a working directory on this machine.
+      void previous.shutdown().catch((err: unknown) => {
+        console.error("[remote] local server shutdown failed:", err);
+      });
+    }
     return { ok: true, sessionId };
   });
 
@@ -213,12 +329,41 @@ export function registerRemoteIpcHandlers(
     if (!router || router.kind !== "remote") {
       return { ok: false, message: "This window is not running a remote session." };
     }
-    return {
-      ok: false,
-      message:
-        "Returning to a local session is not implemented yet. " +
-        "Disconnecting leaves the remote session running on the host.",
-    };
+    if (!options.createLocalServer) {
+      return { ok: false, message: "This build cannot return to a local session." };
+    }
+    // The shutdown invoke can only reach the daemon over a live channel; on
+    // a dead one it silently does nothing, and "Shut Down" would report
+    // success while the daemon keeps running on the host. Decline instead.
+    const current = activeRemoteHandle();
+    if (current && current.connectionState !== "connected") {
+      return {
+        ok: false,
+        message:
+          "The session is unreachable right now. Reconnect first, or use " +
+          "Disconnect — an unreachable session cannot be shut down from here.",
+      };
+    }
+    let previous: ServerHandle | null;
+    try {
+      previous = await swapBackToLocal();
+    } catch (err) {
+      // The remote session is untouched — better a declined action than a
+      // window with no server behind it.
+      return {
+        ok: false,
+        message: `Could not start a local session to return to: ${(err as Error).message}`,
+      };
+    }
+    // Only now is the daemon told to stop: the window is already safe on
+    // the local server, so a lost ack (daemon exits before answering, ssh
+    // drops) no longer matters.
+    if (previous) {
+      void previous.shutdown().catch((err: unknown) => {
+        console.error("[remote] remote session shutdown failed:", err);
+      });
+    }
+    return { ok: true };
   });
 
   return manager;

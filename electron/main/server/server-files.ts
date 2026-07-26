@@ -91,6 +91,7 @@ export const SERVER_DESTINED_FILES: readonly string[] = [
   "ipc-register-modules.ts",
   "ipc-register-tree-namespace-script.ts",
   "ipc-register-config.ts",
+  "ipc-register-file-browse.ts",
   "ipc-register-gui-files.ts",
   // MCP
   "mcp/mcp-server.ts",

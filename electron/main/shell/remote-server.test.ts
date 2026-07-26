@@ -206,6 +206,172 @@ describe("RemoteServerHandle", () => {
   });
 
   describe("supersede", () => {
+    it("a channel that dies mid-attach FAILS the connect instead of hanging it", async () => {
+      // The park policy exists for session invokes a reattach reconciles —
+      // but this client IS the attach attempt. Parking its own attach left
+      // connect() awaiting forever: startSession never resolved, and a
+      // reconnect-loop iteration wedged with `reconnecting` stuck true,
+      // suppressing every future recovery.
+      const disposed: number[] = [];
+      handle = makeHandle({
+        openChannel: async () => {
+          const socket = net.connect(paths.sockPath);
+          socket.on("error", () => undefined);
+          openSockets.push(socket);
+          await new Promise<void>((resolve, reject) => {
+            socket.once("connect", resolve);
+            socket.once("error", reject);
+          });
+          // The daemon's hello is the first data; kill the channel right
+          // after it, so the attach request goes into a dead socket.
+          socket.once("data", () => {
+            setImmediate(() => socket.destroy());
+          });
+          return {
+            readable: socket,
+            writable: socket,
+            dispose: () => {
+              disposed.push(1);
+              socket.destroy();
+            },
+          };
+        },
+        reconnectDelaysMs: [],
+      });
+
+      await expect(handle.start()).rejects.toThrow(/closed during the attach/);
+      // The failure wrapper tore the half-wired channel down: the ssh
+      // channel process is not leaked and no stale client lingers.
+      expect(disposed.length).toBeGreaterThan(0);
+    });
+
+    it("a late close event from a replaced channel does not restart the loop", async () => {
+      // Stream close events arrive on later ticks. After a reconnect, the
+      // OLD socket's close must not be read as the NEW connection dying —
+      // without the identity guards it triggered another loop that tore
+      // down the healthy connection.
+      let opens = 0;
+      const laggards: net.Socket[] = [];
+      handle = makeHandle({
+        openChannel: async () => {
+          opens += 1;
+          const socket = net.connect(paths.sockPath);
+          socket.on("error", () => undefined);
+          openSockets.push(socket);
+          laggards.push(socket);
+          await new Promise<void>((resolve, reject) => {
+            socket.once("connect", resolve);
+            socket.once("error", reject);
+          });
+          return { readable: socket, writable: socket, dispose: () => socket.destroy() };
+        },
+        reconnectDelaysMs: [10],
+      });
+      await handle.start();
+      expect(opens).toBe(1);
+
+      // Kill the first channel; the loop reattaches on the second.
+      laggards[0].destroy();
+      await vi.waitFor(() => {
+        expect(handle!.connectionState).toBe("connected");
+        expect(opens).toBe(2);
+      });
+
+      // Give any straggling close events from the first socket time to
+      // land. A third openChannel call would mean the guards failed.
+      await delay(150);
+      expect(opens).toBe(2);
+      expect(handle.connectionState).toBe("connected");
+    });
+
+    it("retryNow while the automatic loop runs neither dials nor lies about state", async () => {
+      // Pinning the current contract: retryNow defers to an in-flight
+      // reconnect loop (no competing dial), and the caller can see from
+      // connectionState that nothing is attached yet. If this behavior is
+      // ever made to throw instead, this test should change WITH the
+      // registrar's startSession recovery branch.
+      let opens = 0;
+      let gate: null | (() => void) = null;
+      const takeGate = (): (() => void) => {
+        const g = gate;
+        gate = null;
+        if (!g) throw new Error("gate not armed");
+        return g;
+      };
+      handle = makeHandle({
+        openChannel: async () => {
+          opens += 1;
+          // Park the loop's dial until the test releases it.
+          await new Promise<void>((resolve) => {
+            gate = resolve;
+          });
+          throw new Error("released only to fail");
+        },
+        reconnectDelaysMs: [1],
+      });
+      // Start fails immediately via the gated open (release the first one).
+      const started = handle.start();
+      await vi.waitFor(() => expect(gate).not.toBeNull());
+      takeGate()();
+      await expect(started).rejects.toThrow(/released only to fail/);
+
+      // Enter the loop by simulating a lost connection.
+      handle["onConnectionLost"]();
+      await vi.waitFor(() => expect(gate).not.toBeNull());
+      const dialsBefore = opens;
+
+      await handle.retryNow();
+      expect(opens).toBe(dialsBefore); // no competing dial
+      expect(handle.connectionState).toBe("reconnecting"); // and no false "connected"
+
+      // Unwedge the parked loop dial so the test tears down cleanly.
+      if (gate !== null) takeGate()();
+      await delay(20);
+    });
+
+    it("retryNow recovers a session from auth-required", async () => {
+      // The state the automatic backoff deliberately parks in (nobody wants
+      // an unasked-for Duo push loop) used to be terminal — any outage
+      // longer than the schedule needed an app restart. retryNow is the
+      // user-driven way back.
+      handleInvoke("tree:list", () => ["alive"]);
+      let channelBroken = false;
+      const workingOpen = async () => {
+        if (channelBroken) throw new Error("ssh: connection refused");
+        const socket = net.connect(paths.sockPath);
+        socket.on("error", () => undefined);
+        openSockets.push(socket);
+        await new Promise<void>((resolve, reject) => {
+          socket.once("connect", resolve);
+          socket.once("error", reject);
+        });
+        return { readable: socket, writable: socket, dispose: () => socket.destroy() };
+      };
+      handle = makeHandle({
+        openChannel: workingOpen,
+        reconnectDelaysMs: [10],
+      });
+      await handle.start();
+
+      // The outage outlasts the whole backoff schedule.
+      channelBroken = true;
+      dropChannel();
+      await vi.waitFor(() => {
+        expect(handle!.connectionState).toBe("auth-required");
+      });
+
+      // A failed retry stays recoverable rather than wedging...
+      await expect(handle.retryNow()).rejects.toThrow(/connection refused/);
+      expect(handle.connectionState).toBe("auth-required");
+
+      // ...and once the network is back (the user re-authenticated), the
+      // same session resumes and serves invokes again.
+      channelBroken = false;
+      await handle.retryNow();
+      expect(handle.connectionState).toBe("connected");
+      await expect(handle.invoke("tree:list")).resolves.toEqual(["alive"]);
+    });
+
     it("stops chasing a session another client took over", async () => {
       const states: string[] = [];
       handle = makeHandle({ onState: (s) => states.push(s) });

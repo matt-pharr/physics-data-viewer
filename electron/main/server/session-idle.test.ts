@@ -273,6 +273,43 @@ describe("SessionIdlePolicy", () => {
     });
   });
 
+  it("a client that visited during the autosave restarts the countdown", async () => {
+    // The autosave can take a minute. A client that attached AND detached
+    // during it restarted the grace window — shutting down anyway would
+    // discard whatever that client just did (the snapshot predates it).
+    let resolveSave: ((saved: boolean) => void) | null = null;
+    const autosave = vi.fn(
+      () => new Promise<boolean>((resolve) => {
+        resolveSave = resolve;
+      }),
+    );
+    const shutdown = vi.fn();
+    const policy = new SessionIdlePolicy({
+      hasKernel: () => true,
+      isExecuting: () => false,
+      autosave,
+      shutdown,
+      idleCapHours: 12,
+    });
+    policy.onClientsGone();
+    await vi.advanceTimersByTimeAsync(REATTACH_GRACE_MS + 12 * HOUR + 10);
+    expect(autosave).toHaveBeenCalledOnce();
+
+    // Mid-save: a client attaches, mutates things, detaches.
+    policy.onClientAttached();
+    policy.onClientsGone();
+    resolveSave!(true);
+    await vi.advanceTimersByTimeAsync(10);
+    expect(shutdown).not.toHaveBeenCalled();
+
+    // The fresh cycle runs to completion — with a fresh autosave.
+    await vi.advanceTimersByTimeAsync(REATTACH_GRACE_MS + 12 * HOUR + 10);
+    resolveSave!(true);
+    await vi.advanceTimersByTimeAsync(10);
+    expect(autosave).toHaveBeenCalledTimes(2);
+    expect(shutdown).toHaveBeenCalledOnce();
+  });
+
   it("stops scheduling once disposed", async () => {
     const { policy, shutdown } = makePolicy({ idleCapHours: 1 });
     policy.onClientsGone();

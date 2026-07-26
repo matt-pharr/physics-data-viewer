@@ -222,6 +222,16 @@ export class SessionIdlePolicy {
           this.retryAutosave();
           return;
         }
+        // The autosave can take a minute; the world may have changed under
+        // it. A client that reattached meanwhile owns the session again,
+        // work that started meanwhile must not be killed, and a client that
+        // attached AND detached during the save restarted the grace window
+        // — its countdown (grace → cap, with a fresh autosave at the end)
+        // must run, not be preempted by a shutdown whose snapshot predates
+        // whatever that client just did. All three re-arm through their own
+        // events rather than dying here.
+        if (!this.clientsGone || !this.graceDone) return;
+        if (this.opts.isExecuting() && !this.opts.capCountsExecution) return;
         this.opts.shutdown();
       })
       .catch(() => {

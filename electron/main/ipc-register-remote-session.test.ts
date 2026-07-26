@@ -36,6 +36,7 @@ vi.mock("electron", () => ({
 import { IPC } from "./ipc";
 import { removeAllIpcHandlers } from "./ipc-registry";
 import { registerRemoteIpcHandlers } from "./ipc-register-remote";
+import { RemoteServerHandle } from "./shell/remote-server";
 
 /** Invoke a registered handler the way ipcMain would. */
 async function invokeIpc(channel: string, ...args: unknown[]): Promise<unknown> {
@@ -89,13 +90,15 @@ function connectedManager(over: Partial<RemoteConnectionManager> = {}): RemoteCo
   } as unknown as RemoteConnectionManager;
 }
 
+const sendSpy = vi.fn<(channel: string, payload: unknown) => void>();
 const fakeWindow = {
   isDestroyed: () => false,
-  webContents: { send: () => undefined },
+  webContents: { send: sendSpy },
 } as unknown as Parameters<typeof registerRemoteIpcHandlers>[0]["win"];
 
 beforeEach(async () => {
   removeAllIpcHandlers();
+  sendSpy.mockClear();
   vi.spyOn(console, "error").mockImplementation(() => undefined);
   workDir = fs.mkdtempSync(path.join(os.tmpdir(), "pdv-swap-"));
   paths = resolveSessionPaths({
@@ -223,5 +226,160 @@ describe("remote:startSession", () => {
 
     const result = (await invokeIpc(IPC.remote.startSession)) as { ok: boolean };
     expect(result.ok).toBe(false);
+  });
+});
+
+describe("returning to a local session", () => {
+  /** Rebuild the shared daemon with a shutdown spy wired in. */
+  async function rebuildHostWithShutdownSpy(): Promise<ReturnType<typeof vi.fn>> {
+    const onShutdown = vi.fn();
+    await host.close();
+    host = new SessionHost({
+      paths,
+      sessionId: SESSION,
+      version: "9.9.9-test",
+      onShutdown,
+    });
+    await host.listen();
+    return onShutdown;
+  }
+
+  it("endSession swaps onto a fresh local server, then shuts the daemon down", async () => {
+    const onShutdown = await rebuildHostWithShutdownSpy();
+    const fresh = makeLocalHandle();
+    register({ createLocalServer: async () => fresh });
+    await invokeIpc(IPC.remote.startSession);
+    expect(router.kind).toBe("remote");
+
+    const result = (await invokeIpc(IPC.remote.endSession)) as { ok: boolean };
+
+    expect(result.ok).toBe(true);
+    // The window is working locally again...
+    expect(router.active).toBe(fresh);
+    // ...and the daemon was told to stop (fire-and-forget ack).
+    await vi.waitFor(() => {
+      expect(onShutdown).toHaveBeenCalledOnce();
+    });
+  });
+
+  it("declines endSession when the local server cannot start, keeping the remote session", async () => {
+    const onShutdown = await rebuildHostWithShutdownSpy();
+    register({
+      createLocalServer: async () => {
+        throw new Error("spawn failed");
+      },
+    });
+    await invokeIpc(IPC.remote.startSession);
+
+    const result = (await invokeIpc(IPC.remote.endSession)) as {
+      ok: boolean;
+      message: string;
+    };
+
+    // Better a declined action than a window with no server behind it.
+    expect(result.ok).toBe(false);
+    expect(result.message).toMatch(/Could not start a local session/);
+    expect(router.kind).toBe("remote");
+    expect(onShutdown).not.toHaveBeenCalled();
+  });
+
+  it("disconnect while remote returns to local and leaves the daemon running", async () => {
+    const onShutdown = await rebuildHostWithShutdownSpy();
+    const fresh = makeLocalHandle();
+    register({ createLocalServer: async () => fresh });
+    await invokeIpc(IPC.remote.startSession);
+
+    await invokeIpc(IPC.remote.disconnect);
+
+    // The window works locally; the session on the host was NOT ended —
+    // that is the difference between Disconnect and Shut Down.
+    expect(router.active).toBe(fresh);
+    expect(onShutdown).not.toHaveBeenCalled();
+  });
+
+  it("endSession on a local window is declined", async () => {
+    register({ createLocalServer: async () => makeLocalHandle() });
+    const result = (await invokeIpc(IPC.remote.endSession)) as {
+      ok: boolean;
+      message: string;
+    };
+    expect(result.ok).toBe(false);
+    expect(result.message).toMatch(/not running a remote session/);
+  });
+});
+
+describe("unreachable-session guards and recovery", () => {
+  /** The last sessionState payloads the renderer was sent. */
+  function sessionStatePushes(): Array<Record<string, unknown>> {
+    return sendSpy.mock.calls
+      .filter(([channel]) => channel === IPC.push.sessionState)
+      .map(([, payload]) => payload as Record<string, unknown>);
+  }
+
+  it("declines Shut Down while the session is unreachable", async () => {
+    // The shutdown invoke rides the channel; on a dead one it silently
+    // does nothing — reporting success would leave the daemon running on
+    // a login node while the user believes it ended.
+    register({ createLocalServer: async () => makeLocalHandle() });
+    await invokeIpc(IPC.remote.startSession);
+
+    // Kill the daemon under the handle and wait until the handle notices.
+    await host.close();
+    await vi.waitFor(() => {
+      const states = sessionStatePushes();
+      expect(states.at(-1)?.state).not.toBe("connected");
+    });
+
+    const result = (await invokeIpc(IPC.remote.endSession)) as {
+      ok: boolean;
+      message: string;
+    };
+    expect(result.ok).toBe(false);
+    expect(result.message).toMatch(/unreachable/);
+    expect(router.kind).toBe("remote");
+  });
+
+  it("startSession recovers with a fresh handle when the old one cannot reattach", async () => {
+    register({ createLocalServer: async () => makeLocalHandle() });
+    await invokeIpc(IPC.remote.startSession);
+
+    // A second client supersedes this one: its handle stops chasing the
+    // session and can never reattach — yet "reconnect" must still work.
+    const paths2 = paths;
+    const second = new RemoteServerHandle({
+      sessionId: SESSION,
+      openChannel: async () => {
+        const socket = net.connect(paths2.sockPath);
+        socket.on("error", () => undefined);
+        sockets.push(socket);
+        return { readable: socket, writable: socket, dispose: () => socket.destroy() };
+      },
+    });
+    await second.start();
+    await vi.waitFor(() => {
+      expect(sessionStatePushes().at(-1)?.state).toBe("disconnected");
+    });
+    await second.disconnect();
+
+    const result = (await invokeIpc(IPC.remote.startSession)) as { ok: boolean };
+    expect(result.ok).toBe(true);
+    // The window really is served again: an invoke round-trips.
+    await expect(router.invoke("nonexistent:channel")).rejects.toThrow(/No handler/);
+  });
+
+  it("a retired handle's farewell never overwrites the local session state", async () => {
+    // endSession's swap pushes {local, connected}; the retired handle's own
+    // disconnect used to fire a {remote, disconnected} push AFTER it,
+    // leaving the renderer showing a lost remote session while the window
+    // ran locally.
+    register({ createLocalServer: async () => makeLocalHandle() });
+    await invokeIpc(IPC.remote.startSession);
+    const result = (await invokeIpc(IPC.remote.endSession)) as { ok: boolean };
+    expect(result.ok).toBe(true);
+
+    // Give any late callbacks time to land, then check the LAST word.
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const states = sessionStatePushes();
+    expect(states.at(-1)).toMatchObject({ kind: "local", state: "connected" });
   });
 });

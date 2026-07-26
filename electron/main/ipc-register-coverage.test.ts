@@ -121,6 +121,7 @@ import { registerConfigIpcHandlers } from "./ipc-register-config";
 import { registerConfigBridge } from "./shell/config-bridge";
 import { LocalConfigStore } from "./shell/local-config-store";
 import type { ServerHandle } from "./shell/server-supervisor";
+import { registerFileBrowseIpcHandlers } from "./ipc-register-file-browse";
 import { registerGuiFilesIpcHandlers } from "./ipc-register-gui-files";
 import { registerModuleWindowIpcHandlers } from "./ipc-register-module-windows";
 import { registerGuiEditorIpcHandlers } from "./ipc-register-gui-editor";
@@ -302,6 +303,7 @@ function setupAll(): void {
     } as unknown as RemoteConnectionManager,
   });
   registerGuiFilesIpcHandlers({ commRouter: commRouter.router });
+  registerFileBrowseIpcHandlers();
   registerModuleWindowIpcHandlers({
     moduleWindowManager: createModuleWindowManagerMock(),
     mainWindow: win.win,

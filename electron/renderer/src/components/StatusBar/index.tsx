@@ -230,7 +230,16 @@ export const StatusBar: React.FC<StatusBarProps> = ({
           data-testid="kernel-status"
           data-status={kernelStatus}
         >
-          ● {kernelStatus === 'ready' ? 'Connected' : kernelStatus === 'starting' ? 'Starting...' : 'Disconnected'}
+          {/* "Disconnected" is reserved for a kernel that DIED — with no
+              kernel at all it sat beside "SSH: <host>" and read as the ssh
+              link being down. */}
+          ● {kernelStatus === 'ready'
+            ? 'Connected'
+            : kernelStatus === 'starting'
+              ? 'Starting...'
+              : kernelStatus === 'error'
+                ? 'Disconnected'
+                : 'No kernel'}
         </span>
       </div>
     </footer>

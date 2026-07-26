@@ -50,21 +50,52 @@ export const RemoteConnect: React.FC<RemoteConnectProps> = ({ onClose }) => {
   const connected = phase === 'connected';
   const [starting, setStarting] = useState(false);
   const [sessionError, setSessionError] = useState<string | null>(null);
+  // Failures raised by flows OUTSIDE this dialog (an open-recent whose
+  // startSession failed) land in the store; render them in the same slot.
+  const storeSessionError = useStore((s) => s.remoteSessionError);
+  // Two-step shutdown: the button ends a session (and any unsaved work on
+  // the host) in one action, so the first click only arms the second.
+  const [confirmingShutdown, setConfirmingShutdown] = useState(false);
   // Only a *healthy* remote session counts as running. Treating
   // 'remote-reconnecting' or 'remote-lost' as running told the user their
   // session was on the host while the channel was dead underneath it, and
   // hid the button that would let them try again.
   const sessionRunning = useStore((s) => s.connectionState === 'remote-connected');
+  // A session exists on the host but this window cannot reach it — the
+  // state the reconnect action exists for.
+  const sessionLost = useStore(
+    (s) => s.connectionState === 'remote-lost' || s.connectionState === 'remote-reconnecting',
+  );
+  // The shell's automatic backoff is still running; a manual attempt now
+  // would race it.
+  const reconnecting = useStore((s) => s.connectionState === 'remote-reconnecting');
 
   /** Move the session onto the connected host. */
   const startSession = async (): Promise<void> => {
     setStarting(true);
     setSessionError(null);
+    useStore.getState().setRemoteSessionError(null);
     try {
       const result = await window.pdv.remote.startSession();
       // A failure here leaves the local session working and the connection
       // open, so the dialog stays put and says why rather than closing.
       if (!result.ok) setSessionError(result.message ?? 'Could not start the session.');
+    } catch (err) {
+      setSessionError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setStarting(false);
+    }
+  };
+
+  /** End the session on the host and return this window to a local one. */
+  const endSession = async (): Promise<void> => {
+    setStarting(true);
+    setSessionError(null);
+    useStore.getState().setRemoteSessionError(null);
+    setConfirmingShutdown(false);
+    try {
+      const result = await window.pdv.remote.endSession();
+      if (!result.ok) setSessionError(result.message ?? 'Could not end the session.');
     } catch (err) {
       setSessionError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -110,7 +141,11 @@ export const RemoteConnect: React.FC<RemoteConnectProps> = ({ onClose }) => {
   return (
     <div className="remote-overlay">
       <div className="remote-panel">
-        <div className="remote-title">Connect to Remote Host</div>
+        <div className="remote-title">
+          {connected || sessionRunning || sessionLost
+            ? `Remote Host: ${host ?? ''}`
+            : 'Connect to Remote Host'}
+        </div>
 
         {!busy && !connected && (
           <>
@@ -156,11 +191,17 @@ export const RemoteConnect: React.FC<RemoteConnectProps> = ({ onClose }) => {
             </div>
             <div className="remote-subtitle">
               {sessionRunning
-                ? `Your session is running on ${host ?? 'this host'}.`
-                : 'This session still runs on your computer. Run it on ' +
-                  `${host ?? 'this host'} to use its data and compute.`}
+                ? `Your session is running on ${host ?? 'this host'}. ` +
+                  'Disconnect keeps it running there for later; Shut Down ends it.'
+                : sessionLost
+                  ? `Your session on ${host ?? 'this host'} is unreachable right now. ` +
+                    'Reconnect to resume it — the kernel and your work are still there.'
+                  : 'This session still runs on your computer. Run it on ' +
+                    `${host ?? 'this host'} to use its data and compute.`}
             </div>
-            {sessionError && <div className="remote-error">{sessionError}</div>}
+            {(sessionError ?? storeSessionError) && (
+              <div className="remote-error">{sessionError ?? storeSessionError}</div>
+            )}
           </div>
         )}
 
@@ -210,25 +251,44 @@ export const RemoteConnect: React.FC<RemoteConnectProps> = ({ onClose }) => {
           </form>
         )}
 
+        {confirmingShutdown && connected && sessionRunning && (
+          <div className="remote-error">
+            This ends the session on {host ?? 'the host'} — its kernel stops and
+            anything unsaved there is lost. Shut it down?
+          </div>
+        )}
+
+        {/* Primary action rightmost, matching the app's other dialogs. */}
         <div className="remote-actions">
           {busy && (
             <button className="btn btn-secondary" onClick={() => void window.pdv.remote.cancel()}>
               Cancel
             </button>
           )}
-          {connected && !sessionRunning && (
+          {connected && sessionRunning && (
             <button
-              className="btn btn-primary"
+              className={confirmingShutdown ? 'btn btn-danger' : 'btn btn-secondary'}
               disabled={starting}
-              onClick={() => void startSession()}
+              onClick={() => {
+                if (confirmingShutdown) void endSession();
+                else setConfirmingShutdown(true);
+              }}
             >
-              {starting ? 'Starting…' : 'Run session here'}
+              {confirmingShutdown ? 'Yes, Shut It Down' : 'Shut Down Remote Session'}
             </button>
           )}
           {connected && (
             <button
               className="btn btn-secondary"
-              onClick={() => void window.pdv.remote.disconnect()}
+              onClick={() => {
+                setConfirmingShutdown(false);
+                window.pdv.remote.disconnect().catch((err: unknown) => {
+                  // Reachable failure: the fresh local server to return to
+                  // would not start, so the window stays on the remote
+                  // session — the user must know why nothing happened.
+                  setSessionError(err instanceof Error ? err.message : String(err));
+                });
+              }}
             >
               Disconnect
             </button>
@@ -236,6 +296,21 @@ export const RemoteConnect: React.FC<RemoteConnectProps> = ({ onClose }) => {
           <button className="btn btn-secondary" onClick={onClose}>
             Close
           </button>
+          {connected && !sessionRunning && (
+            <button
+              className="btn btn-primary"
+              // While the shell is already auto-reconnecting, a manual
+              // attempt would race it — the button waits its turn.
+              disabled={starting || reconnecting}
+              onClick={() => void startSession()}
+            >
+              {starting
+                ? 'Starting…'
+                : sessionLost
+                  ? `Reconnect to ${host ?? 'host'}`
+                  : `Run session on ${host ?? 'this host'}`}
+            </button>
+          )}
         </div>
       </div>
     </div>

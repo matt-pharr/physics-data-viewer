@@ -635,6 +635,42 @@ export function registerKernelIpcHandlers(
     // dir, health warnings) so they don't carry over.
     resetProjectState();
 
+    // A session hosts one kernel, and this handler is the authority on that.
+    // The renderer stops its own kernel before starting a new one, but a
+    // fresh client attaching to a long-lived session daemon has no idea what
+    // a previous client left running — without this sweep every reconnect
+    // that starts fresh stacks another ipykernel on the host (three were
+    // found accumulated on a real cluster's login node). Working dirs are
+    // preserved: they hold `.autosave` snapshots the welcome screen can
+    // still recover.
+    const survivors = kernelManager.list();
+    for (const survivor of survivors) {
+      console.warn(
+        `[kernels:start] stopping leftover kernel ${survivor.id} from a previous client`
+      );
+      kernelEnvMeta.delete(survivor.id);
+      await cleanupKernelWorkingDir(
+        projectManager,
+        kernelManager,
+        survivor.id,
+        kernelWorkingDirs,
+        crashHandlers,
+        /* preserveDir */ true
+      );
+      await kernelManager.stop(survivor.id).catch(() => undefined);
+    }
+    if (survivors.length > 0) {
+      // Same hygiene as kernels.stop: the routers must not stay attached to
+      // a stopped kernel (straggling traffic burns full timeouts against a
+      // dead socket), and a cached save_completed entry from the OLD kernel
+      // would let the new session's first save skip serialization and
+      // silently commit the old kernel's tree.
+      commRouter.detach();
+      queryRouter.detach();
+      projectManager.clearCachedKernelResults();
+    }
+    if (getActiveKernelId() !== null) setActiveKernelId(null);
+
     // uv-mode boot: the project venv lives inside the kernel working
     // directory, so it must be created and materialized BEFORE the kernel
     // process spawns against the venv interpreter (ARCHITECTURE.md §10.5.9).
@@ -777,12 +813,16 @@ export function registerKernelIpcHandlers(
     }
 
     let kernel: KernelInfo;
+    // The spawned kernel's id, known to the catch below even when the
+    // handshake after the spawn is what failed.
+    let spawnedKernelId: string | null = null;
     try {
       // Julia boots stream their process output (Pkg precompile progress) to
       // the EnvSyncModal while the kernel id is still unknown (§10.8).
       forwardJuliaBootOutput = requestedLanguage === "julia";
       try {
         kernel = await kernelManager.start(requestedSpec);
+        spawnedKernelId = kernel.id;
       } finally {
         forwardJuliaBootOutput = false;
       }
@@ -808,6 +848,24 @@ export function registerKernelIpcHandlers(
       // Don't leave a concurrent Pkg.instantiate running against a session
       // that will never exist.
       pkgAbortInstantiate?.();
+      // Nor the kernel process itself: a spawn whose handshake failed never
+      // became a session, and nothing tracks it afterwards — under a
+      // long-lived daemon it would survive as an orphan holding memory on
+      // the host. The working dir is preserved for autosave recovery.
+      if (spawnedKernelId !== null) {
+        kernelEnvMeta.delete(spawnedKernelId);
+        await cleanupKernelWorkingDir(
+          projectManager,
+          kernelManager,
+          spawnedKernelId,
+          kernelWorkingDirs,
+          crashHandlers,
+          /* preserveDir */ true
+        );
+        await kernelManager.stop(spawnedKernelId).catch(() => undefined);
+        commRouter.detach();
+        queryRouter.detach();
+      }
       throw err;
     }
 

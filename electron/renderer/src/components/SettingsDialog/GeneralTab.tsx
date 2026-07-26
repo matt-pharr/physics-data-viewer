@@ -9,6 +9,7 @@
  */
 
 import React, { useState } from 'react';
+import { pickServerPath } from '../../services/pick-path';
 import type { TerminalPreset } from '../../types';
 import {
   CUSTOM_PRESET_ID,
@@ -186,7 +187,7 @@ export const GeneralTab: React.FC<GeneralTabProps> = ({
             className="btn btn-secondary btn-sm"
             type="button"
             onClick={async () => {
-              const picked = await window.pdv.files.pickDirectory(defaultSaveLocation || undefined);
+              const picked = await pickServerPath({ mode: 'directory', title: 'Choose the default save location', defaultPath: defaultSaveLocation || undefined });
               if (picked) onDefaultSaveLocationChange(picked);
             }}
           >
@@ -215,7 +216,7 @@ export const GeneralTab: React.FC<GeneralTabProps> = ({
             className="btn btn-secondary btn-sm"
             type="button"
             onClick={async () => {
-              const picked = await window.pdv.files.pickDirectory(workingDirBase || undefined);
+              const picked = await pickServerPath({ mode: 'directory', title: 'Choose the working directory base', defaultPath: workingDirBase || undefined });
               if (picked) onWorkingDirBaseChange(picked);
             }}
           >

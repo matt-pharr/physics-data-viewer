@@ -304,6 +304,7 @@ const api: PDVApi = {
     pickExecutable: () => invoke(IPC.files.pickExecutable),
     pickFile: () => invoke(IPC.files.pickFile),
     pickDirectory: (defaultPath) => invoke(IPC.files.pickDirectory, defaultPath),
+    listDir: (dirPath) => invoke(IPC.files.listDir, dirPath),
   },
   menu: {
     updateRecentProjects: (paths) =>

@@ -43,6 +43,7 @@ import {
 import { registerAutosaveIpcHandlers } from "../ipc-register-autosave";
 import { readConfig, registerConfigIpcHandlers } from "../ipc-register-config";
 import { registerEnvironmentIpcHandlers } from "../ipc-register-environment";
+import { registerFileBrowseIpcHandlers } from "../ipc-register-file-browse";
 import { registerGuiFilesIpcHandlers } from "../ipc-register-gui-files";
 import {
   registerKernelIpcHandlers,
@@ -832,6 +833,7 @@ export function wireServer(ctx: ServerContext): WireHandle {
   });
 
   registerGuiFilesIpcHandlers({ commRouter });
+  registerFileBrowseIpcHandlers();
 
   // When kernel goes idle and an autosave was deferred, trigger it now.
   // Tracked in `trackedExecutionStateListener` so unwireServer can detach

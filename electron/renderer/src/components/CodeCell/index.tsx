@@ -28,6 +28,8 @@ interface CodeCellProps {
   activeTabId: number;
   kernelId?: string | null;
   disabled?: boolean;
+  /** True while a kernel start is in flight (drives the placeholder text). */
+  startingKernel?: boolean;
   onTabChange: (id: number) => void;
   onAddTab: () => void;
   onRemoveTab?: (id: number) => void;
@@ -58,6 +60,7 @@ export const CodeCell: React.FC<CodeCellProps> = ({
   activeTabId,
   kernelId = null,
   disabled = false,
+  startingKernel = false,
   onTabChange,
   onAddTab,
   onRemoveTab,
@@ -507,7 +510,9 @@ export const CodeCell: React.FC<CodeCellProps> = ({
       )}
       {disabled && (
         <div className="code-cell-status-bar">
-          <span>Starting kernel...</span>
+          {/* Same honesty rule as the Tree placeholder: "Starting…" only
+              while a start is actually in flight. */}
+          <span>{startingKernel ? 'Starting kernel...' : 'No active session'}</span>
         </div>
       )}
     </section>

@@ -465,6 +465,13 @@ export const IPC = {
     pickExecutable: "files:pickExecutable",
     pickFile: "files:pickFile",
     pickDirectory: "files:pickDirectory",
+    /**
+     * List a directory on the machine the session runs on — the remote
+     * path picker's one data source. Server-side (unlike its native-dialog
+     * siblings above), because the filesystem being browsed is the
+     * session's, not the window's.
+     */
+    listDir: "files:listDir",
   },
 } as const;
 
@@ -488,7 +495,13 @@ export const SHELL_CHANNELS: readonly string[] = [
   ...Object.values(IPC.about),
   ...Object.values(IPC.updater),
   ...Object.values(IPC.themes),
-  ...Object.values(IPC.files),
+  // Explicit, not `...Object.values(IPC.files)`: that spread silently
+  // auto-assigned any new `IPC.files.*` entry to the shell while the
+  // partition test kept passing — exactly how `files.listDir` (a session
+  // concern) would have landed on the wrong process.
+  IPC.files.pickExecutable,
+  IPC.files.pickFile,
+  IPC.files.pickDirectory,
   // The ssh client lives in the shell. These set up the connection a remote
   // session is reached through, so they can never be served by that session.
   ...Object.values(IPC.remote),
@@ -530,6 +543,8 @@ export const SERVER_CHANNELS: readonly string[] = [
   ...Object.values(IPC.environment),
   IPC.guiEditor.read,
   IPC.guiEditor.save,
+  // The remote path picker browses the session's filesystem.
+  IPC.files.listDir,
 ];
 
 /**
@@ -745,6 +760,13 @@ export interface SessionStatePayload {
    * running forever on an execution that finished while the client was away.
    */
   resync?: boolean;
+  /**
+   * Why the resync happened: `moved` is a deliberate session swap the user
+   * asked for; `recovered` is a reattach whose view could not be resumed.
+   * The console marker wording depends on it — "output may be missing"
+   * after an intentional move read as data loss.
+   */
+  cause?: "moved" | "recovered";
 }
 
 /** Result of {@link PDVApi.remote.startSession} / `endSession`. */
@@ -763,6 +785,27 @@ export interface RemoteConnectResult {
   /** Set when `ok` is false; one of the failure kinds from the ssh layer. */
   failure: string | null;
   message: string;
+}
+
+/** One entry in a {@link ListDirResult}. */
+export interface ListDirEntry {
+  /** Base name within the listed directory. */
+  name: string;
+  /** Directory or file; a symlink reports its target's kind. */
+  kind: "dir" | "file";
+}
+
+/**
+ * Result of `files.listDir` — the remote path picker's one data source.
+ * Listed on the machine the session runs on, which is the whole point.
+ */
+export interface ListDirResult {
+  /** The absolute directory that was listed (the input path, resolved). */
+  path: string;
+  /** Entries, directories first, each group sorted by name. */
+  entries: ListDirEntry[];
+  /** The session user's home directory (the picker's default seed). */
+  home: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -3293,6 +3336,15 @@ export interface PDVApi {
      * @returns Selected directory path, or null if cancelled.
      */
     pickDirectory(defaultPath?: string): Promise<string | null>;
+    /**
+     * List a directory on the machine the session runs on (the remote
+     * path picker's data source; server-side, unlike the native pickers).
+     *
+     * @param dirPath - Absolute directory to list, or omitted for the
+     *   session user's home directory.
+     * @returns The resolved directory and its entries.
+     */
+    listDir(dirPath?: string): Promise<ListDirResult>;
   };
 
   /** App menu integration. */

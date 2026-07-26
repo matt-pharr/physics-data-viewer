@@ -60,6 +60,9 @@ import type { ServerHandle } from "./shell/server-supervisor";
  * @param userDataDir - Electron `userData` root, for shell-owned runtime
  *   artifacts that must not live in the server-owned `~/.PDV`.
  * @param setAllowClose - Flips the close-guard flag in `app.ts`.
+ * @param createLocalServer - Starts a fresh local pdv-server, used when a
+ *   remote session ends or disconnects and the window returns to local mode.
+ *   Omitted in builds/tests without session swapping.
  * @returns The light session-reset callback, called on renderer reloads.
  * @throws {Error} When the server is not running (session reset fails).
  */
@@ -69,7 +72,8 @@ export async function registerIpcHandlers(
   localConfig: LocalConfigStore,
   pdvDir: string,
   userDataDir: string,
-  setAllowClose: (allow: boolean) => void
+  setAllowClose: (allow: boolean) => void,
+  createLocalServer?: () => Promise<ServerHandle>
 ): Promise<() => void> {
   unregisterIpcHandlers();
 
@@ -132,6 +136,7 @@ export async function registerIpcHandlers(
     // test) gets connection control without session swapping rather than a
     // menu item that fails when used.
     router: server instanceof SessionRouter ? server : undefined,
+    createLocalServer,
   });
 
   registerModuleWindowIpcHandlers({

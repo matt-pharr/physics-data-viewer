@@ -29,6 +29,7 @@ interface SessionStatePush {
   host: string | null;
   state: 'connected' | 'reconnecting' | 'auth-required' | 'disconnected';
   resync?: boolean;
+  cause?: 'moved' | 'recovered';
 }
 
 /** Map a pushed session state onto the store's connection state. */
@@ -83,14 +84,21 @@ export function useSessionState(
         invalidateAllKernelState(currentKernelId, 'reconnect');
       }
       onResync?.();
+      // A deliberate move is not an outage — "output may be missing" after
+      // clicking "Run session on <host>" read as data loss to a real user.
+      const marker =
+        state.cause === 'moved'
+          ? state.kind === 'remote'
+            ? `── session moved to ${state.host ?? 'the remote host'} ──`
+            : '── session moved back to this computer ──'
+          : '── reconnected; output produced while disconnected may be missing ──';
       useStore.getState().setLogs((prev) => [
         ...prev,
         {
           id: `reconnect-${String(Date.now())}`,
           timestamp: Date.now(),
           code: '',
-          stdout:
-            '── reconnected; output produced while disconnected may be missing ──',
+          stdout: marker,
         },
       ]);
     });
