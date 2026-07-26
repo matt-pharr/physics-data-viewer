@@ -20,10 +20,13 @@
  *    and an NTP correction both move wall clock discontinuously, and either
  *    could expire a parked response early — precisely during the disconnect
  *    the store exists to survive.
- *  - **Every entry records the journal seq it settled at.** Replaying parked
- *    responses after a reconnect in settle order would put them all at the
- *    end; the stamp lets the pump interleave them back into the push stream
- *    where they actually happened, so the client sees the original timeline.
+ *  - **Every entry records the journal seq it settled at** — currently a
+ *    diagnostic only. On reattach, retained settlements are delivered
+ *    BEFORE the push replay (so a result can precede the output that led
+ *    to it); that is harmless because settlements are id-correlated, not
+ *    order-correlated. The stamp is what a future pump would need to
+ *    interleave them back into the original timeline, but no consumer
+ *    does that today — do not assume ordering it does not provide.
  *
  * This module does NOT decide what to do with a missing entry (that is the
  * attach handshake's three-state reconciliation) or perform I/O — it is a
@@ -62,8 +65,8 @@ export interface RetainedResponse {
   /** The complete newline-terminated response frame. */
   frame: Buffer;
   /**
-   * The session's `lastSeq` at the moment this settled, so a replay can
-   * interleave it back into the push stream at the right point.
+   * The session's `lastSeq` at the moment this settled. Diagnostic today;
+   * no replay consumer interleaves on it (see the file header).
    */
   settledAtSeq: number;
   /** Monotonic timestamp (ns) used for the TTL. */

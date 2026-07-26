@@ -129,7 +129,7 @@ function serializeError(err: unknown): RpcError {
  *
  * Lifecycle: construct over the connection's streams, then call
  * {@link RpcServer.start} to begin serving (its first act is the hello
- * push, seq 0). {@link RpcServer.close} detaches from the streams.
+ * push, unsequenced). {@link RpcServer.close} detaches from the streams.
  */
 export class RpcServer {
   private readonly writer: LineWriter;
@@ -252,7 +252,7 @@ export class RpcServer {
   }
 
   /**
-   * Begin serving: send the hello push (seq 0) and start decoding
+   * Begin serving: send the hello push (unsequenced, seq -1) and start decoding
    * requests from the readable stream.
    *
    * @returns Nothing.

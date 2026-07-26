@@ -639,7 +639,14 @@ export const IDEMPOTENT_CHANNELS: readonly string[] = [
   IPC.tree.list,
   IPC.tree.get,
   IPC.namespace.query,
+  IPC.namespace.inspect,
   IPC.kernels.list,
+  // The path picker's only call. Without it, a listing in flight at a
+  // connection drop rejected with "check the Tree before retrying" —
+  // mutation language for a directory read.
+  IPC.files.listDir,
+  IPC.autosave.check,
+  IPC.environment.check,
 ];
 
 /**

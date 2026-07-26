@@ -91,7 +91,7 @@ export interface RpcPush {
   event: string;
   /** Push payload exactly as handed to the server's `PushSender`. */
   payload: unknown;
-  /** Per-connection monotonic sequence number, stamped on every push. */
+  /** Session-owned monotonic sequence number (survives reconnects), stamped on every sequenced push; -1 for the unsequenced control channels. */
   seq: number;
 }
 
@@ -103,7 +103,7 @@ export const RPC_CHANNEL_PREFIX = "pdv.rpc.";
  * shell bridge consumes them.
  */
 export const RPC_CHANNELS = {
-  /** First push on every connection (seq 0): an {@link RpcHello} payload. */
+  /** First push on every connection (unsequenced, seq -1): an {@link RpcHello} payload. */
   hello: "pdv.rpc.hello",
   /** Liveness invoke; result is an {@link RpcPingResult}. */
   ping: "pdv.rpc.ping",

@@ -188,14 +188,30 @@ export class RemoteConnectionManager {
     const version = this.options.appVersion;
     if (!this.options.bundleDir || !version) return null;
 
+    // Upload byte-counts arrive once per 64 KB stream chunk — thousands per
+    // second over a fast link, each one an IPC message and a renderer
+    // render. Throttle mid-upload updates to ~10 Hz; stage changes and the
+    // final 100% update always pass.
+    let lastProgressAt = 0;
     const onProgress = (progress: BootstrapProgress): void => {
+      const hasBytes =
+        progress.total !== undefined && progress.transferred !== undefined;
+      const midUpload =
+        hasBytes &&
+        progress.stage === "uploading" &&
+        progress.transferred! < progress.total!;
+      if (midUpload) {
+        const now = Date.now();
+        if (now - lastProgressAt < 100) return;
+        lastProgressAt = now;
+      }
       this.emit({
         phase: "preparing",
         host,
         attemptId,
         message: progress.message,
-        ...(progress.total !== undefined && progress.transferred !== undefined
-          ? { progress: { transferred: progress.transferred, total: progress.total } }
+        ...(hasBytes
+          ? { progress: { transferred: progress.transferred!, total: progress.total! } }
           : {}),
       });
     };

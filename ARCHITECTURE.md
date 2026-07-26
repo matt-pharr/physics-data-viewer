@@ -2054,204 +2054,6 @@ light renderer-reload reset) and is never exposed to the preload.
 Ordering between shell-originated and server-originated pushes is not
 guaranteed (it never was between independent emitters).
 
-**Push seq and retained settlements belong to the session, not the
-connection** (`transport/push-journal.ts`, `transport/response-store.ts`).
-A remote session outlives the channel carrying it, so a client that drops
-and reattaches must be able to say "I last saw seq N" and receive exactly
-what it missed — which only means anything if the numbering survives the
-connection. `PushJournal` assigns every seq and retains the encoded frames
-in one bounded ring per session (5000 messages / 32 MB) with a cursor per
-client, so replay is a byte copy rather than a per-client buffer. A cursor
-that has fallen off the back of the ring is told so explicitly; it is never
-advanced silently, which would leave a client believing it had seen pushes
-that were dropped.
-
-Consequently `hello` is **unsequenced** (seq −1): it describes the
-connection, and consuming a seq would renumber the session's stream on
-every reconnect. Exactly three channels bypass the journal — `hello`,
-`attachError`, `superseded` — a closed allowlist enforced by type and at
-runtime. `confirmRequest` is deliberately not among them: a parked native
-confirm is session state and must survive a reconnect. `RPC_PROTOCOL_VERSION`
-is therefore 2, and the hello advertises `protocolMin` so peers see a
-*range*; a range cannot be retrofitted once long-lived daemons exist, and a
-client that learns only an exact version must refuse an older-but-compatible
-server, stranding a live kernel on every app upgrade.
-
-`ResponseStore` retains recent invoke settlements (200 entries / 10 minutes,
-on a monotonic clock so a lid-close or NTP step cannot expire one early) and
-the server **records a settlement before writing it**. A `script.run` that
-finishes while the connection is down has still really run, so its result
-must exist somewhere findable before it goes to a writer that may be gone.
-Reconciliation is three-state — in-flight, completed, unknown — because two
-states are silently wrong: "not running, therefore failed" rejects work that
-in fact completed.
-
-In local mode all of this is inert by construction: one connection for the
-process lifetime means the session and the connection are the same thing.
-
-**Session daemon.** On a remote host the server runs as a detached daemon
-(`server/session-host.ts`) serving one session over a Unix socket, and
-`pdv-server attach --session <id> --stdio` is what the SSH channel runs — a
-*proxy*, not a server. The channel may die at any moment; all that dies with
-it is the proxy, while the daemon holding the kernel, the journal and the
-settlements carries on. The next channel attaches and is replayed what it
-missed.
-
-Every fresh connection is **gated until it attaches**: between accept and
-attach the client has not said where its cursor is, so a kernel streaming
-output in that window would hand it an unpredictable seq — a gap on the
-first frame of a reconnect. Gated pushes are journalled but withheld, and
-arrive through the replay instead. A new attach **supersedes** the previous
-connection (the reverse-RPC confirm would otherwise pop two native dialogs
-for one question); the notice carries `bySameClientId`, without which a
-displaced shell that auto-reconnects would ping-pong a session between two
-laptops.
-
-**Daemon creation is gated by an `O_EXCL` lock, never by the socket**
-(`server/session-lock.ts`). Two channels arriving together both find a stale
-socket and both get `ECONNREFUSED`; without the lock both would spawn a
-daemon, and one would end up serving a kernel and a Tree nobody ever
-connects to. `bootId` closes the pid-reuse hole — after a reboot,
-`kill(pid, 0)` on a recycled pid would report a stranger as the daemon.
-
-**Metadata lives under `~/.pdv-server/`; the socket does not**
-(`server/session-paths.ts`). That root is a shared NFS home on the target
-clusters and AF_UNIX there is unreliable, so the socket resolves node-local
-(`$PDV_SERVER_RUNTIME_DIR` → `$XDG_RUNTIME_DIR` → `/tmp/pdv-server-<uid>` →
-root), rejecting any candidate that would blow the ~104-byte `sun_path`
-budget. `session.json` records the **concrete hostname**: `flux.pppl.gov`
-round-robins and the socket is node-local, so a reattach that follows the
-alias lands on the wrong node and reports a session that is alive elsewhere
-as vanished.
-
-**Detachment** (`server/daemonize.ts`) is `detached: true` (setsid),
-`unref()` plus the launcher exiting (orphaning), and
-`stdio: ["ignore", logFd, logFd]` — the last is mandatory, because a daemon
-inheriting the SSH channel's stdout keeps its write end open, so sshd never
-sees EOF and the launching command hangs forever. Measured on a PPPL login
-node: a detached daemon survived a full logout and the site's 45-minute idle
-timeout with an unbroken heartbeat. Log rotation is copytruncate, since
-renaming a file the daemon holds an `O_APPEND` fd on leaves it writing to
-the rotated inode.
-
-**Idle policy** (`server/session-idle.ts`): no clients and no kernel exits
-after 30 minutes; an idle kernel survives up to `idleCapHours` (default 12,
-0 = forever). A reattach within a 90-second grace window is not a detach at
-all. The cap measures *idle* time, not elapsed time — a literal reading
-would SIGKILL a 20-hour simulation with the laptop shut, the exact loss this
-feature exists to prevent (`idleCapCountsExecution` restores it). The policy
-is only as good as what drives it, so `wireSessionIdle` (`server-main.ts`)
-owns the coupling: the kernel manager's `kernel:executionState` events
-suspend the cap on busy and re-arm it — full length — on idle, and a final
-`isExecuting` check before the shutdown catches a timer that fired in the
-race window. Before stopping, the daemon takes a real snapshot through the
-same `performAutosave` core the timer and pre-restart paths use
-(`autosaveForShutdown` in `ipc-register-autosave.ts`), with code cells from
-the working dir's `code-cells.json` mirror since no client is attached to
-supply live ones. A failed snapshot blocks the shutdown and retries,
-because exiting then destroys the work the autosave protects; a session
-with no kernel, or a dead one, has nothing preservable left and shuts down
-without blocking — a dead kernel must not pin a login node forever.
-
-**Moving a session onto a host.** Connecting and *running the session there*
-are separate steps (`IPC.remote.connect` then `IPC.remote.startSession`) with
-different failure modes: a failed attach leaves the user with a working local
-session and a live connection rather than neither. `startSession` attaches to
-(or creates) a daemon on the host and calls `SessionRouter.swap()`, after
-which every existing invoke and push travels to the cluster with no caller
-changes — the payoff for the seam work in §11.4's router. The outgoing local
-server is shut down rather than abandoned, since it holds a kernel and a
-working directory on this machine. The session id is stable per user, so
-reconnecting after a crash or an app restart finds the same session, kernel
-and Tree instead of stranding the previous daemon.
-
-`shell/remote-server.ts` is the remote `ServerHandle`. The transport is
-unchanged — an ssh channel is a stream pair and `RpcClient` already takes one
-— but the *lifetime* differs, which is why it is a separate implementation:
-`RpcClient` is disposable here and the pending map lives one level above it,
-so invokes survive the connection that carried them. Unknown outcomes are
-classified by channel (`IDEMPOTENT_CHANNELS`): reads may be re-issued,
-mutations may not, because running the same script twice against one kernel
-writes to the Tree twice. An unaccountable mutation rejects with
-`RpcRequestLostError` so the renderer can say "check the Tree" rather than
-report a plain failure for something that may have succeeded.
-
-Reconnects use `BatchMode=yes` — a retry must succeed from the existing
-master or fail at once, never silently trigger a Duo push — and a `superseded`
-notice from a *different* client stops the reconnect loop dead, since two
-laptops chasing one session would ping-pong it forever.
-
-**When the backoff gives up** the handle parks in `auth-required` and settles
-every owed promise loudly; nothing automatic runs after that, because the
-missing ingredient is interactive re-authentication. Recovery is
-`RemoteServerHandle.retryNow()`: the connect dialog's "Reconnect to *host*"
-(which is `IPC.remote.startSession` — on a window already fronting a remote
-session that call *means* reattach) after the user re-authenticates, and a
-`powerMonitor` resume kick in batch mode (succeed silently off a live master
-or fail fast — a wake must never fire an auth prompt; locally the resume
-still forwards `systemResumed` to the server instead, since a remote server
-never slept). A handle that can never reattach — superseded, or closed —
-makes `startSession` fall through to a *fresh* handle against the same
-stable session id, so "reconnect" works even after another client visited.
-
-**Three ways out of a remote session, deliberately distinct.**
-*Disconnect* closes the channel and returns the window to a freshly started
-local server; the daemon and its kernel keep running for a later reconnect.
-*Shut Down Remote Session* (`IPC.remote.endSession`) starts the local server
-FIRST — a failure leaves the remote session untouched rather than the window
-with neither — then swaps and tells the daemon to stop (the `SessionHost`
-honors the shutdown invoke: graceful kernel shutdown, socket unlinked). It
-declines while the session is unreachable, because a shutdown invoke on a
-dead channel silently does nothing and "success" would leave the daemon
-running on a login node. *Quitting the app* is disconnect-only for remote
-sessions (`closingForQuit`, `app.ts`): the daemon outliving the client is
-the feature, and Cmd+Q must never end a 20-hour run on the cluster. In all
-three cases the retired handle's state callbacks are gated on it still being
-`SessionRouter.active`, so a farewell "disconnected" push can never
-overwrite the renderer's freshly-landed local state.
-
-**One kernel per session, enforced at the authority.** A fresh client
-attaching to a long-lived daemon has no idea what a previous client left
-running, so `kernels:start` first retires any surviving kernels (their
-working directories are preserved — they hold `.autosave` snapshots the
-welcome screen can recover — and the kernel-results cache is purged so the
-new session's first save cannot silently commit the old kernel's tree). A
-spawn whose handshake fails is likewise stopped rather than leaked.
-
-**Host-qualified recents reconnect.** A recent project carries the host it
-lives on; opening one that lives elsewhere moves the session first (connect
-— with any auth riding the dialog — then `startSession`, then the open
-completes when the connection state says the session arrived). A pending
-open is a click, not a standing order: it expires after two minutes, dies
-with the dialog if the user closes it mid-flow, and is identity-tracked so
-a second click cannot be killed by the first flow's failure.
-
-**The remote path picker.** Every path PDV asks the user for is interpreted
-by the *server*, so in a remote session a native dialog would browse the
-wrong machine. `renderer/src/services/pick-path.ts` routes: local sessions
-keep the native dialogs byte-for-byte; remote sessions (including
-unreachable ones — the session's filesystem is still the remote one) get a
-minimal in-app picker fed by `files:listDir`, the one new server channel
-(`ipc-register-file-browse.ts`: read-only, `~` expansion, dirs-first,
-symlinks reported as their target's kind). The picker is deliberately bare
-— a typed-path field doubling as navigation, an entry list, Home — because
-it is a placeholder for the planned command-palette UI, not a foundation.
-The `SHELL_CHANNELS` partition now enumerates the native `files.*` pickers
-explicitly rather than spreading the namespace, precisely so a new
-`files.*` channel can never again be silently auto-assigned to the shell.
-
-The renderer learns where its session lives from the `sessionState` push,
-distinct from `remoteStatus` (which describes a connection *attempt*). On a
-resync it rebuilds query-backed state, reloads App-held config (component
-state that a query-cache reset cannot reach — without it a kernel start
-after a swap used the previous machine's interpreter path), lands on the
-welcome screen when the new server has no kernel, and marks the console.
-The marker wording follows the push's `cause`: a deliberate move says
-"session moved to *host*", while a reattach that could not resume says
-output may be missing — that text after an intentional swap read as data
-loss to a real user. Console output is append-only and genuinely
-unrecoverable, so real gaps are made legible rather than papered over.
-
 Within the pdv-server, two routers communicate with the kernel:
 
 **CommRouter** (`comm-router.ts`) — handles all write operations and push notifications over the Jupyter comm channel. Listens on `iopub` for incoming messages:
@@ -2331,7 +2133,7 @@ Rules:
 - **Round-trip discipline**: Server state is cached by React Query and refreshed by push-driven invalidation; common interactions cost at most one round trip, and idle traffic is O(1) per tick (the §7.4.3 version-check poll), never proportional to how much of the tree is expanded. No new refresh tokens or ad-hoc polling.
 - **Hook composition**: See `electron/renderer/src/app/HOOKS.md` for the full hook dependency graph and data flow documentation.
 
-### 11.5 Custom Title Bar and Window Chrome
+### 11.5.1 Custom Title Bar and Window Chrome
 
 PDV uses a custom renderer-drawn title bar on all platforms:
 - **macOS**: `titleBarStyle: "hiddenInset"` — the native title bar is hidden but traffic-light buttons remain. A drag region and app title are rendered by the `TitleBar` component.
@@ -2361,6 +2163,222 @@ This ensures the project venv, tree state, module bindings, and `sys.path` confi
 
 ---
 
+### 11.7 Remote Sessions (SSH)
+
+Everything below concerns a session whose pdv-server runs on a remote
+host reached over SSH (issue #132). Local mode is untouched by all of it:
+the machinery activates only when a session is moved onto a host.
+
+**Push seq and retained settlements belong to the session, not the
+connection** (`transport/push-journal.ts`, `transport/response-store.ts`).
+A remote session outlives the channel carrying it, so a client that drops
+and reattaches must be able to say "I last saw seq N" and receive exactly
+what it missed — which only means anything if the numbering survives the
+connection. `PushJournal` assigns every seq and retains the encoded frames
+in one bounded ring per session (5000 messages / 32 MB) with a cursor per
+client, so replay is a byte copy rather than a per-client buffer. A cursor
+that has fallen off the back of the ring is told so explicitly; it is never
+advanced silently, which would leave a client believing it had seen pushes
+that were dropped.
+
+Consequently `hello` is **unsequenced** (seq −1): it describes the
+connection, and consuming a seq would renumber the session's stream on
+every reconnect. Exactly three channels bypass the journal — `hello`,
+`attachError`, `superseded` — a closed allowlist enforced by type and at
+runtime. `confirmRequest` is deliberately not among them: a parked native
+confirm is session state and must survive a reconnect. `RPC_PROTOCOL_VERSION`
+is therefore 2, and the hello advertises `protocolMin` so peers see a
+*range*; a range cannot be retrofitted once long-lived daemons exist, and a
+client that learns only an exact version must refuse an older-but-compatible
+server, stranding a live kernel on every app upgrade.
+
+`ResponseStore` retains recent invoke settlements (200 entries / 10 minutes,
+on a monotonic clock so a lid-close or NTP step cannot expire one early) and
+the server **records a settlement before writing it**. A `script.run` that
+finishes while the connection is down has still really run, so its result
+must exist somewhere findable before it goes to a writer that may be gone.
+Reconciliation is three-state — in-flight, completed, unknown — because two
+states are silently wrong: "not running, therefore failed" rejects work that
+in fact completed.
+
+In local mode all of this is inert by construction: one connection for the
+process lifetime means the session and the connection are the same thing.
+
+**Session daemon.** On a remote host the server runs as a detached daemon
+(`server/session-host.ts`) serving one session over a Unix socket, and
+`pdv-server attach --session <id> --stdio` is what the SSH channel runs — a
+*proxy*, not a server. The channel may die at any moment; all that dies with
+it is the proxy, while the daemon holding the kernel, the journal and the
+settlements carries on. The next channel attaches and is replayed what it
+missed.
+
+Every fresh connection is **gated until it attaches**: between accept and
+attach the client has not said where its cursor is, so a kernel streaming
+output in that window would hand it an unpredictable seq — a gap on the
+first frame of a reconnect. Gated pushes are journalled but withheld, and
+arrive through the replay instead. A new attach **supersedes** the previous
+connection (the reverse-RPC confirm would otherwise pop two native dialogs
+for one question); the notice carries `bySameClientId`, without which a
+displaced shell that auto-reconnects would ping-pong a session between two
+laptops.
+
+**Daemon creation is gated by an `O_EXCL` lock, never by the socket**
+(`server/session-lock.ts`). Two channels arriving together both find a stale
+socket and both get `ECONNREFUSED`; without the lock both would spawn a
+daemon, and one would end up serving a kernel and a Tree nobody ever
+connects to. `bootId` closes the pid-reuse hole — after a reboot,
+`kill(pid, 0)` on a recycled pid would report a stranger as the daemon.
+
+**Metadata lives under `~/.pdv-server/`; the socket does not**
+(`server/session-paths.ts`). That root is a shared NFS home on the target
+clusters and AF_UNIX there is unreliable, so the socket resolves node-local
+(`$PDV_SERVER_RUNTIME_DIR` → `$XDG_RUNTIME_DIR` → `/tmp/pdv-server-<uid>` →
+root), rejecting any candidate that would blow the ~104-byte `sun_path`
+budget. `session.json` records the **concrete hostname**: `flux.pppl.gov`
+round-robins and the socket is node-local, so a reattach that follows the
+alias can land on a different login node. **Known limitation:** today
+nothing shell-side *reads* that hostname — a reconnect that lands on
+login2 finds no socket, judges the (NFS-shared) lock stale because the
+bootId belongs to another machine, and spawns a second daemon while the
+first strands its kernel on login1. Single-node hosts are unaffected; on
+round-robin aliases, pin a concrete `Host` entry until the reattach path
+learns to target the recorded node (tracked follow-up).
+
+**Detachment** (`server/daemonize.ts`) is `detached: true` (setsid),
+`unref()` plus the launcher exiting (orphaning), and
+`stdio: ["ignore", logFd, logFd]` — the last is mandatory, because a daemon
+inheriting the SSH channel's stdout keeps its write end open, so sshd never
+sees EOF and the launching command hangs forever. Measured on a PPPL login
+node: a detached daemon survived a full logout and the site's 45-minute idle
+timeout with an unbroken heartbeat. Log rotation is copytruncate, since
+renaming a file the daemon holds an `O_APPEND` fd on leaves it writing to
+the rotated inode.
+
+**Idle policy** (`server/session-idle.ts`): no clients and no kernel exits
+after 30 minutes; an idle kernel survives up to `idleCapHours` (default 12,
+0 = forever). A reattach within a 90-second grace window is not a detach at
+all. The cap measures *idle* time, not elapsed time — a literal reading
+would SIGKILL a 20-hour simulation with the laptop shut, the exact loss this
+feature exists to prevent (`idleCapCountsExecution` restores it). The policy
+is only as good as what drives it, so `wireSessionIdle` (`server-main.ts`)
+owns the coupling: the kernel manager's `kernel:executionState` events
+suspend the cap on busy and re-arm it — full length — on idle, and a final
+`isExecuting` check before the shutdown catches a timer that fired in the
+race window. Before stopping, the daemon takes a real snapshot through the
+same `performAutosave` core the timer and pre-restart paths use
+(`autosaveForShutdown` in `ipc-register-autosave.ts`), with code cells from
+the working dir's `code-cells.json` mirror since no client is attached to
+supply live ones. A failed snapshot blocks the shutdown and retries,
+because exiting then destroys the work the autosave protects; a session
+with no kernel, or a dead one, has nothing preservable left and shuts down
+without blocking — a dead kernel must not pin a login node forever.
+
+**Moving a session onto a host.** Connecting and *running the session there*
+are separate steps (`IPC.remote.connect` then `IPC.remote.startSession`) with
+different failure modes: a failed attach leaves the user with a working local
+session and a live connection rather than neither. `startSession` attaches to
+(or creates) a daemon on the host and calls `SessionRouter.swap()`, after
+which every existing invoke and push travels to the cluster with no caller
+changes — the payoff for the seam work in §11.4's router. The outgoing local
+server is shut down rather than abandoned, since it holds a kernel and a
+working directory on this machine. The session id is stable per user, so
+reconnecting after a crash or an app restart finds the same session, kernel
+and Tree instead of stranding the previous daemon.
+
+`shell/remote-server.ts` is the remote `ServerHandle`. The transport is
+unchanged — an ssh channel is a stream pair and `RpcClient` already takes one
+— but the *lifetime* differs, which is why it is a separate implementation:
+`RpcClient` is disposable here and the pending map lives one level above it,
+so invokes survive the connection that carried them. Unknown outcomes are
+classified by channel (`IDEMPOTENT_CHANNELS`): reads may be re-issued,
+mutations may not, because running the same script twice against one kernel
+writes to the Tree twice. An unaccountable mutation rejects with
+`RpcRequestLostError` so the renderer can say "check the Tree" rather than
+report a plain failure for something that may have succeeded.
+
+Reconnects use `BatchMode=yes` — a retry must succeed from the existing
+master or fail at once, never silently trigger a Duo push — and a `superseded`
+notice from a *different* client stops the reconnect loop dead, since two
+laptops chasing one session would ping-pong it forever.
+
+**When the backoff gives up** the handle parks in `auth-required`. Owed
+invokes are not failed wholesale: within their TTL they survive, because a
+manual reconnect minutes later reconciles them against the daemon and a
+completed `script.run` still resolves with its result — worth more than a
+fast rejection. A sweep keeps that from decaying into "hang forever":
+every owed promise settles within one TTL of its creation, reconnect or
+not (idempotent reads with a plain error, mutations with
+`RpcRequestLostError`). Nothing automatic runs after that, because the
+missing ingredient is interactive re-authentication. Recovery is
+`RemoteServerHandle.retryNow()`: the connect dialog's "Reconnect to *host*"
+(which is `IPC.remote.startSession` — on a window already fronting a remote
+session that call *means* reattach) after the user re-authenticates, and a
+`powerMonitor` resume kick in batch mode (succeed silently off a live master
+or fail fast — a wake must never fire an auth prompt; locally the resume
+still forwards `systemResumed` to the server instead, since a remote server
+never slept). A handle that can never reattach — superseded, or closed —
+makes `startSession` fall through to a *fresh* handle against the same
+stable session id, so "reconnect" works even after another client visited.
+
+**Three ways out of a remote session, deliberately distinct.**
+*Disconnect* closes the channel and returns the window to a freshly started
+local server; the daemon and its kernel keep running for a later reconnect.
+*Shut Down Remote Session* (`IPC.remote.endSession`) starts the local server
+FIRST — a failure leaves the remote session untouched rather than the window
+with neither — then swaps and tells the daemon to stop (the `SessionHost`
+honors the shutdown invoke: graceful kernel shutdown, socket unlinked). It
+declines while the session is unreachable, because a shutdown invoke on a
+dead channel silently does nothing and "success" would leave the daemon
+running on a login node. *Quitting the app* is disconnect-only for remote
+sessions (`closingForQuit`, `app.ts`): the daemon outliving the client is
+the feature, and Cmd+Q must never end a 20-hour run on the cluster. In all
+three cases the retired handle's state callbacks are gated on it still being
+`SessionRouter.active`, so a farewell "disconnected" push can never
+overwrite the renderer's freshly-landed local state.
+
+**One kernel per session, enforced at the authority.** A fresh client
+attaching to a long-lived daemon has no idea what a previous client left
+running, so `kernels:start` first retires any surviving kernels (their
+working directories are preserved — they hold `.autosave` snapshots the
+welcome screen can recover — and the kernel-results cache is purged so the
+new session's first save cannot silently commit the old kernel's tree). A
+spawn whose handshake fails is likewise stopped rather than leaked.
+
+**Host-qualified recents reconnect.** A recent project carries the host it
+lives on; opening one that lives elsewhere moves the session first (connect
+— with any auth riding the dialog — then `startSession`, then the open
+completes when the connection state says the session arrived). A pending
+open is a click, not a standing order: it expires after two minutes, dies
+with the dialog if the user closes it mid-flow, and is identity-tracked so
+a second click cannot be killed by the first flow's failure.
+
+**The remote path picker.** Every path PDV asks the user for is interpreted
+by the *server*, so in a remote session a native dialog would browse the
+wrong machine. `renderer/src/services/pick-path.ts` routes: local sessions
+keep the native dialogs byte-for-byte; remote sessions (including
+unreachable ones — the session's filesystem is still the remote one) get a
+minimal in-app picker fed by `files:listDir`, the one new server channel
+(`ipc-register-file-browse.ts`: read-only, `~` expansion, dirs-first,
+symlinks reported as their target's kind). The picker is deliberately bare
+— a typed-path field doubling as navigation, an entry list, Home — because
+it is a placeholder for the planned command-palette UI, not a foundation.
+The `SHELL_CHANNELS` partition now enumerates the native `files.*` pickers
+explicitly rather than spreading the namespace, precisely so a new
+`files.*` channel can never again be silently auto-assigned to the shell.
+
+The renderer learns where its session lives from the `sessionState` push,
+distinct from `remoteStatus` (which describes a connection *attempt*). On a
+resync it rebuilds query-backed state, reloads App-held config (component
+state that a query-cache reset cannot reach — without it a kernel start
+after a swap used the previous machine's interpreter path), lands on the
+welcome screen when the new server has no kernel, and marks the console.
+The marker wording follows the push's `cause`: a deliberate move says
+"session moved to *host*", while a reattach that could not resume says
+output may be missing — that text after an intentional swap read as data
+loss to a real user. Console output is append-only and genuinely
+unrecoverable, so real gaps are made legible rather than papered over.
+
+
 ## 12. File and Module Structure
 
 ### 12.1 Electron (TypeScript)
@@ -2378,26 +2396,34 @@ electron/
         shell/
             server-supervisor.ts ← Spawns/supervises the pdv-server child (hello, ping, crash, shutdown)
             server-bridge.ts     ← Forwards SERVER_CHANNELS invokes over the transport; push fan-out; reverse-RPC confirm dialog
+            session-router.ts    ← Stable ServerHandle delegating to the active server; swap() moves the session
+            remote-server.ts     ← Remote ServerHandle (disposable RpcClients, reconnect, reconciliation)
+            config-bridge.ts     ← config.get/set merge across the local store + server store
+            local-config-store.ts ← Shell-owned config half (theme, shortcuts, launchers, recents)
         server/
             server-main.ts      ← pdv-server CLI entry (serve / self-check / attach /
-                                    session-host, plain Node)
-            session-host.ts     ← Session daemon: attach gate, replay, supersede
-            session-paths.ts    ← Socket/metadata placement (node-local, path budget)
-            session-lock.ts     ← O_EXCL spawn lock + bootId staleness
-            session-meta.ts     ← session.json (concrete host, resolved sockPath)
-            session-idle.ts     ← Idle policy (grace, kernel cap, autosave gate)
-        remote/
-            remote-channel.ts   ← ssh channel → stream pair for one attach
-        shell/
-            remote-server.ts    ← Remote ServerHandle (reconnect, reconciliation)
-            daemonize.ts        ← setsid detachment + copytruncate log rotation
-            attach-cli.ts       ← attach proxy: stdio ⇄ session socket
+                                    session-host, plain Node); wireSessionIdle
             wire.ts             ← pdv-server core assembly: session state + server registrars + MCP
             invoke-registry.ts  ← Electron-free invoke handler registry (server channels)
             shell-confirm.ts    ← Reverse-RPC confirm broker (server side)
             confirm.ts          ← Injected ConfirmFn/ConfirmOptions contract
             server-paths.ts     ← userData/resources roots from env (extracted process) or injection
             server-files.ts     ← List of server-destined files (electron-import guard test)
+            self-check.ts       ← On-host bundle verification (zeromq dlopen, tcp bind, temp dir)
+            session-host.ts     ← Session daemon: attach gate, replay, supersede
+            session-paths.ts    ← Socket/metadata placement (node-local, path budget)
+            session-lock.ts     ← O_EXCL spawn lock + bootId staleness
+            session-meta.ts     ← session.json (concrete host, resolved sockPath)
+            session-idle.ts     ← Idle policy (grace, kernel cap, autosave gate)
+            daemonize.ts        ← setsid detachment + copytruncate log rotation
+            attach-cli.ts       ← attach proxy: stdio ⇄ session socket
+        remote/
+            ssh-config.ts       ← ~/.ssh/config alias harvesting for the host picker
+            ssh-mux.ts          ← Multiplexed exec over a ControlMaster; exit sentinel + failure ladder
+            ssh-pty.ts          ← node-pty interactive auth (Duo/passphrase); secret echo stripping
+            remote-connection.ts ← Connection state machine: reuse-or-create master, probe, bootstrap
+            remote-channel.ts   ← ssh channel → stream pair for one attach
+            bootstrap.ts        ← Probe / upload / verify / atomic install / self-check on the host
         transport/
             protocol.ts         ← RPC envelope types + reserved pdv.rpc.* channels
             line-codec.ts       ← Newline-delimited JSON encoder/decoder with backpressure
@@ -2434,6 +2460,8 @@ electron/
         ipc-register-tree-namespace-script.ts ← IPC handlers: tree, namespace, script
         ipc-register-app-state.ts         ← IPC handlers: config, themes, code cells, files, about
         ipc-register-launchers.ts         ← IPC handlers: external editor/terminal launch + availability
+        ipc-register-remote.ts            ← IPC handlers: remote connect/auth + session start/end/disconnect
+        ipc-register-file-browse.ts       ← IPC handler: files:listDir (remote path picker source)
         ipc-registry.ts                   ← handleIpc wrapper (logs + normalizes handler errors)
         agent-launcher.ts       ← Spawn external AI agent CLIs against the MCP server
         auto-updater.ts         ← electron-updater integration and update-check throttle

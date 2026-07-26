@@ -255,6 +255,8 @@ function flagValue(args: string[], flag: string): string | undefined {
  * @returns The root directory path.
  */
 function defaultRoot(): string {
+  // Must agree with REMOTE_ROOT in remote/bootstrap.ts — the shell's
+  // remoteServerCommand cd's into the same directory it installed to.
   return path.join(os.homedir(), ".pdv-server");
 }
 

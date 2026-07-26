@@ -43,6 +43,8 @@ import {
 } from "./ssh-mux";
 
 /** Root of PDV's install tree on the remote host, relative to `$HOME`. */
+// Must agree with `defaultRoot()` in server/server-main.ts — the attach
+// CLI resolves the same directory on the host from its own default.
 const REMOTE_ROOT = ".pdv-server";
 
 /*

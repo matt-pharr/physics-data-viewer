@@ -231,7 +231,7 @@ export class RpcClient {
   }
 
   /**
-   * Resolve with the server's hello push (seq 0). Resolves immediately if
+   * Resolve with the server's hello push (unsequenced). Resolves immediately if
    * the hello already arrived.
    *
    * @param timeoutMs - How long to wait before giving up.
@@ -321,6 +321,23 @@ export class RpcClient {
    */
   get lastSeq(): number {
     return this.lastSeqReceived;
+  }
+
+  /**
+   * Adopt a new push cursor mid-connection.
+   *
+   * Exists for exactly one caller: a STALE attach against a restarted
+   * session, whose new epoch restarts seq near zero. The cursor this client
+   * was seeded with belongs to the old epoch; keeping it makes every
+   * subsequent push read as a sequence gap — a full resync per push,
+   * forever. The attach response is the authority on where the new epoch's
+   * stream begins.
+   *
+   * @param seq - The new epoch's last seq, from the attach result.
+   * @returns Nothing.
+   */
+  adoptCursor(seq: number): void {
+    this.lastSeqReceived = seq;
   }
 
   /**

@@ -206,6 +206,50 @@ describe("RemoteServerHandle", () => {
   });
 
   describe("supersede", () => {
+    it("a stale attach adopts the new epoch's cursor — pushes flow, no resync storm", async () => {
+      // The daemon restarted (idle cap, crash): new epoch, seq restarts
+      // near zero. Keeping the OLD epoch's high-water cursor made every
+      // subsequent push read as a sequence gap — a full resync (with its
+      // data-loss console marker) per push, forever, until app restart.
+      const staleReasons: string[] = [];
+      const pushes: string[] = [];
+      handle = makeHandle({
+        onStale: (reason) => staleReasons.push(reason),
+        reconnectDelaysMs: [],
+      });
+      handle.setBridgeHandlers({
+        onPush: (event) => pushes.push(event),
+        confirm: async () => 0,
+        closeChildWindows: () => undefined,
+      });
+      await handle.start();
+      // Drive the old epoch's seq well past zero.
+      for (let i = 0; i < 5; i++) host.push(`old:${i}`, {});
+      await vi.waitFor(() => expect(pushes.length).toBe(5));
+
+      // The daemon dies and is recreated: fresh epoch, fresh journal.
+      dropChannel();
+      await host.close();
+      await vi.waitFor(() => {
+        expect(handle!.connectionState).toBe("auth-required");
+      });
+      host = new SessionHost({ paths, sessionId: SESSION, version: "9.9.9-test" });
+      await host.listen();
+
+      await handle.retryNow();
+      expect(handle.connectionState).toBe("connected");
+      expect(staleReasons).toContain("epoch-mismatch");
+
+      // Live pushes from the new epoch must DELIVER — and not one
+      // sequence-gap resync per push.
+      staleReasons.length = 0;
+      pushes.length = 0;
+      host.push("new:0", {});
+      host.push("new:1", {});
+      await vi.waitFor(() => expect(pushes).toEqual(["new:0", "new:1"]));
+      expect(staleReasons).toEqual([]);
+    });
+
     it("a channel that dies mid-attach FAILS the connect instead of hanging it", async () => {
       // The park policy exists for session invokes a reattach reconciles —
       // but this client IS the attach attempt. Parking its own attach left

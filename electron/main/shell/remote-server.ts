@@ -147,6 +147,8 @@ export class RemoteServerHandle implements ServerHandle {
   private reconnecting = false;
   /** True while this handle is closing its own client (not a real loss). */
   private tearingDown = false;
+  /** Owed-invoke expiry timer, armed only while parked in auth-required. */
+  private expireSweep: NodeJS.Timeout | null = null;
 
   /**
    * @param opts - Session id, channel factory, and reconnect tuning.
@@ -187,6 +189,7 @@ export class RemoteServerHandle implements ServerHandle {
    */
   async disconnect(): Promise<void> {
     this.stopped = true;
+    this.disarmExpirySweep();
     this.failOwned(new Error("Disconnected from the remote session."));
     this.teardownChannel();
     this.setState("disconnected");
@@ -199,6 +202,7 @@ export class RemoteServerHandle implements ServerHandle {
    */
   async shutdown(): Promise<void> {
     this.stopped = true;
+    this.disarmExpirySweep();
     try {
       await this.client?.invoke(RPC_CHANNELS.shutdown);
     } catch {
@@ -344,6 +348,16 @@ export class RemoteServerHandle implements ServerHandle {
         rejectOnEarlyClose(new Error("The channel closed during the attach."));
         if (this.client === client) this.onConnectionLost();
       },
+      // A VPN drop or network switch without an RST leaves the local ssh
+      // process alive with open pipes — no end/error/close ever fires, and
+      // after three missed pings the ping loop STOPS. Without this hook the
+      // handle would sit "connected" forever over a dead link, invokes
+      // parked, no reconnect, no banner. Closing the client routes the loss
+      // into the ordinary reconnect path.
+      onUnresponsive: () => {
+        console.error("[remote] channel unresponsive; treating it as lost");
+        if (this.client === client) client.close("remote channel unresponsive");
+      },
     });
 
     this.channel = channel;
@@ -374,8 +388,20 @@ export class RemoteServerHandle implements ServerHandle {
     ])) as RpcAttachResult;
 
     this.sessionEpoch = result.sessionEpoch;
-    this.lastSeq = Math.max(this.lastSeq, result.lastSeq);
+    if (result.status === "stale") {
+      // A stale attach means the old cursor is meaningless — usually a NEW
+      // epoch whose seq restarts near zero. `Math.max` here kept the old
+      // epoch's high-water mark, so every subsequent push read as a
+      // sequence gap: a full resync (with its data-loss console marker)
+      // per push, forever, and a poisoned cursor for the next reattach.
+      // The attach response is the authority on where this stream begins.
+      this.lastSeq = result.lastSeq;
+      client.adoptCursor(result.lastSeq);
+    } else {
+      this.lastSeq = Math.max(this.lastSeq, result.lastSeq);
+    }
     this.reconcile(result);
+    this.disarmExpirySweep();
     this.setState("connected");
     client.startPing();
 
@@ -528,10 +554,35 @@ export class RemoteServerHandle implements ServerHandle {
 
     this.reconnecting = false;
     if (this.stopped) return;
-    // Out of attempts: settle everything loudly rather than leaving the
-    // renderer spinning on promises that will never resolve.
+    // Out of attempts. Owed invokes older than the TTL settle loudly now;
+    // younger ones deliberately survive — a manual reconnect minutes later
+    // reconciles them against the daemon (a completed script.run still
+    // resolves with its result), which is worth more than a fast rejection.
+    // The sweep interval is what keeps "survive for reconciliation" from
+    // decaying into "hang forever if the user never reconnects": every owed
+    // promise settles within one TTL of its creation, reconnect or not.
     this.setState("auth-required");
     this.expireOwned();
+    this.armExpirySweep();
+  }
+
+  /** Periodic owed-invoke expiry while parked in auth-required. */
+  private armExpirySweep(): void {
+    if (this.expireSweep) return;
+    const ttl = this.opts.parkedTtlMs ?? PARKED_INVOKE_TTL_MS;
+    this.expireSweep = setInterval(() => {
+      this.expireOwned();
+      if (this.owned.size === 0) this.disarmExpirySweep();
+    }, Math.max(1000, Math.floor(ttl / 2)));
+    this.expireSweep.unref?.();
+  }
+
+  /** Stop the expiry sweep (reattached, or the handle is closing). */
+  private disarmExpirySweep(): void {
+    if (this.expireSweep) {
+      clearInterval(this.expireSweep);
+      this.expireSweep = null;
+    }
   }
 
   /** Fail owned invokes past their TTL; a mutation reports as lost. */

@@ -306,9 +306,13 @@ export class SessionHost {
   /**
    * Tell an older connection it has been replaced, then close it.
    *
-   * `bySameClientId` is what stops a reconnect war: when a *different*
+   * `bySameClientId` is what would stop a reconnect war: when a *different*
    * client took over, the displaced shell must not automatically reconnect,
-   * or two laptops ping-pong the session between them forever.
+   * or two laptops ping-pong the session between them forever. Today it is
+   * hardcoded `false` — the attach request carries no client identity yet,
+   * so every supersede is treated as a foreign client (the safe direction:
+   * the displaced side stops rather than chases). Distinguishing the
+   * same-client case needs an identity field in `RpcAttachRequest`.
    */
   private supersede(conn: HostConnection): void {
     try {
