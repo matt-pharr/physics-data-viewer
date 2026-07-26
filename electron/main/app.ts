@@ -402,10 +402,19 @@ export function wireAppEvents(
   getServer: () => ServerHandle | null
 ): void {
   app.on("before-quit", () => {
+    console.error("[PDV] before-quit");
     isQuittingGlobal = true;
+  });
+  // A GPU or utility process dying can take the window down with no
+  // renderer-level trace — name it, same rationale as render-process-gone.
+  app.on("child-process-gone", (_event, details) => {
+    console.error(
+      `[PDV] child process gone: type=${details.type} reason=${details.reason} exitCode=${String(details.exitCode)}`
+    );
   });
 
   app.on("window-all-closed", () => {
+    console.error("[PDV] window-all-closed");
     // On darwin we normally keep the app alive after the window closes (so
     // Cmd+W behaves like a typical mac app). But if a real quit is in
     // progress, we must actually exit so `will-quit` runs and the server
@@ -421,6 +430,7 @@ export function wireAppEvents(
   // kernel. The server owns kernel shutdown, MCP stop, and working-dir
   // cleanup; the supervisor escalates if it hangs.
   app.on("will-quit", (event) => {
+    console.error("[PDV] will-quit");
     const server = getServer();
     if (!server || isShuttingDownGlobal) {
       return;
