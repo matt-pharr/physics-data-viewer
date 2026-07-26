@@ -2054,6 +2054,41 @@ light renderer-reload reset) and is never exposed to the preload.
 Ordering between shell-originated and server-originated pushes is not
 guaranteed (it never was between independent emitters).
 
+**Push seq and retained settlements belong to the session, not the
+connection** (`transport/push-journal.ts`, `transport/response-store.ts`).
+A remote session outlives the channel carrying it, so a client that drops
+and reattaches must be able to say "I last saw seq N" and receive exactly
+what it missed — which only means anything if the numbering survives the
+connection. `PushJournal` assigns every seq and retains the encoded frames
+in one bounded ring per session (5000 messages / 32 MB) with a cursor per
+client, so replay is a byte copy rather than a per-client buffer. A cursor
+that has fallen off the back of the ring is told so explicitly; it is never
+advanced silently, which would leave a client believing it had seen pushes
+that were dropped.
+
+Consequently `hello` is **unsequenced** (seq −1): it describes the
+connection, and consuming a seq would renumber the session's stream on
+every reconnect. Exactly three channels bypass the journal — `hello`,
+`attachError`, `superseded` — a closed allowlist enforced by type and at
+runtime. `confirmRequest` is deliberately not among them: a parked native
+confirm is session state and must survive a reconnect. `RPC_PROTOCOL_VERSION`
+is therefore 2, and the hello advertises `protocolMin` so peers see a
+*range*; a range cannot be retrofitted once long-lived daemons exist, and a
+client that learns only an exact version must refuse an older-but-compatible
+server, stranding a live kernel on every app upgrade.
+
+`ResponseStore` retains recent invoke settlements (200 entries / 10 minutes,
+on a monotonic clock so a lid-close or NTP step cannot expire one early) and
+the server **records a settlement before writing it**. A `script.run` that
+finishes while the connection is down has still really run, so its result
+must exist somewhere findable before it goes to a writer that may be gone.
+Reconciliation is three-state — in-flight, completed, unknown — because two
+states are silently wrong: "not running, therefore failed" rejects work that
+in fact completed.
+
+In local mode all of this is inert by construction: one connection for the
+process lifetime means the session and the connection are the same thing.
+
 Within the pdv-server, two routers communicate with the kernel:
 
 **CommRouter** (`comm-router.ts`) — handles all write operations and push notifications over the Jupyter comm channel. Listens on `iopub` for incoming messages:
@@ -2191,8 +2226,10 @@ electron/
         transport/
             protocol.ts         ← RPC envelope types + reserved pdv.rpc.* channels
             line-codec.ts       ← Newline-delimited JSON encoder/decoder with backpressure
+            push-journal.ts     ← Session-owned push seq + bounded replay ring
+            response-store.ts   ← Retained invoke settlements (survive a dropped connection)
             rpc-client.ts       ← Shell-side transport client (correlation, hello, ping)
-            rpc-server.ts       ← Server-side transport endpoint (dispatch, push seq)
+            rpc-server.ts       ← Server-side transport endpoint (dispatch, journal, settlements)
         kernel-manager.ts       ← Kernel process lifecycle, ZeroMQ socket management
         kernel-session.ts       ← Kernel bootstrap/init handshake helpers (pdv.ready → pdv.init)
         kernel-error-parser.ts  ← Traceback/error parsing for execution errors
