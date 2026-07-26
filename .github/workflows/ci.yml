@@ -628,6 +628,14 @@ jobs:
 
       - name: Boot the dev servers
         working-directory: electron
+        env:
+          # Chromium's SUID sandbox helper must be root-owned mode 4755, which
+          # it is not on a GitHub runner, and Electron treats that as fatal.
+          # The e2e job passes --no-sandbox at launch (e2e/helpers/launch.ts);
+          # `npm run dev` offers no such hook because electronmon spawns
+          # Electron itself, so use the environment equivalent. Sandboxing is
+          # irrelevant to what this job checks — that the dev scripts boot.
+          ELECTRON_DISABLE_SANDBOX: "1"
         run: |
           set -u
           xvfb-run -a npm run dev > /tmp/dev.log 2>&1 &
