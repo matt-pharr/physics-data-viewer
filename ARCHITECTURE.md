@@ -2089,6 +2089,60 @@ in fact completed.
 In local mode all of this is inert by construction: one connection for the
 process lifetime means the session and the connection are the same thing.
 
+**Session daemon.** On a remote host the server runs as a detached daemon
+(`server/session-host.ts`) serving one session over a Unix socket, and
+`pdv-server attach --session <id> --stdio` is what the SSH channel runs — a
+*proxy*, not a server. The channel may die at any moment; all that dies with
+it is the proxy, while the daemon holding the kernel, the journal and the
+settlements carries on. The next channel attaches and is replayed what it
+missed.
+
+Every fresh connection is **gated until it attaches**: between accept and
+attach the client has not said where its cursor is, so a kernel streaming
+output in that window would hand it an unpredictable seq — a gap on the
+first frame of a reconnect. Gated pushes are journalled but withheld, and
+arrive through the replay instead. A new attach **supersedes** the previous
+connection (the reverse-RPC confirm would otherwise pop two native dialogs
+for one question); the notice carries `bySameClientId`, without which a
+displaced shell that auto-reconnects would ping-pong a session between two
+laptops.
+
+**Daemon creation is gated by an `O_EXCL` lock, never by the socket**
+(`server/session-lock.ts`). Two channels arriving together both find a stale
+socket and both get `ECONNREFUSED`; without the lock both would spawn a
+daemon, and one would end up serving a kernel and a Tree nobody ever
+connects to. `bootId` closes the pid-reuse hole — after a reboot,
+`kill(pid, 0)` on a recycled pid would report a stranger as the daemon.
+
+**Metadata lives under `~/.pdv-server/`; the socket does not**
+(`server/session-paths.ts`). That root is a shared NFS home on the target
+clusters and AF_UNIX there is unreliable, so the socket resolves node-local
+(`$PDV_SERVER_RUNTIME_DIR` → `$XDG_RUNTIME_DIR` → `/tmp/pdv-server-<uid>` →
+root), rejecting any candidate that would blow the ~104-byte `sun_path`
+budget. `session.json` records the **concrete hostname**: `flux.pppl.gov`
+round-robins and the socket is node-local, so a reattach that follows the
+alias lands on the wrong node and reports a session that is alive elsewhere
+as vanished.
+
+**Detachment** (`server/daemonize.ts`) is `detached: true` (setsid),
+`unref()` plus the launcher exiting (orphaning), and
+`stdio: ["ignore", logFd, logFd]` — the last is mandatory, because a daemon
+inheriting the SSH channel's stdout keeps its write end open, so sshd never
+sees EOF and the launching command hangs forever. Measured on a PPPL login
+node: a detached daemon survived a full logout and the site's 45-minute idle
+timeout with an unbroken heartbeat. Log rotation is copytruncate, since
+renaming a file the daemon holds an `O_APPEND` fd on leaves it writing to
+the rotated inode.
+
+**Idle policy** (`server/session-idle.ts`): no clients and no kernel exits
+after 30 minutes; an idle kernel survives up to `idleCapHours` (default 12,
+0 = forever). A reattach within a 90-second grace window is not a detach at
+all. The cap measures *idle* time, not elapsed time — a literal reading
+would SIGKILL a 20-hour simulation with the laptop shut, the exact loss this
+feature exists to prevent (`idleCapCountsExecution` restores it). A failed
+autosave blocks the shutdown and retries, because exiting then destroys the
+work the autosave protects.
+
 Within the pdv-server, two routers communicate with the kernel:
 
 **CommRouter** (`comm-router.ts`) — handles all write operations and push notifications over the Jupyter comm channel. Listens on `iopub` for incoming messages:
@@ -2216,7 +2270,15 @@ electron/
             server-supervisor.ts ← Spawns/supervises the pdv-server child (hello, ping, crash, shutdown)
             server-bridge.ts     ← Forwards SERVER_CHANNELS invokes over the transport; push fan-out; reverse-RPC confirm dialog
         server/
-            server-main.ts      ← pdv-server CLI entry (`serve --stdio`, plain Node)
+            server-main.ts      ← pdv-server CLI entry (serve / self-check / attach /
+                                    session-host, plain Node)
+            session-host.ts     ← Session daemon: attach gate, replay, supersede
+            session-paths.ts    ← Socket/metadata placement (node-local, path budget)
+            session-lock.ts     ← O_EXCL spawn lock + bootId staleness
+            session-meta.ts     ← session.json (concrete host, resolved sockPath)
+            session-idle.ts     ← Idle policy (grace, kernel cap, autosave gate)
+            daemonize.ts        ← setsid detachment + copytruncate log rotation
+            attach-cli.ts       ← attach proxy: stdio ⇄ session socket
             wire.ts             ← pdv-server core assembly: session state + server registrars + MCP
             invoke-registry.ts  ← Electron-free invoke handler registry (server channels)
             shell-confirm.ts    ← Reverse-RPC confirm broker (server side)
@@ -2227,6 +2289,7 @@ electron/
             protocol.ts         ← RPC envelope types + reserved pdv.rpc.* channels
             line-codec.ts       ← Newline-delimited JSON encoder/decoder with backpressure
             push-journal.ts     ← Session-owned push seq + bounded replay ring
+            attach.ts           ← Reattach decision: replay, resync, or refuse
             response-store.ts   ← Retained invoke settlements (survive a dropped connection)
             rpc-client.ts       ← Shell-side transport client (correlation, hello, ping)
             rpc-server.ts       ← Server-side transport endpoint (dispatch, journal, settlements)
