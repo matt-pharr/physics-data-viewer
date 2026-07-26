@@ -2143,6 +2143,40 @@ feature exists to prevent (`idleCapCountsExecution` restores it). A failed
 autosave blocks the shutdown and retries, because exiting then destroys the
 work the autosave protects.
 
+**Moving a session onto a host.** Connecting and *running the session there*
+are separate steps (`IPC.remote.connect` then `IPC.remote.startSession`) with
+different failure modes: a failed attach leaves the user with a working local
+session and a live connection rather than neither. `startSession` attaches to
+(or creates) a daemon on the host and calls `SessionRouter.swap()`, after
+which every existing invoke and push travels to the cluster with no caller
+changes — the payoff for the seam work in §11.4's router. The outgoing local
+server is shut down rather than abandoned, since it holds a kernel and a
+working directory on this machine. The session id is stable per user, so
+reconnecting after a crash or an app restart finds the same session, kernel
+and Tree instead of stranding the previous daemon.
+
+`shell/remote-server.ts` is the remote `ServerHandle`. The transport is
+unchanged — an ssh channel is a stream pair and `RpcClient` already takes one
+— but the *lifetime* differs, which is why it is a separate implementation:
+`RpcClient` is disposable here and the pending map lives one level above it,
+so invokes survive the connection that carried them. Unknown outcomes are
+classified by channel (`IDEMPOTENT_CHANNELS`): reads may be re-issued,
+mutations may not, because running the same script twice against one kernel
+writes to the Tree twice. An unaccountable mutation rejects with
+`RpcRequestLostError` so the renderer can say "check the Tree" rather than
+report a plain failure for something that may have succeeded.
+
+Reconnects use `BatchMode=yes` — a retry must succeed from the existing
+master or fail at once, never silently trigger a Duo push — and a `superseded`
+notice from a *different* client stops the reconnect loop dead, since two
+laptops chasing one session would ping-pong it forever.
+
+The renderer learns where its session lives from the `sessionState` push,
+distinct from `remoteStatus` (which describes a connection *attempt*). On a
+resync it rebuilds query-backed state and marks the console: output there is
+append-only and genuinely unrecoverable, so the gap is made legible rather
+than papered over.
+
 Within the pdv-server, two routers communicate with the kernel:
 
 **CommRouter** (`comm-router.ts`) — handles all write operations and push notifications over the Jupyter comm channel. Listens on `iopub` for incoming messages:
@@ -2277,6 +2311,10 @@ electron/
             session-lock.ts     ← O_EXCL spawn lock + bootId staleness
             session-meta.ts     ← session.json (concrete host, resolved sockPath)
             session-idle.ts     ← Idle policy (grace, kernel cap, autosave gate)
+        remote/
+            remote-channel.ts   ← ssh channel → stream pair for one attach
+        shell/
+            remote-server.ts    ← Remote ServerHandle (reconnect, reconciliation)
             daemonize.ts        ← setsid detachment + copytruncate log rotation
             attach-cli.ts       ← attach proxy: stdio ⇄ session socket
             wire.ts             ← pdv-server core assembly: session state + server registrars + MCP
@@ -2813,7 +2851,6 @@ PDV does not ship a static API reference, which would drift. Instead:
 The following features are acknowledged as future work and must not influence the current architecture in ways that complicate the above design:
 
 - **Crash recovery** — working directory is deleted on close; future discussion required
-- **Remote execution** (SSH, HPC clusters) — no remote connector architecture in this version
 - **Autosave** — `.pdv-work/autosave/` directory is created but not used
 - **Modules ecosystem hardening** — core module lifecycle is implemented (install from disk/GitHub, import, uninstall, update, bundled examples, project-local storage); deeper registry/trust features are deferred
 - **Multiple simultaneous kernels** — architecture supports it (kernels have IDs) but UI exposes only one at a time
