@@ -1318,6 +1318,10 @@ export interface PDVApi {
     cancel(): Promise<void>;
     disconnect(): Promise<void>;
     getStatus(): Promise<import('../../../main/ipc').RemoteStatus>;
+    /** Move the session onto the connected host. */
+    startSession(): Promise<import('../../../main/ipc').RemoteSessionResult>;
+    /** Leave the remote session running and return to a local session. */
+    endSession(): Promise<import('../../../main/ipc').RemoteSessionResult>;
     onStatus(
       callback: (status: import('../../../main/ipc').RemoteStatus) => void,
     ): () => void;

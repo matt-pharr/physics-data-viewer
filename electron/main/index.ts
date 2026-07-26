@@ -35,6 +35,7 @@ import { registerModuleWindowIpcHandlers } from "./ipc-register-module-windows";
 import { removeAllIpcHandlers } from "./ipc-registry";
 import { ModuleWindowManager } from "./module-window-manager";
 import { readMergedConfig, registerConfigBridge } from "./shell/config-bridge";
+import { SessionRouter } from "./shell/session-router";
 import type { LocalConfigStore } from "./shell/local-config-store";
 import { registerServerBridge } from "./shell/server-bridge";
 import type { ServerHandle } from "./shell/server-supervisor";
@@ -127,6 +128,10 @@ export async function registerIpcHandlers(
     // Built by `npm run build:server-bundle`. Absent in a checkout that has
     // not built them, which simply skips the bootstrap.
     bundleDir: path.join(__dirname, "..", "remote-bundles"),
+    // Only a router can move the session; anything else (a bare handle in a
+    // test) gets connection control without session swapping rather than a
+    // menu item that fails when used.
+    router: server instanceof SessionRouter ? server : undefined,
   });
 
   registerModuleWindowIpcHandlers({

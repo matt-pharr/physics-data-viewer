@@ -37,7 +37,8 @@ import * as fs from "fs";
 import * as path from "path";
 
 import type { RemoteConnectResult, RemoteHostAlias, RemoteStatus } from "../ipc";
-import { installBundle, probeHost, sha256File, type BootstrapProgress } from "./bootstrap";
+import {
+  remoteServerCommand, installBundle, probeHost, sha256File, type BootstrapProgress } from "./bootstrap";
 import { listSshHostAliases } from "./ssh-config";
 import {
   checkMaster,
@@ -98,6 +99,8 @@ export class RemoteConnectionManager {
   private status: RemoteStatus = { phase: "idle", host: null, attemptId: null };
   private attempt: PtyMasterSession | null = null;
   private activeControl: SshControl | null = null;
+  /** Where the bundle lives on the connected host; see {@link serverCommand}. */
+  private installedServerPath: string | null = null;
   /**
    * The held ssh process backing a connection PDV created. Null when the
    * connection was inherited from a master the user already ran — PDV does
@@ -110,6 +113,18 @@ export class RemoteConnectionManager {
   /** The control socket of the live connection, or null when disconnected. */
   get control(): SshControl | null {
     return this.status.phase === "connected" ? this.activeControl : null;
+  }
+
+  /**
+   * Path to `pdv-server` on the connected host, or null when unknown.
+   *
+   * Shell-expandable rather than resolved (it contains `$HOME`), so it must
+   * be passed unquoted into a remote command for the far-side shell to
+   * expand — quoting it would produce a literal `$HOME` and a command not
+   * found.
+   */
+  get serverCommand(): string | null {
+    return this.status.phase === "connected" ? this.installedServerPath : null;
   }
 
   /** The current state, safe to hand straight to the renderer. */
@@ -187,7 +202,10 @@ export class RemoteConnectionManager {
 
     const probe = await probeHost(control, { ...this.muxOptions(), version, onProgress });
     if (!probe.ok) return probe.problem ?? `PDV could not inspect ${host}.`;
-    if (probe.installed) return null;
+    if (probe.installed) {
+      this.installedServerPath = remoteServerCommand(version);
+      return null;
+    }
     if (!probe.arch) return `PDV has no components for ${probe.machine ?? "this architecture"}.`;
 
     const bundle = this.resolveBundle(probe.arch);
@@ -203,6 +221,7 @@ export class RemoteConnectionManager {
       version,
       onProgress,
     });
+    if (result.ok) this.installedServerPath = remoteServerCommand(version);
     return result.ok ? null : result.message;
   }
 

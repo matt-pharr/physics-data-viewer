@@ -16,7 +16,18 @@
 
 import { app, type BrowserWindow } from "electron";
 
-import { IPC, type RemoteConnectResult, type RemoteHostAlias, type RemoteStatus } from "./ipc";
+import * as os from "os";
+
+import {
+  IPC,
+  type RemoteConnectResult,
+  type RemoteHostAlias,
+  type RemoteSessionResult,
+  type RemoteStatus,
+} from "./ipc";
+import { openSessionChannel } from "./remote/remote-channel";
+import { RemoteServerHandle } from "./shell/remote-server";
+import type { SessionRouter } from "./shell/session-router";
 import { handleIpc } from "./ipc-registry";
 import { RemoteConnectionManager } from "./remote/remote-connection";
 
@@ -43,6 +54,17 @@ export interface RegisterRemoteIpcOptions {
   bundleDir?: string;
   /** Injected for tests; production uses the real ssh binary and node-pty. */
   manager?: RemoteConnectionManager;
+  /**
+   * The router whose active handle is swapped when a session moves. Omit to
+   * expose connection control without the ability to move the session,
+   * which is what a build with no session support should do rather than
+   * offering a menu item that fails.
+   */
+  router?: SessionRouter;
+  /** Session id to attach to. Defaults to a per-user stable id. */
+  sessionId?: string;
+  /** Opens the ssh channel. Injected by tests. */
+  openChannel?: typeof openSessionChannel;
 }
 
 /**
@@ -98,5 +120,81 @@ export function registerRemoteIpcHandlers(
 
   handleIpc(IPC.remote.getStatus, async (): Promise<RemoteStatus> => manager.getStatus());
 
+  handleIpc(IPC.remote.startSession, async (): Promise<RemoteSessionResult> => {
+    const router = options.router;
+    if (!router) {
+      return { ok: false, message: "This build cannot run remote sessions." };
+    }
+    const control = manager.control;
+    const serverCommand = manager.serverCommand;
+    if (!control || !serverCommand) {
+      return {
+        ok: false,
+        message: "Connect to a host before starting a session there.",
+      };
+    }
+    if (router.kind === "remote") {
+      return { ok: false, message: "This window already runs a remote session." };
+    }
+
+    const sessionId = options.sessionId ?? defaultSessionId();
+    const open = options.openChannel ?? openSessionChannel;
+    const handle = new RemoteServerHandle({
+      sessionId,
+      openChannel: async ({ batchMode }) =>
+        open({
+          control,
+          sessionId,
+          serverCommand,
+          create: true,
+          muxOptions: { batchMode },
+        }),
+    });
+
+    try {
+      await handle.start();
+    } catch (err) {
+      // The local session is untouched: nothing was swapped, so a failed
+      // start leaves the user working exactly as before rather than with
+      // neither session.
+      return { ok: false, message: (err as Error).message };
+    }
+
+    const previous = router.swap(handle);
+    // The outgoing local server is shut down, not abandoned: it holds a
+    // kernel and a working directory on this machine.
+    void previous?.shutdown().catch((err: unknown) => {
+      console.error("[remote] local server shutdown failed:", err);
+    });
+    return { ok: true, sessionId };
+  });
+
+  handleIpc(IPC.remote.endSession, async (): Promise<RemoteSessionResult> => {
+    const router = options.router;
+    if (!router || router.kind !== "remote") {
+      return { ok: false, message: "This window is not running a remote session." };
+    }
+    return {
+      ok: false,
+      message:
+        "Returning to a local session is not implemented yet. " +
+        "Disconnecting leaves the remote session running on the host.",
+    };
+  });
+
   return manager;
+}
+
+/**
+ * A stable session id for this user on any host.
+ *
+ * Stable rather than random on purpose: reconnecting after a crash or an app
+ * restart must find the *same* session, kernel and Tree. A fresh id each
+ * time would strand the previous daemon holding the user's work with no way
+ * back to it.
+ *
+ * @returns The default session identifier.
+ */
+function defaultSessionId(): string {
+  return `pdv-${os.userInfo().username}`;
 }

@@ -431,6 +431,28 @@ export async function installBundle(
   };
 }
 
+/**
+ * The shell command that runs `pdv-server` on a host, ready for arguments.
+ *
+ * Deliberately returns a *shell fragment* rather than a path: the install
+ * lives under `$HOME`, needs its zeromq loader pointed at the bundled copy,
+ * and must run from its own directory. Callers append their subcommand.
+ *
+ * The `$HOME` is left unquoted-by-design so the remote shell expands it —
+ * quoting the whole fragment would produce a literal `$HOME` and a command
+ * that is not found.
+ *
+ * @param version - Installed bundle version.
+ * @returns A shell fragment ending in the `pdv-server.cjs` invocation.
+ */
+export function remoteServerCommand(version: string): string {
+  const target = `$HOME/${REMOTE_ROOT}/${version}`;
+  return (
+    `cd "${target}" && PDV_ZEROMQ_PATH="${target}/node_modules/zeromq" ` +
+    `PDV_APP_VERSION="${version}" ./node/bin/node pdv-server.cjs`
+  );
+}
+
 /** Verdict shape emitted by `pdv-server self-check`. */
 interface SelfCheckVerdict {
   ok?: boolean;

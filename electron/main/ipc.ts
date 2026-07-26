@@ -436,6 +436,19 @@ export const IPC = {
     disconnect: "remote:disconnect",
     /** Current connection state, for renderer (re)hydration. */
     getStatus: "remote:getStatus",
+    /**
+     * Move the session onto the connected host: attach to (or create) a
+     * session daemon there and swap the active server onto it.
+     *
+     * Separate from `connect` on purpose. Reaching a host and *running the
+     * session there* are different steps with different failure modes, and
+     * keeping them apart is what lets a failed session start leave the user
+     * with a working local session and a live connection rather than
+     * neither.
+     */
+    startSession: "remote:startSession",
+    /** Leave the remote session running and return to a local session. */
+    endSession: "remote:endSession",
   },
   /** Native file/directory picker channels. */
   files: {
@@ -703,6 +716,16 @@ export interface RemoteStatus {
    * progress bar would mean anything.
    */
   progress?: { transferred: number; total: number };
+}
+
+/** Result of {@link PDVApi.remote.startSession} / `endSession`. */
+export interface RemoteSessionResult {
+  /** True when the session now runs where the caller asked. */
+  ok: boolean;
+  /** Session id on the host, when one was started. */
+  sessionId?: string;
+  /** Actionable failure text, shown verbatim. */
+  message?: string;
 }
 
 /** Result of {@link PDVApi.remote.connect}. */
@@ -3072,6 +3095,10 @@ export interface PDVApi {
      * it is in flight.
      */
     connect(host: string): Promise<RemoteConnectResult>;
+    /** Move the session onto the connected host. */
+    startSession(): Promise<RemoteSessionResult>;
+    /** Leave the remote session running and return to a local session. */
+    endSession(): Promise<RemoteSessionResult>;
     /** Answer the prompt currently on screen. */
     respond(text: string): Promise<void>;
     /** Abandon the in-flight attempt. */

@@ -197,6 +197,14 @@ function buildBase() {
         host: null,
         attemptId: null,
       })),
+      startSession: stub<PDVApi["remote"]["startSession"]>(async () => ({
+        ok: false,
+        message: "not-mocked",
+      })),
+      endSession: stub<PDVApi["remote"]["endSession"]>(async () => ({
+        ok: false,
+        message: "not-mocked",
+      })),
       onStatus: subStub<PDVApi["remote"]["onStatus"]>(),
     },
     updater: {
