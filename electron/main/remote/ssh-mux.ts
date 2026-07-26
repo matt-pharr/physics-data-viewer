@@ -52,13 +52,23 @@ import * as path from "path";
 /**
  * Practical ceiling for an AF_UNIX socket path.
  *
- * `sockaddr_un.sun_path` is 104 bytes on macOS and 108 on Linux; ssh fails
- * with a truncation error rather than a clear message when the ControlPath
- * exceeds it. Electron's userData path plus a cluster hostname gets close
- * enough that this needs an explicit guard, so PDV hashes the host and falls
- * back to the temp dir when even that does not fit.
+ * `sockaddr_un.sun_path` is 104 bytes on macOS and 108 on Linux, and the
+ * limit applies to the path ssh actually binds — which is **not** the
+ * ControlPath given to it. While establishing a master, ssh binds a
+ * temporary `<ControlPath>.<17 random chars>` and renames it into place, so
+ * the effective budget is ~18 bytes smaller than it appears.
+ *
+ * Missing that is not hypothetical: a real macOS install produced a 91-byte
+ * ControlPath — comfortably inside the raw 104 — that became 108 with the
+ * suffix and failed with `unix_listener: path "..." too long for Unix domain
+ * socket`. Electron's userData path (`~/Library/Application Support/...`)
+ * consumes most of the budget before PDV adds anything.
+ *
+ * So the ceiling below reserves the suffix, and PDV hashes the host and
+ * falls back to the temp dir when even that does not fit.
  */
-const MAX_CONTROL_PATH_BYTES = 100;
+const SSH_TEMP_SUFFIX_BYTES = 18;
+const MAX_CONTROL_PATH_BYTES = 104 - SSH_TEMP_SUFFIX_BYTES;
 
 /** Default seconds to wait for a channel to reach the host. */
 const DEFAULT_CONNECT_TIMEOUT_SECONDS = 30;
@@ -250,10 +260,20 @@ export function controlPathFor(host: string, controlDir: string): string {
   if (Buffer.byteLength(preferred) <= MAX_CONTROL_PATH_BYTES) {
     return preferred;
   }
-  // A userData path deep enough to overflow is rare but real (long macOS
-  // user names, redirected profiles). Falling back keeps the connection
-  // working; the socket is per-uid and recreated on demand either way.
-  return path.join(os.tmpdir(), `pdv-${process.getuid?.() ?? 0}-${name}`);
+  // Overflow is not rare — Electron's userData on macOS
+  // (`~/Library/Application Support/<app>`) leaves too little headroom once
+  // ssh's temp suffix is counted, so this is the normal path there.
+  //
+  // The fallback name mixes in the control directory, not just the host.
+  // Keying on the host alone would collapse every control directory onto one
+  // socket, so two PDV profiles — or two tests — would silently share a
+  // master and each would see the other's connection as its own.
+  const scoped = crypto
+    .createHash("sha256")
+    .update(`${controlDir}\u0000${host}`)
+    .digest("hex")
+    .slice(0, 16);
+  return path.join(os.tmpdir(), `pdv-${process.getuid?.() ?? 0}-m-${scoped}`);
 }
 
 /**

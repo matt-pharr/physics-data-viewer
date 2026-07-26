@@ -87,7 +87,35 @@ describe("controlPathFor", () => {
   it("keeps the socket path inside the platform's sun_path budget", () => {
     const deep = path.join(dir, "a".repeat(60), "b".repeat(60));
     const result = controlPathFor("some.very.long.cluster.hostname.example.org", deep);
-    expect(Buffer.byteLength(result)).toBeLessThanOrEqual(104);
+    // +18 for the temporary `.<17 random chars>` ssh actually binds before
+    // renaming into place. Asserting against the bare path is what let a
+    // 91-byte ControlPath through that failed at 108 on a real machine.
+    expect(Buffer.byteLength(result) + 18).toBeLessThanOrEqual(104);
+  });
+
+  it("fits a real macOS userData path, suffix included", () => {
+    // Regression, found by driving the UI: Electron's userData on macOS is
+    // `~/Library/Application Support/<app>`, which left only ~13 bytes of
+    // headroom — enough for the ControlPath, not enough for the socket ssh
+    // binds. It failed with
+    //   unix_listener: path "..." too long for Unix domain socket
+    const userData =
+      "/Users/pharr/Library/Application Support/physics-data-viewer/ssh-control";
+    const result = controlPathFor("feyn", userData);
+
+    expect(Buffer.byteLength(result) + 18).toBeLessThanOrEqual(104);
+    // Too long to live under userData, so it must have fallen back.
+    expect(result.startsWith(userData)).toBe(false);
+  });
+
+  it("gives different control directories different fallback sockets", () => {
+    // Keying the fallback on the host alone would collapse every control
+    // directory onto one socket, so two PDV profiles (or two tests) would
+    // share a master and each would read the other's connection as its own.
+    const deepA = path.join(dir, "a".repeat(80));
+    const deepB = path.join(dir, "b".repeat(80));
+
+    expect(controlPathFor("feyn", deepA)).not.toBe(controlPathFor("feyn", deepB));
   });
 
   it("cannot escape the control directory via a hostile alias", () => {
