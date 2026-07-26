@@ -126,6 +126,17 @@ cd electron && JULIA_PATH=/path/to/julia npm test -- --reporter=verbose main/int
 cd electron && npm run build:e2e
 cd electron && PYTHON_PATH=/path/to/python npm run test:e2e
 
+# Remote sessions against a REAL host (skipped unless the host is set).
+# Needs an ssh alias you can authenticate to; open a ControlMaster first
+# (ssh -f -N -M -o ControlPath=/tmp/pdv-dbg.sock <host>) or be ready to
+# approve a key, since PDV will otherwise establish its own master and any
+# agent prompt or 2FA push must be answered inside the connect timeout.
+# Build the bundle first — fetch:remote-node then build:server-bundle —
+# or the host has nothing to install.
+cd electron && npm run fetch:remote-node && npm run build:server-bundle
+cd electron && PDV_E2E_REMOTE_HOST=feyn PYTHON_PATH=/path/to/python \
+  npm run test:e2e -- remote-session-live
+
 # pdv-python dependency-resolution sweep (uv-driven matrix of Python
 # versions x extras combos x resolution strategies). Run before merging
 # any PR that touches pdv-python or its pyproject.toml.

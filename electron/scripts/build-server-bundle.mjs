@@ -210,6 +210,18 @@ if (!version) {
   process.exit(1);
 }
 
+/**
+ * Where `scripts/fetch-remote-node.mjs` leaves a runtime for this arch.
+ *
+ * @param {string} root - The electron/ directory.
+ * @param {string} arch - Target architecture ("x64" | "arm64").
+ * @returns {string|null} The directory, or null when it has not been fetched.
+ */
+function defaultNodeDir(root, arch) {
+  const candidate = path.join(root, "resources", "node", `linux-${arch}`);
+  return fs.existsSync(candidate) ? candidate : null;
+}
+
 const outRoot = path.join(electronRoot, "dist", "remote-bundles");
 fs.rmSync(outRoot, { recursive: true, force: true });
 fs.mkdirSync(outRoot, { recursive: true });
@@ -247,20 +259,33 @@ for (const arch of arches) {
     if (payload.exclude) prune(dest);
   }
 
+  // Default to where `npm run fetch:remote-node` puts it. Without this the
+  // two scripts do not connect, and `npm run build:server-bundle` on its own
+  // produces a bundle with no Node in it — which installs fine and then
+  // cannot execute anything, reported only as a parenthetical "(omitted)".
+  const resolvedNodeDir =
+    nodeDir ?? defaultNodeDir(electronRoot, arch);
+
   let nodeVersion = null;
-  if (nodeDir) {
-    if (!fs.existsSync(nodeDir)) {
-      console.error(`[bundle] --node ${nodeDir} does not exist`);
+  if (resolvedNodeDir) {
+    if (!fs.existsSync(resolvedNodeDir)) {
+      console.error(`[bundle] --node ${resolvedNodeDir} does not exist`);
       process.exit(1);
     }
-    copyInto(nodeDir, path.join(stage, "node"));
+    copyInto(resolvedNodeDir, path.join(stage, "node"));
     const nodeBin = path.join(stage, "node", "bin", "node");
     if (fs.existsSync(nodeBin)) fs.chmodSync(nodeBin, 0o755);
-    nodeVersion = fs.existsSync(path.join(nodeDir, "version"))
-      ? fs.readFileSync(path.join(nodeDir, "version"), "utf8").trim()
+    nodeVersion = fs.existsSync(path.join(resolvedNodeDir, "version"))
+      ? fs.readFileSync(path.join(resolvedNodeDir, "version"), "utf8").trim()
       : "unknown";
   } else {
     missing.push("node runtime");
+    // Louder than the parenthetical summary: this bundle will upload,
+    // install and verify its checksum, then fail to execute anything at all.
+    console.warn(
+      `[bundle] WARNING: ${arch} bundle has no Node runtime and cannot run on a host. ` +
+        "Run `npm run fetch:remote-node` first.",
+    );
   }
 
   // Read by the installer before it trusts anything in here.
