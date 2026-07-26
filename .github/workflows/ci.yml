@@ -563,6 +563,103 @@ jobs:
   # as OK and fails only on a real failure or cancellation — so the required
   # check stays stable even as the job matrix changes, and dist.yml can gate
   # the release on this one job via workflow_call.
+  # `npm run dev` is the one entry point nothing else exercises: the unit
+  # tests, typecheck, lint and even the packaged build all pass while it is
+  # broken. It stayed broken once because a dependency bump moved
+  # concurrently's entry point and the script still named the old path.
+  #
+  # This boots it for real and waits for two markers that together prove the
+  # whole dev chain works:
+  #   - "VITE ... ready"        — the renderer dev server is serving
+  #   - "serving stdio RPC"     — Electron started, the supervisor spawned the
+  #                               pdv-server child, and the transport is up
+  #
+  # The second is deliberately not just "electron started": a main process
+  # that boots and then fails to reach its server would still be broken for
+  # anyone trying to develop.
+  dev-smoke:
+    name: Dev server smoke
+    needs: filter
+    if: needs.filter.outputs.electron == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e  # v6.4.0
+        with:
+          node-version: 24
+          cache: 'npm'
+          cache-dependency-path: electron/package-lock.json
+
+      - name: Cache electron/node_modules
+        id: node-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: electron/node_modules
+          key: node-modules-${{ runner.os }}-${{ hashFiles('electron/package-lock.json') }}
+
+      - name: Install Node dependencies
+        if: steps.node-cache.outputs.cache-hit != 'true'
+        working-directory: electron
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install
+          fi
+
+      - name: Install Electron Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            xvfb libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 \
+            libdrm2 libgbm1 libxkbcommon0 libxcomposite1 libxdamage1 \
+            libxfixes3 libxrandr2 libpango-1.0-0 libcairo2 libasound2t64
+
+      # electronmon loads dist/main/bootstrap.js, so the main process has to
+      # be compiled first — exactly as a developer must before `npm run dev`.
+      - name: Build main process
+        working-directory: electron
+        run: npm run build:main
+
+      - name: Boot the dev servers
+        working-directory: electron
+        run: |
+          set -u
+          xvfb-run -a npm run dev > /tmp/dev.log 2>&1 &
+          DEV_PID=$!
+
+          renderer_up=0
+          main_up=0
+          for _ in $(seq 1 90); do
+            grep -q "ready in" /tmp/dev.log && renderer_up=1
+            grep -q "serving stdio RPC" /tmp/dev.log && main_up=1
+            if [ "$renderer_up" = 1 ] && [ "$main_up" = 1 ]; then break; fi
+            # A dead process will never produce the markers; fail fast rather
+            # than burning the whole timeout.
+            if ! kill -0 "$DEV_PID" 2>/dev/null; then break; fi
+            sleep 2
+          done
+
+          kill -TERM "$DEV_PID" 2>/dev/null || true
+          pkill -f electronmon 2>/dev/null || true
+
+          echo "----- dev output -----"
+          cat /tmp/dev.log
+          echo "----------------------"
+
+          if [ "$renderer_up" != 1 ]; then
+            echo "::error::the renderer dev server never became ready"
+          fi
+          if [ "$main_up" != 1 ]; then
+            echo "::error::the main process never reached its pdv-server"
+          fi
+          [ "$renderer_up" = 1 ] && [ "$main_up" = 1 ]
+
   ci-ok:
     name: CI OK
     needs:
@@ -575,6 +672,7 @@ jobs:
       - dep-sweep
       - node-main-tests
       - renderer-tests
+      - dev-smoke
       - e2e-tests
       - docs-build
     if: always()
