@@ -401,6 +401,35 @@ export function clearQuitRequestPending(): void {
 export function wireAppEvents(
   getServer: () => ServerHandle | null
 ): void {
+  // E2E-only quit forensics. CI-Linux showed the app entering a full quit
+  // cycle (before-quit → will-quit) seconds into a remote spec with no code
+  // path of ours calling quit. The initiator is invisible in the event
+  // markers alone, so name it directly: a stack trace for any JS-level
+  // quit/exit (including Playwright's inspector-evaluated `app.quit()`),
+  // and a log line for a POSIX signal, which Chromium otherwise translates
+  // into the same quit cycle without any JS trace.
+  if (process.env.PDV_E2E === "1") {
+    const originalQuit = app.quit.bind(app);
+    const originalExit = app.exit.bind(app);
+    app.quit = (): void => {
+      console.error(
+        `[PDV] app.quit() called:\n${new Error("app.quit tracer").stack ?? "<no stack>"}`
+      );
+      originalQuit();
+    };
+    app.exit = (exitCode?: number): void => {
+      console.error(
+        `[PDV] app.exit(${String(exitCode ?? 0)}) called:\n${new Error("app.exit tracer").stack ?? "<no stack>"}`
+      );
+      originalExit(exitCode);
+    };
+    for (const sig of ["SIGTERM", "SIGINT", "SIGHUP"] as const) {
+      process.on(sig, () => {
+        console.error(`[PDV] received ${sig}; quitting`);
+        originalQuit();
+      });
+    }
+  }
   app.on("before-quit", () => {
     console.error("[PDV] before-quit");
     isQuittingGlobal = true;
