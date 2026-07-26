@@ -41,6 +41,7 @@ import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
+import * as zlib from "node:zlib";
 
 import { bundleServer } from "./lib/bundle-server.mjs";
 
@@ -303,7 +304,51 @@ for (const arch of arches) {
   fs.writeFileSync(path.join(stage, "bundle-manifest.json"), JSON.stringify(manifest, null, 2));
 
   const tarball = path.join(outRoot, `pdv-server-${version}-linux-${arch}.tar.gz`);
-  execFileSync("tar", ["-czf", tarball, "-C", stage, "."], { stdio: "inherit" });
+  // COPYFILE_DISABLE stops macOS bsdtar from writing AppleDouble ("._*")
+  // metadata entries; extracted on a Linux host those become real junk files
+  // that shadow real assets (a "._*.whl" broke the wheel install on a real
+  // cluster). Harmless elsewhere — GNU tar ignores the variable.
+  // macOS metadata must not reach a Linux host, in any of its three forms:
+  // --exclude catches real junk files sitting in the source tree (.DS_Store
+  // in resources/examples was really there); COPYFILE_DISABLE stops bsdtar
+  // from inventing AppleDouble "._*" entries (a "._*.whl" shadowed the real
+  // wheel and broke the install on a real cluster); --no-xattrs stops xattr
+  // pax headers (com.apple.provenance), which made the host's GNU tar print
+  // an "Ignoring unknown extended header" warning per file — thousands of
+  // lines of red noise streamed into the connect dialog.
+  execFileSync(
+    "tar",
+    [
+      "-czf", tarball,
+      "--no-xattrs",
+      "--exclude", "._*",
+      "--exclude", ".DS_Store",
+      "-C", stage, ".",
+    ],
+    {
+      stdio: "inherit",
+      env: { ...process.env, COPYFILE_DISABLE: "1" },
+    },
+  );
+  // Verify rather than trust: a tar that ignores these options would
+  // regress silently, and every form only bites on the Linux host.
+  const junk = execFileSync("tar", ["-tzf", tarball])
+    .toString()
+    .split("\n")
+    .filter((entry) => /(^|\/)\._|(^|\/)\.DS_Store/.test(entry));
+  if (junk.length > 0) {
+    throw new Error(
+      `[bundle] macOS metadata junk in ${path.basename(tarball)} ` +
+        `(would shadow real assets on the host): ${junk.slice(0, 5).join(", ")}`,
+    );
+  }
+  const rawTar = zlib.gunzipSync(fs.readFileSync(tarball));
+  if (rawTar.includes("LIBARCHIVE.xattr")) {
+    throw new Error(
+      `[bundle] xattr pax headers in ${path.basename(tarball)} — the host's ` +
+        "GNU tar warns once per file; build with --no-xattrs intact.",
+    );
+  }
   fs.rmSync(stage, { recursive: true, force: true });
 
   const data = fs.readFileSync(tarball);

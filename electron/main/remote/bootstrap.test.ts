@@ -15,7 +15,7 @@ import * as os from "os";
 import * as path from "path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { installBundle, probeHost, sha256File, uploadFile } from "./bootstrap";
+import { installBundle, probeHost, remoteServerCommand, sha256File, uploadFile } from "./bootstrap";
 import type { SshControl } from "./ssh-mux";
 import { TEST_PDV_VERSION } from "../test-helpers";
 
@@ -223,4 +223,32 @@ describe("installBundle", () => {
     expect(fs.existsSync(marker)).toBe(false);
     expect(fs.existsSync(path.join(home, `.pdv-server`, `${TEST_PDV_VERSION}.old`))).toBe(false);
   }, 60_000);
+});
+
+describe("remoteServerCommand", () => {
+  it("hands the server every bundled-path variable, $HOME-expanded", () => {
+    // Executed under a real shell against a staged install, because the env
+    // the *server process* receives is the contract — not the string. The
+    // missing PDV_RESOURCES_ROOT was exactly this class of bug: the command
+    // looked complete, and on a real cluster every bundled asset (uv, the
+    // pdv-python wheel) was invisible, so no kernel could ever start.
+    const target = path.join(home, ".pdv-server", TEST_PDV_VERSION);
+    fs.mkdirSync(path.join(target, "node", "bin"), { recursive: true });
+    fs.writeFileSync(path.join(target, "pdv-server.cjs"), "// server\n");
+    fs.writeFileSync(
+      path.join(target, "node", "bin", "node"),
+      "#!/bin/sh\nenv | grep '^PDV_' | sort\npwd\n",
+      { mode: 0o755 },
+    );
+
+    const out = execFileSync("/bin/sh", ["-c", remoteServerCommand(TEST_PDV_VERSION)], {
+      env: { ...process.env, HOME: home },
+    }).toString();
+
+    expect(out).toContain(`PDV_APP_VERSION=${TEST_PDV_VERSION}`);
+    expect(out).toContain(`PDV_ZEROMQ_PATH=${path.join(target, "node_modules", "zeromq")}`);
+    expect(out).toContain(`PDV_RESOURCES_ROOT=${path.join(target, "resources")}`);
+    // The trailing pwd proves the cd into the install dir took effect.
+    expect(out.trim().split("\n").pop()).toBe(target);
+  });
 });

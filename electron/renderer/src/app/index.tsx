@@ -492,7 +492,18 @@ const App: React.FC = () => {
 
   // An ssh connection outlives any one kernel, so this is not kernel-keyed.
   useRemoteConnection();
-  useSessionState(currentKernelId);
+  useSessionState(
+    currentKernelId,
+    // On a resync the server behind this window changed; `config` lives in
+    // component state, so the query-cache reset cannot refresh it. Without
+    // this reload a kernel start after a session swap uses the previous
+    // machine's pythonPath and default packages.
+    useCallback(() => {
+      void window.pdv.config.get().then((loaded) => {
+        setConfig(loaded);
+      });
+    }, []),
+  );
 
   useKernelSubscriptions({
     currentKernelId,

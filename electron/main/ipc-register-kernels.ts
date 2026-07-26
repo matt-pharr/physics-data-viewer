@@ -684,7 +684,9 @@ export function registerKernelIpcHandlers(
         const installStatus = await EnvironmentDetector.checkPDVInstalled(pythonPath);
         if (!installStatus.installed) {
           throw new Error(
-            `Selected Python runtime is missing pdv. Install it with: cd pdv-python && ${pythonPath} -m pip install -e ".[dev]"`
+            `Selected Python runtime is missing pdv-python (${pythonPath}). ` +
+              "Choose or install an environment in Settings → Runtime — " +
+              "PDV can install pdv-python into it there."
           );
         }
         envMeta = {

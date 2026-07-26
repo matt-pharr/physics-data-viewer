@@ -103,6 +103,13 @@ export interface KernelExecuteRequest {
   code: string;
   /** If true, suppress history storage in the kernel. */
   silent?: boolean;
+  /**
+   * Override history storage independently of `silent`. ipykernel publishes
+   * no iopub `error` for silent executions, so a caller that needs errors
+   * (the bootstrap handshake) must run non-silent — this keeps such an
+   * execute out of the user's history anyway. Defaults to `!silent`.
+   */
+  storeHistory?: boolean;
   /** Caller-supplied ID used to correlate streamed output chunks. */
   executionId?: string;
   /** Optional execution-origin metadata used in error summaries. */
@@ -771,7 +778,7 @@ export class KernelManager extends EventEmitter {
       {
         code: request.code,
         silent: request.silent ?? false,
-        store_history: !(request.silent ?? false),
+        store_history: request.storeHistory ?? !(request.silent ?? false),
         user_expressions: {},
         allow_stdin: false,
         stop_on_error: true,

@@ -22,6 +22,7 @@
 
 import { expect, test } from "@playwright/test";
 
+import { expectKernelReady } from "./helpers/kernel-status";
 import { launchPDV, type LaunchedApp } from "./helpers/launch";
 import { sendMenuAction } from "./helpers/menu-action";
 
@@ -80,15 +81,14 @@ test.describe(() => {
     expect(await markers.count()).toBeLessThanOrEqual(1);
   });
 
-  // KNOWN GAP, kept as a failing-by-design test rather than deleted: a
-  // remote host has no PDV Python environment, so no kernel can start there
-  // yet. Verified on feyn — `/usr/bin/python3` exists but `import pdv` fails,
-  // and nothing in the UI says so: "Starting kernel…" spins indefinitely
-  // while the daemon logs nothing, because the start never gets far enough
-  // to fail. Two separate pieces of work: provisioning the environment on
-  // the host (the bundle ships uv for exactly this), and surfacing "this host
-  // has no usable interpreter" instead of an unbounded spinner.
-  test.fixme("starts a kernel on the remote host", async () => {
+  // Once a failing-by-design fixme ("a remote host has no PDV Python
+  // environment"), now the provisioning proof: the default New Python
+  // Project drives the bundle's own uv on the host — venv, packages, and
+  // the bundled pdv-python wheel — and the kernel that boots from it runs
+  // real code there. What made it pass, for the record: PDV_RESOURCES_ROOT
+  // reaching the daemon, a bundle free of macOS tar metadata, and a boot
+  // silence allowance that tolerates cold imports from an NFS home.
+  test("starts a kernel on the remote host", async () => {
     // The step beyond "the session moved": the kernel, the Tree and the
     // ZeroMQ loopback all have to come up *there*.
     launched = await launchPDV({ env: { PDV_REMOTE: "1" } });
@@ -107,15 +107,29 @@ test.describe(() => {
     });
     await dialog.getByRole("button", { name: "Close" }).click();
 
+    // The default new-project path: uv mode, using the bundle's own uv and
+    // pdv-python wheel on the host. Cold-cache uv downloads a CPython and
+    // the default packages, so the ceiling is generous.
     await sendMenuAction(app, { action: "project:new" });
+    await page.getByRole("button", { name: "New Python Project" }).click();
+    await page.getByTestId("new-project-create").click();
 
     // Either the kernel comes up, or the UI says why. A spinner that never
     // resolves is the failure mode this test exists to catch.
-    await expect(page.getByText(/Starting kernel/)).toHaveCount(0, {
-      timeout: 120_000,
-    });
-    await expect(page.getByTestId("kernel-status")).toContainText(/Idle|Busy/, {
-      timeout: 120_000,
+    await expectKernelReady(page, 300_000);
+    await expect(page.getByText(/Starting kernel/)).toHaveCount(0);
+
+    // The kernel is not just alive — it runs code on the cluster. Asking it
+    // for the hostname closes the loop: the answer must be the remote node,
+    // not this laptop.
+    const editor = page.getByRole("textbox", { name: "Editor content" });
+    await editor.focus();
+    await page.keyboard.type("import socket; print(socket.gethostname())");
+    await page.getByRole("button", { name: "Execute" }).click();
+    // Not `.first()` — the reconnect marker also renders as a log entry;
+    // the hostname arrives in a later one.
+    await expect(page.locator(".log-stdout").filter({ hasText: /feyn/i })).toBeVisible({
+      timeout: 60_000,
     });
   });
 });

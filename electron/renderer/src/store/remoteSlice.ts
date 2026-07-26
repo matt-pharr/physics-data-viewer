@@ -29,7 +29,7 @@ export interface RemoteSlice {
    * pinned to this node, and a later reconnect can land somewhere else.
    */
   remoteNode: string | null;
-  /** Accumulated ssh output for the connection log. */
+  /** Accumulated ssh output for the connection log (tail-bounded). */
   remoteLog: string;
   /** True when the prompt on screen wants something secret — mask the input. */
   remoteSecret: boolean;
@@ -63,11 +63,17 @@ export const createRemoteSlice: AppSlice<RemoteSlice> = (set) => ({
       const isNewAttempt =
         status.attemptId !== null && status.attemptId !== state.remoteAttemptId;
       const base = isNewAttempt ? '' : state.remoteLog;
+      // Tail-bounded: a misbehaving remote step can emit one warning per
+      // bundle file (thousands of lines), and rendering an unbounded log
+      // wedged the connect dialog on a real cluster. The interesting part
+      // of a connection log is always its tail.
+      const grown = status.output ? base + status.output : base;
+      const log = grown.length > 32_768 ? grown.slice(-32_768) : grown;
       return {
         remotePhase: status.phase,
         remoteConnectHost: status.host,
         remoteNode: status.node ?? (status.phase === 'connected' ? state.remoteNode : null),
-        remoteLog: status.output ? base + status.output : base,
+        remoteLog: log,
         remoteSecret: status.secret ?? false,
         remoteMessage: status.message ?? (isNewAttempt ? null : state.remoteMessage),
         remoteAttemptId: status.attemptId,

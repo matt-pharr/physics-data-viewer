@@ -51,9 +51,18 @@ function toConnectionState(push: SessionStatePush): ConnectionState {
  * Subscribe to session-state pushes for the lifetime of the app.
  *
  * @param currentKernelId - Kernel to invalidate on a resync, or null.
+ * @param onResync - Called on every resync AFTER the query cache is reset.
+ *   App uses it to reload state that lives outside React Query — its
+ *   `config` useState in particular, whose `pythonPath`/`defaultPackages`
+ *   would otherwise still be the previous machine's (clearing the query
+ *   cache cannot reach component state, and a kernel started with the
+ *   laptop's interpreter path on a cluster was a real observed failure).
  * @returns Nothing.
  */
-export function useSessionState(currentKernelId: string | null): void {
+export function useSessionState(
+  currentKernelId: string | null,
+  onResync?: () => void,
+): void {
   const setConnectionState = useStore((s) => s.setConnectionState);
   const setRemoteHost = useStore((s) => s.setRemoteHost);
 
@@ -73,6 +82,7 @@ export function useSessionState(currentKernelId: string | null): void {
       if (currentKernelId) {
         invalidateAllKernelState(currentKernelId, 'reconnect');
       }
+      onResync?.();
       useStore.getState().setLogs((prev) => [
         ...prev,
         {
@@ -85,5 +95,5 @@ export function useSessionState(currentKernelId: string | null): void {
       ]);
     });
     return unsubscribe;
-  }, [currentKernelId, setConnectionState, setRemoteHost]);
+  }, [currentKernelId, onResync, setConnectionState, setRemoteHost]);
 }

@@ -81,6 +81,20 @@ describe('useSessionState', () => {
       expect(invalidateAllKernelState).toHaveBeenCalledWith('k1', 'reconnect');
     });
 
+    it('invokes the resync callback so App can reload non-query state', () => {
+      // App's `config` is component state; the query-cache reset cannot
+      // reach it, and stale config after a swap means the next kernel
+      // start uses the previous machine's interpreter and packages.
+      const onResync = vi.fn();
+      renderHook(() => useSessionState('k1', onResync));
+
+      emit({ kind: 'remote', host: 'flux', state: 'connected' });
+      expect(onResync).not.toHaveBeenCalled();
+
+      emit({ kind: 'remote', host: 'flux', state: 'connected', resync: true });
+      expect(onResync).toHaveBeenCalledOnce();
+    });
+
     it('discards config and project too, not just kernel-scoped state', () => {
       // A pythonPath cached from the laptop is a path that does not exist on
       // the cluster, and the kernel start it feeds hangs rather than fails.

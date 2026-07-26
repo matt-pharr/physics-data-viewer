@@ -52,6 +52,26 @@ describe('applyRemoteStatus', () => {
     expect(useStore.getState().remoteLog).toBe('Duo push?');
   });
 
+  it('keeps only the tail of a flooding connection log', () => {
+    // A misbehaving remote step can emit one warning per bundle file —
+    // thousands of lines. Rendering an unbounded log wedged the connect
+    // dialog on a real cluster; the tail is the part worth keeping.
+    const s = useStore.getState();
+    s.applyRemoteStatus(status({ phase: 'connecting', host: 'flux', attemptId: 'a1' }));
+    const line = 'tar: Ignoring unknown extended header keyword\n';
+    for (let i = 0; i < 2000; i++) {
+      s.applyRemoteStatus(
+        status({ phase: 'connecting', host: 'flux', attemptId: 'a1', output: line }),
+      );
+    }
+    s.applyRemoteStatus(
+      status({ phase: 'connecting', host: 'flux', attemptId: 'a1', output: 'END-MARKER' }),
+    );
+    const log = useStore.getState().remoteLog;
+    expect(log.length).toBeLessThanOrEqual(32_768);
+    expect(log.endsWith('END-MARKER')).toBe(true);
+  });
+
   it('starts a fresh log for a new attempt', () => {
     const s = useStore.getState();
     s.applyRemoteStatus(status({ phase: 'prompting', host: 'flux', attemptId: 'a1', output: 'old failure' }));

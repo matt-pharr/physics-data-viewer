@@ -29,6 +29,9 @@
  */
 
 import { expect, test } from "@playwright/test";
+import * as fsSync from "fs";
+import * as fs from "fs/promises";
+import * as os from "os";
 import * as path from "path";
 
 import { launchPDV, type LaunchedApp } from "./helpers/launch";
@@ -42,6 +45,12 @@ const SERVER_ENTRY = path.join(REPO_ROOT, "dist", "main", "server", "server-main
 function remoteEnv(): Record<string, string> {
   return {
     PDV_REMOTE: "1",
+    // Isolate the session socket per launch. The default runtime dir is
+    // shared (`/tmp/pdv-server-<uid>`) and the session id is
+    // username-stable, so without this every spec run attaches to whatever
+    // daemon a PREVIOUS run leaked — old code, old config, very confusing
+    // failures (it happened).
+    PDV_SERVER_RUNTIME_DIR: fsSync.mkdtempSync(path.join(os.tmpdir(), "pdv-rt-")),
     // Executable with a `#!/usr/bin/env node` shebang, so it stands in for
     // the ssh binary directly rather than needing an interpreter prefix.
     PDV_SSH_PATH: FAKE_SSH,
@@ -110,6 +119,63 @@ test("keeps the local session working when the host cannot be reached", async ()
   await dialog.getByRole("button", { name: "Close" }).click();
   // The app is still usable: the local session was never touched.
   await expect(page.locator(".welcome-overlay")).toBeVisible();
+});
+
+test("surfaces a remote kernel-start failure instead of spinning", async () => {
+  test.setTimeout(240_000);
+  // The failure mode this pins down was found on a real cluster: a host
+  // where the session environment cannot be built. The invariant is that
+  // the failure is LOUD — the launch overlay lands on "Session failed to
+  // start" with the daemon's actual error and a Retry — never an unbounded
+  // "Starting kernel…" spinner. The daemon-side failure is forced
+  // deterministically: a fresh remote config whose default packages cannot
+  // resolve, so the uv sync step fails fast on the host.
+  const scratch = await fs.mkdtemp(path.join(os.tmpdir(), "pdv-remote-fail-"));
+  const remotePdvDir = path.join(scratch, "dot-pdv");
+  await fs.mkdir(remotePdvDir, { recursive: true });
+  await fs.writeFile(
+    path.join(remotePdvDir, "preferences.json"),
+    JSON.stringify({ defaultPackages: ["pdv-does-not-exist-anywhere-e2e"] }),
+    "utf8",
+  );
+
+  launched = await launchPDV({
+    env: {
+      ...remoteEnv(),
+      PDV_REMOTE_SERVER_COMMAND:
+        `PDV_PDV_DIR="${remotePdvDir}" ` +
+        `ELECTRON_RUN_AS_NODE=1 "${process.execPath}" "${SERVER_ENTRY}"`,
+    },
+  });
+  const { app, window: page } = launched;
+
+  await sendMenuAction(app, { action: "remote:connect" });
+  const dialog = page.locator(".remote-panel");
+  await dialog.locator(".remote-host-input").fill("testhost");
+  await dialog.getByRole("button", { name: "Connect" }).click();
+  await expect(dialog.getByText(/Connected to/)).toBeVisible({ timeout: 30_000 });
+  await dialog.getByRole("button", { name: "Run session here" }).click();
+  await expect(dialog.getByText(/Your session is running on/)).toBeVisible({
+    timeout: 30_000,
+  });
+  await dialog.getByRole("button", { name: "Close" }).click();
+
+  // The default new-project path (uv mode) against the poisoned config.
+  await sendMenuAction(app, { action: "project:new" });
+  await page.getByRole("button", { name: "New Python Project" }).click();
+  await page.getByTestId("new-project-create").click();
+
+  // The overlay must land on the failed state with the daemon's error and
+  // a way out — not spin forever.
+  await expect(page.locator(".env-sync-title")).toHaveText(
+    "Session failed to start",
+    { timeout: 120_000 },
+  );
+  await expect(page.locator(".env-sync-error")).toContainText(
+    /uv environment setup failed/,
+  );
+  await expect(page.getByRole("button", { name: "Retry" })).toBeVisible();
+  await fs.rm(scratch, { recursive: true, force: true });
 });
 
 test("does not offer remote mode unless it is enabled", async () => {

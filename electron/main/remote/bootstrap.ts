@@ -476,6 +476,11 @@ export function remoteServerCommand(version: string): string {
   const target = `$HOME/${REMOTE_ROOT}/${version}`;
   return (
     `cd "${target}" && PDV_ZEROMQ_PATH="${target}/node_modules/zeromq" ` +
+    // Without the resources root, every bundled asset is invisible to the
+    // server — resolveUvBinary finds no uv, the one-click install finds no
+    // pdv-python wheel — and a kernel start on a fresh host dies with
+    // "Could not locate the uv binary" (observed on a real cluster).
+    `PDV_RESOURCES_ROOT="${target}/resources" ` +
     `PDV_APP_VERSION="${version}" ./node/bin/node pdv-server.cjs`
   );
 }
