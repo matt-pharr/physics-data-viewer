@@ -33,7 +33,15 @@ const ELECTRON_IMPORT_RE =
  * allowed to name it (it hands the stream to the transport).
  */
 const STDOUT_ACCESS_RE = /process\.stdout/;
-const STDOUT_ALLOWED = new Set(["server/server-main.ts"]);
+const STDOUT_ALLOWED = new Set([
+  "server/server-main.ts",
+  // The attach proxy's stdout IS the protocol channel: it pipes the session
+  // socket straight to it, byte for byte, with nothing of its own added.
+  // That is the sanctioned use the rule protects — the hazard is a stray
+  // write interleaving with frames, and a pipe cannot do that. Its own
+  // diagnostics go through console.*, which server-main rebinds to stderr.
+  "server/attach-cli.ts",
+]);
 
 /**
  * Matches any reach into the shell-only remote layer.

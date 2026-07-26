@@ -55,6 +55,13 @@ import { setAppVersion } from "../pdv-protocol";
 import { RPC_CHANNELS } from "../transport/protocol";
 import { RpcServer } from "../transport/rpc-server";
 import { runSelfCheck } from "./self-check";
+import { attachToSession, proxyStdio } from "./attach-cli";
+import { SessionHost } from "./session-host";
+import { resolveSessionPaths } from "./session-paths";
+import { writeSessionMeta } from "./session-meta";
+import { readBootId } from "./session-lock";
+import { SessionIdlePolicy } from "./session-idle";
+import { RPC_PROTOCOL_VERSION } from "../transport/protocol";
 import { ShellConfirmBroker } from "./shell-confirm";
 import { getWiredCellRpc, getWiredMcpServer, unwireServer, wireServer, type WireHandle } from "./wire";
 
@@ -82,8 +89,26 @@ export function serverMain(): void {
     return;
   }
 
+  if (subcommand === "session-host") {
+    // The long-lived daemon. Already detached by whoever spawned it, so it
+    // simply serves its socket until the idle policy or a signal ends it.
+    void runSessionHost(args);
+    return;
+  }
+
+  if (subcommand === "attach") {
+    // A proxy over one ssh channel, not a server. It may die at any moment
+    // without touching the session it is connected to.
+    void runAttach(args);
+    return;
+  }
+
   if (subcommand !== "serve" || !args.includes("--stdio")) {
-    console.error("usage: pdv-server serve --stdio | pdv-server self-check");
+    console.error(
+      "usage: pdv-server serve --stdio | pdv-server self-check | " +
+        "pdv-server attach --session <id> --stdio [--create] | " +
+        "pdv-server session-host --session <id> --root <dir>"
+    );
     process.exit(2);
   }
 
@@ -212,4 +237,122 @@ export function serverMain(): void {
 // the future supervisor import types from this module).
 if (require.main === module) {
   serverMain();
+}
+
+/** Read `--flag value` from an argv slice. */
+function flagValue(args: string[], flag: string): string | undefined {
+  const at = args.indexOf(flag);
+  return at >= 0 ? args[at + 1] : undefined;
+}
+
+/**
+ * Default PDV root for sessions: `~/.pdv-server`.
+ *
+ * @returns The root directory path.
+ */
+function defaultRoot(): string {
+  return path.join(os.homedir(), ".pdv-server");
+}
+
+/**
+ * Serve one session until the process is told to stop.
+ *
+ * @param args - argv slice beginning with `session-host`.
+ * @returns Resolves when the socket is listening; the process stays alive.
+ * @throws Error if the session id is missing or the socket cannot be bound.
+ */
+async function runSessionHost(args: string[]): Promise<void> {
+  const sessionId = flagValue(args, "--session");
+  if (!sessionId) {
+    console.error("[session-host] --session <id> is required");
+    process.exit(2);
+    return;
+  }
+  const root = flagValue(args, "--root") ?? defaultRoot();
+  const version = process.env.PDV_APP_VERSION ?? "unknown";
+
+  const paths = resolveSessionPaths({ sessionId, root });
+
+  // The kernel is not wired into the daemon yet, so the policy sees a
+  // session with no kernel: it exits 30 minutes after the last client
+  // leaves rather than lingering on a login node forever. The predicates
+  // become real when the daemon owns a kernel.
+  // The two reference each other, which is safe because every callback
+  // below fires long after both are constructed.
+  const host: SessionHost = new SessionHost({
+    paths,
+    sessionId,
+    version,
+    onNoClients: () => idle.onClientsGone(),
+    onClientAttached: () => idle.onClientAttached(),
+  });
+  const idle = new SessionIdlePolicy({
+    hasKernel: () => false,
+    isExecuting: () => false,
+    autosave: async () => true,
+    shutdown: () => {
+      console.log("[session-host] idle; shutting down");
+      void host.close().then(() => process.exit(0));
+    },
+  });
+  await host.listen();
+
+  // Written only after the socket is listening: a session.json pointing at a
+  // socket nobody is serving would send every attach to a dead end.
+  writeSessionMeta(paths.metaPath, {
+    sessionId,
+    version,
+    protocol: RPC_PROTOCOL_VERSION,
+    pid: process.pid,
+    bootId: readBootId(),
+    hostname: paths.hostname,
+    sockPath: paths.sockPath,
+    runtimeSource: paths.runtimeSource,
+    startedAt: new Date().toISOString(),
+  });
+
+  console.log(
+    `[session-host] session ${sessionId} listening on ${paths.sockPath} ` +
+      `(host ${paths.hostname}, runtime ${paths.runtimeSource})`
+  );
+
+  const stop = (signal: string): void => {
+    console.log(`[session-host] ${signal}; shutting down`);
+    idle.dispose();
+    void host.close().then(() => process.exit(0));
+  };
+  process.on("SIGTERM", () => stop("SIGTERM"));
+  process.on("SIGINT", () => stop("SIGINT"));
+}
+
+/**
+ * Proxy this channel's stdio to a session, starting it if asked.
+ *
+ * @param args - argv slice beginning with `attach`.
+ * @returns Resolves when the proxy has finished; exits the process.
+ */
+async function runAttach(args: string[]): Promise<void> {
+  const sessionId = flagValue(args, "--session");
+  if (!sessionId || !args.includes("--stdio")) {
+    console.error("usage: pdv-server attach --session <id> --stdio [--create]");
+    process.exit(2);
+    return;
+  }
+  const root = flagValue(args, "--root") ?? defaultRoot();
+
+  try {
+    const { socket } = await attachToSession({
+      sessionId,
+      root,
+      create: args.includes("--create"),
+      execPath: process.execPath,
+      execArgs: process.argv.slice(1, 2),
+      env: process.env,
+    });
+    const code = await proxyStdio(socket);
+    process.exit(code);
+  } catch (err) {
+    console.error(`[attach] ${(err as Error).message}`);
+    process.exit(1);
+  }
 }

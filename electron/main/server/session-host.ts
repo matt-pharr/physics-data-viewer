@@ -61,6 +61,8 @@ export interface SessionHostOptions {
   attachDeadlineMs?: number;
   /** Called when the last client goes away, for the idle policy. */
   onNoClients?: () => void;
+  /** Called when a client attaches, for the idle policy. */
+  onClientAttached?: () => void;
 }
 
 /** One live connection and the state the host tracks for it. */
@@ -229,6 +231,8 @@ export class SessionHost {
     const previous = this.active;
     this.active = conn;
     if (previous && previous !== conn) this.supersede(previous);
+    // Cancels any idle countdown: somebody is watching again.
+    this.opts.onClientAttached?.();
 
     return plan;
   }
