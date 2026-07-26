@@ -176,9 +176,11 @@ export function registerRemoteIpcHandlers(
         pushSessionState({ kind: "remote", host, state });
       },
       onStale: (reason) => {
-        // The client's view could not be resumed. Query invalidation alone
-        // would leave push-backed state (execution status, kernel status)
-        // stale, so the renderer is told to rebuild everything.
+        // A first attach is always stale ("no-cursor") — there is nothing to
+        // resume yet — and the swap below already asks for a rebuild. Telling
+        // the renderer twice made it print two "output may be missing"
+        // markers for one connect, which reads as two lost intervals.
+        if (reason === "no-cursor") return;
         console.error(`[remote] session resync required: ${reason}`);
         pushSessionState({ kind: "remote", host, state: "connected", resync: true });
       },

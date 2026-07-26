@@ -16,7 +16,10 @@
 
 import { useEffect } from 'react';
 
-import { invalidateAllKernelState } from '../queries/invalidation';
+import {
+  invalidateAllKernelState,
+  resetSessionQueries,
+} from '../queries/invalidation';
 import { useStore } from '../store';
 import type { ConnectionState } from '../store/sessionSlice';
 
@@ -62,7 +65,11 @@ export function useSessionState(currentKernelId: string | null): void {
 
       if (!state.resync) return;
       // Rebuild everything: the server backing this window either changed or
-      // could not resume our view.
+      // could not resume our view. This must include config and project,
+      // which are not kernel-scoped — a `pythonPath` cached from the laptop
+      // is meaningless on a cluster, and starting a kernel with it hangs
+      // rather than failing.
+      resetSessionQueries();
       if (currentKernelId) {
         invalidateAllKernelState(currentKernelId, 'reconnect');
       }

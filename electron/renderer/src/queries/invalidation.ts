@@ -156,6 +156,26 @@ export function invalidateCompletions(kernelId: string): void {
  * @param kernelId - Kernel whose state is affected.
  * @param reason - What happened; controls remove-vs-invalidate.
  */
+/**
+ * Discard every cached query because the server behind them changed.
+ *
+ * Stronger than {@link invalidateAllKernelState}, and deliberately so: that
+ * one is scoped to kernel-owned domains, which excludes `config` and
+ * `project`. When a session moves to another machine those are exactly the
+ * ones that must not survive — a cached `pythonPath` from the laptop is a
+ * path that does not exist on the cluster, and the kernel start it feeds
+ * hangs instead of failing.
+ *
+ * Removed rather than invalidated: the data is not stale, it is *from
+ * somewhere else*, and showing it while a refetch is in flight would be
+ * showing the wrong machine's state as though it were this one's.
+ *
+ * @returns Nothing.
+ */
+export function resetSessionQueries(): void {
+  queryClient.removeQueries();
+}
+
 export function invalidateAllKernelState(
   kernelId: string,
   reason: KernelInvalidationReason,

@@ -15,7 +15,11 @@ import { useStore } from '../store';
 import { useSessionState } from './useSessionState';
 
 const invalidateAllKernelState = vi.hoisted(() => vi.fn());
-vi.mock('../queries/invalidation', () => ({ invalidateAllKernelState }));
+const resetSessionQueries = vi.hoisted(() => vi.fn());
+vi.mock('../queries/invalidation', () => ({
+  invalidateAllKernelState,
+  resetSessionQueries,
+}));
 
 type SessionPush = Parameters<
   Parameters<typeof window.pdv.remote.onSessionState>[0]
@@ -26,6 +30,7 @@ let emit: (push: SessionPush) => void;
 beforeEach(() => {
   installPdvMock();
   invalidateAllKernelState.mockClear();
+  resetSessionQueries.mockClear();
   useStore.setState({ connectionState: 'local', remoteHost: null, logs: [] });
   vi.mocked(window.pdv.remote.onSessionState).mockImplementation((cb) => {
     emit = cb;
@@ -76,6 +81,17 @@ describe('useSessionState', () => {
       expect(invalidateAllKernelState).toHaveBeenCalledWith('k1', 'reconnect');
     });
 
+    it('discards config and project too, not just kernel-scoped state', () => {
+      // A pythonPath cached from the laptop is a path that does not exist on
+      // the cluster, and the kernel start it feeds hangs rather than fails.
+      // invalidateAllKernelState alone cannot reach it: config and project
+      // are not kernel-scoped.
+      renderHook(() => useSessionState('k1'));
+      emit({ kind: 'remote', host: 'flux', state: 'connected', resync: true });
+
+      expect(resetSessionQueries).toHaveBeenCalled();
+    });
+
     it('marks the console where output was lost', () => {
       // Console output is append-only and genuinely unrecoverable — nothing
       // re-emits what was printed while nobody was listening. A silent gap
@@ -94,6 +110,7 @@ describe('useSessionState', () => {
       emit({ kind: 'remote', host: 'flux', state: 'connected' });
 
       expect(invalidateAllKernelState).not.toHaveBeenCalled();
+      expect(resetSessionQueries).not.toHaveBeenCalled();
       expect(useStore.getState().logs).toEqual([]);
     });
 

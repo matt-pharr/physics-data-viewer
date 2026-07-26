@@ -72,5 +72,50 @@ test.describe(() => {
     });
     // And no error crept in behind the success text.
     await expect(dialog.locator(".remote-error")).toHaveCount(0);
+
+    // Exactly one reconnect marker for one connect. Two would claim two
+    // separate intervals of lost output.
+    await dialog.getByRole("button", { name: "Close" }).click();
+    const markers = page.getByText(/output produced while disconnected/);
+    expect(await markers.count()).toBeLessThanOrEqual(1);
+  });
+
+  // KNOWN GAP, kept as a failing-by-design test rather than deleted: a
+  // remote host has no PDV Python environment, so no kernel can start there
+  // yet. Verified on feyn — `/usr/bin/python3` exists but `import pdv` fails,
+  // and nothing in the UI says so: "Starting kernel…" spins indefinitely
+  // while the daemon logs nothing, because the start never gets far enough
+  // to fail. Two separate pieces of work: provisioning the environment on
+  // the host (the bundle ships uv for exactly this), and surfacing "this host
+  // has no usable interpreter" instead of an unbounded spinner.
+  test.fixme("starts a kernel on the remote host", async () => {
+    // The step beyond "the session moved": the kernel, the Tree and the
+    // ZeroMQ loopback all have to come up *there*.
+    launched = await launchPDV({ env: { PDV_REMOTE: "1" } });
+    const { app, window: page } = launched;
+
+    await sendMenuAction(app, { action: "remote:connect" });
+    const dialog = page.locator(".remote-panel");
+    await dialog.locator(".remote-host-input").fill(HOST as string);
+    await dialog.getByRole("button", { name: "Connect" }).click();
+    await expect(dialog.getByText(/Connected to/)).toBeVisible({
+      timeout: CONNECT_TIMEOUT_MS,
+    });
+    await dialog.getByRole("button", { name: "Run session here" }).click();
+    await expect(dialog.getByText(/Your session is running on/)).toBeVisible({
+      timeout: 60_000,
+    });
+    await dialog.getByRole("button", { name: "Close" }).click();
+
+    await sendMenuAction(app, { action: "project:new" });
+
+    // Either the kernel comes up, or the UI says why. A spinner that never
+    // resolves is the failure mode this test exists to catch.
+    await expect(page.getByText(/Starting kernel/)).toHaveCount(0, {
+      timeout: 120_000,
+    });
+    await expect(page.getByTestId("kernel-status")).toContainText(/Idle|Busy/, {
+      timeout: 120_000,
+    });
   });
 });
