@@ -36,16 +36,21 @@ import {
   attachDecoder,
   MAX_LINE_BYTES,
 } from "./line-codec";
+import { PushJournal } from "./push-journal";
 import {
   RPC_CHANNELS,
+  RPC_PROTOCOL_MIN,
   RPC_PROTOCOL_VERSION,
+  UNSEQUENCED_SEQ,
   isRpcRequest,
+  isUnsequencedChannel,
   type RpcError,
   type RpcHello,
   type RpcPingResult,
   type RpcPush,
   type RpcRequest,
   type RpcResponse,
+  type UnsequencedChannel,
 } from "./protocol";
 
 /** Options accepted by {@link RpcServer}. */
@@ -73,6 +78,16 @@ export interface RpcServerOptions {
   onConfirmResponse?: (payload: unknown) => void;
   /** Override the decoder's max-line guard (tests). */
   maxLineBytes?: number;
+  /**
+   * The session's push journal. Defaults to a fresh one, which is correct
+   * for local mode: one connection for the process lifetime, so "the
+   * session" and "this connection" are the same thing. A session daemon
+   * serving successive attaches passes its own, which is what lets seq
+   * survive a reconnect.
+   */
+  journal?: PushJournal;
+  /** Session id advertised in the hello push; `null` for local mode. */
+  session?: string | null;
 }
 
 /** Serialize a rejection for the wire, preserving the visible message. */
@@ -95,16 +110,20 @@ export class RpcServer {
   private readonly readable: Readable;
   private readonly opts: RpcServerOptions;
   private detachDecoderFn: (() => void) | null = null;
-  /** Next push seq to stamp; hello consumes 0. */
-  private nextSeq = 0;
+
+  /**
+   * The session's push journal: it assigns every seq and retains the frames
+   * for replay. Exposed so a session daemon can drive the attach handshake.
+   */
+  readonly journal: PushJournal;
 
   /**
    * The connection's `PushSender` — inject this as server handlers' `push`.
    * Bound, so it can be passed around bare.
    */
   readonly push: PushSender = (channel, payload) => {
-    const push: RpcPush = { event: channel, payload, seq: this.nextSeq++ };
-    this.writer.write(push);
+    const { frame } = this.journal.append(channel, payload);
+    this.writer.writeFrame(frame);
   };
 
   /**
@@ -116,6 +135,32 @@ export class RpcServer {
     this.readable = readable;
     this.opts = opts;
     this.writer = new LineWriter(writable);
+    this.journal = opts.journal ?? new PushJournal();
+  }
+
+  /**
+   * Write a frame that is deliberately outside the sequenced stream.
+   *
+   * Restricted to {@link UNSEQUENCED_CHANNELS} by its parameter type *and*
+   * by a runtime check, because this is the one way to put a push on the
+   * wire without journalling it: an unsequenced frame is invisible to
+   * replay, so a session-state push sent this way would be lost by any
+   * client that reconnects.
+   *
+   * @param channel - One of the three unsequenced channels.
+   * @param payload - Push payload.
+   * @returns Nothing.
+   * @throws Error if `channel` is not an unsequenced channel.
+   */
+  writeUnsequenced(channel: UnsequencedChannel, payload: unknown): void {
+    if (!isUnsequencedChannel(channel)) {
+      throw new Error(
+        `[rpc-server] refusing to send "${channel}" unsequenced — ` +
+          "only hello/attachError/superseded bypass the journal"
+      );
+    }
+    const push: RpcPush = { event: channel, payload, seq: UNSEQUENCED_SEQ };
+    this.writer.write(push);
   }
 
   /**
@@ -129,9 +174,15 @@ export class RpcServer {
       version: this.opts.version,
       pid: process.pid,
       protocol: RPC_PROTOCOL_VERSION,
-      session: null,
+      protocolMin: RPC_PROTOCOL_MIN,
+      session: this.opts.session ?? null,
+      sessionEpoch: this.journal.sessionEpoch,
     };
-    this.push(RPC_CHANNELS.hello, hello);
+    // Unsequenced: hello is per-connection, but seq now belongs to the
+    // session. Letting it consume a seq would renumber the session's stream
+    // on every reconnect — and a replay would hand the client somebody
+    // else's hello in the middle of its history.
+    this.writeUnsequenced(RPC_CHANNELS.hello, hello);
     const decoder = new LineDecoder({
       onMessage: (msg) => this.onMessage(msg),
       maxLineBytes: this.opts.maxLineBytes ?? MAX_LINE_BYTES,
@@ -193,7 +244,10 @@ export class RpcServer {
   ): Promise<unknown> {
     switch (channel) {
       case RPC_CHANNELS.ping: {
-        const result: RpcPingResult = { ts: Date.now(), seq: this.nextSeq - 1 };
+        const result: RpcPingResult = {
+          ts: Date.now(),
+          seq: this.journal.lastSeq,
+        };
         return result;
       }
       case RPC_CHANNELS.shutdown: {

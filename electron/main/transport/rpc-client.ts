@@ -276,7 +276,14 @@ export class RpcClient {
   /** Route one decoded wire message. */
   private onMessage(msg: unknown): void {
     if (isRpcPush(msg)) {
-      this.lastSeqReceived = msg.seq;
+      // An unsequenced frame (hello/attachError/superseded) carries seq −1
+      // and is not part of the session's stream. Recording it would rewind
+      // the cursor to −1, and the next reattach would then ask to replay the
+      // entire session from the start — or be told it cannot be, and force a
+      // needless full resync.
+      if (msg.seq > this.lastSeqReceived) {
+        this.lastSeqReceived = msg.seq;
+      }
       if (msg.event === RPC_CHANNELS.hello) {
         const hello = msg.payload as RpcHello;
         this.helloPayload = hello;

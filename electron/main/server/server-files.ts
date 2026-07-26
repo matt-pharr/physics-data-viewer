@@ -39,6 +39,7 @@ export const SERVER_DESTINED_FILES: readonly string[] = [
   // Stdio RPC transport
   "transport/protocol.ts",
   "transport/line-codec.ts",
+  "transport/push-journal.ts",
   "transport/rpc-client.ts",
   "transport/rpc-server.ts",
   // Core managers

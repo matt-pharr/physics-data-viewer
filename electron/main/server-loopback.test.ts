@@ -27,7 +27,11 @@ import type { PDVConfig } from "./ipc";
 import { INTERNAL_CHANNELS, IPC } from "./ipc";
 import type { KernelInfo } from "./kernel-manager";
 import { dispatchInvoke } from "./server/invoke-registry";
-import { RPC_CHANNELS } from "./transport/protocol";
+import {
+  RPC_CHANNELS,
+  RPC_PROTOCOL_MIN,
+  RPC_PROTOCOL_VERSION,
+} from "./transport/protocol";
 import { RpcClient } from "./transport/rpc-client";
 
 const APP_VERSION = "0.0.7-loopback-test";
@@ -110,19 +114,26 @@ afterAll(() => {
 });
 
 describe("pdv-server over loopback stdio", () => {
-  it("sends hello (seq 0) with the advertised version and answers ping", async () => {
+  it("sends hello with the advertised version and answers ping", async () => {
     const { client } = spawnServer();
     const hello = await client.waitForHello(10_000);
     expect(hello.version).toBe(APP_VERSION);
-    expect(hello.protocol).toBe(1);
+    // Against the constant, not a literal: a protocol bump is a deliberate
+    // edit in protocol.ts, and this assertion should follow it rather than
+    // fail and be "fixed" by typing the new number in here.
+    expect(hello.protocol).toBe(RPC_PROTOCOL_VERSION);
+    expect(hello.protocolMin).toBe(RPC_PROTOCOL_MIN);
     expect(hello.session).toBeNull();
+    expect(hello.sessionEpoch).toMatch(/^[0-9a-f-]{36}$/);
     expect(hello.pid).toBeGreaterThan(0);
 
     const pong = (await client.invoke(RPC_CHANNELS.ping)) as {
       ts: number;
       seq: number;
     };
-    expect(pong.seq).toBe(0);
+    // −1, not 0: hello is unsequenced, so a server that has pushed nothing
+    // has assigned no seq at all.
+    expect(pong.seq).toBe(-1);
     expect(pong.ts).toBeGreaterThan(0);
   });
 

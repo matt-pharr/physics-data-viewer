@@ -24,8 +24,31 @@
  * push; bumped only when the envelope shapes here change incompatibly.
  * Distinct from the unified app version (which the hello also carries and
  * which the shell checks for an exact match).
+ *
+ * 2 — push seq became session-owned rather than per-connection, and hello no
+ * longer consumes seq 0 (see {@link UNSEQUENCED_SEQ}).
  */
-export const RPC_PROTOCOL_VERSION = 1;
+export const RPC_PROTOCOL_VERSION = 2;
+
+/**
+ * Oldest protocol version this build can still serve, advertised alongside
+ * {@link RPC_PROTOCOL_VERSION} so a peer sees a *range* rather than a point.
+ *
+ * This exists now, before any peer needs it, on purpose: a range cannot be
+ * retrofitted once long-lived daemons are running in the wild. A client that
+ * only learns the server's exact version has no way to tell "older but still
+ * compatible" from "incompatible", so it must refuse — which would strand a
+ * running session with a live kernel on every app upgrade.
+ */
+export const RPC_PROTOCOL_MIN = 2;
+
+/**
+ * Seq stamped on frames that are deliberately outside the sequenced stream
+ * (see {@link UNSEQUENCED_CHANNELS}). Negative so it can never collide with
+ * a real seq, and so a client recording `lastSeq` can reject it with a
+ * single comparison instead of a channel lookup.
+ */
+export const UNSEQUENCED_SEQ = -1;
 
 /** Serialized error carried in an {@link RpcResponse}. */
 export interface RpcError {
@@ -97,7 +120,54 @@ export const RPC_CHANNELS = {
    * editor/viewer). Emitted by server-side session/project resets.
    */
   closeChildWindows: "pdv.rpc.closeChildWindows",
+  /**
+   * Push rejecting an attach attempt (unknown session, protocol out of
+   * range, replay impossible). Unsequenced: it describes why the sequenced
+   * stream cannot start, so it cannot be part of it.
+   */
+  attachError: "pdv.rpc.attachError",
+  /**
+   * Push telling a connection that a newer one took over its session. Sent
+   * immediately before the older connection is closed, and unsequenced for
+   * the same reason: the connection it addresses is leaving the stream.
+   */
+  superseded: "pdv.rpc.superseded",
 } as const;
+
+/**
+ * The complete set of channels exempt from push sequencing — closed by
+ * construction rather than checked at each call site, so adding a fourth is
+ * a deliberate edit here and not an accident somewhere else.
+ *
+ * Membership is narrow on purpose. These three frames describe the state of
+ * the *connection*, so they must flow even when the sequenced stream cannot
+ * (before attach completes, or after it has failed). Everything else is
+ * session state and must be journalled, replayable, and gap-detectable.
+ *
+ * `confirmRequest` is the tempting fourth member and is deliberately absent:
+ * a native confirm parked on a dropped connection is session state, and must
+ * survive a reconnect rather than evaporate with the connection that asked.
+ */
+export const UNSEQUENCED_CHANNELS = [
+  RPC_CHANNELS.hello,
+  RPC_CHANNELS.attachError,
+  RPC_CHANNELS.superseded,
+] as const;
+
+/** A channel exempt from sequencing (see {@link UNSEQUENCED_CHANNELS}). */
+export type UnsequencedChannel = (typeof UNSEQUENCED_CHANNELS)[number];
+
+/**
+ * Whether a channel is exempt from push sequencing.
+ *
+ * @param channel - Channel name to classify.
+ * @returns True when `channel` is one of {@link UNSEQUENCED_CHANNELS}.
+ */
+export function isUnsequencedChannel(
+  channel: string
+): channel is UnsequencedChannel {
+  return (UNSEQUENCED_CHANNELS as readonly string[]).includes(channel);
+}
 
 /** Payload of a {@link RPC_CHANNELS.confirmRequest} push. */
 export interface RpcConfirmRequest {
@@ -134,8 +204,22 @@ export interface RpcHello {
   pid: number;
   /** {@link RPC_PROTOCOL_VERSION} of the server. */
   protocol: number;
+  /** {@link RPC_PROTOCOL_MIN} — oldest version this server still serves. */
+  protocolMin: number;
   /** Session identifier; always `null` for local mode (remote is additive). */
   session: string | null;
+  /**
+   * Identifies this *incarnation* of the session, regenerated on every
+   * server start and never reused.
+   *
+   * This is the guard against the one failure that loses data silently. A
+   * daemon that died and was recreated restarts its seq at 0, so a client
+   * holding `lastSeq: 4000` would compute `4001 >= firstRetainedSeq (0)`,
+   * conclude it is replayable, receive nothing, and believe it is caught up
+   * — while the entire session it was watching is gone. Comparing epochs
+   * catches that before any seq arithmetic is allowed to run.
+   */
+  sessionEpoch: string;
 }
 
 /** Result of a {@link RPC_CHANNELS.ping} invoke. */
