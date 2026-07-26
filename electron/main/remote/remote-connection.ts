@@ -202,13 +202,22 @@ export class RemoteConnectionManager {
 
     const probe = await probeHost(control, { ...this.muxOptions(), version, onProgress });
     if (!probe.ok) return probe.problem ?? `PDV could not inspect ${host}.`;
-    if (probe.installed) {
-      this.installedServerPath = remoteServerCommand(version);
-      return null;
-    }
     if (!probe.arch) return `PDV has no components for ${probe.machine ?? "this architecture"}.`;
 
     const bundle = this.resolveBundle(probe.arch);
+    // Installed *and* the same bytes. Comparing only the version would let a
+    // rebuild at an unchanged version keep serving the old bundle, which
+    // fails later and far less legibly than reinstalling now.
+    if (probe.installed && bundle && probe.bundleId === bundle.sha256) {
+      this.installedServerPath = remoteServerCommand(version);
+      return null;
+    }
+    if (probe.installed && (!bundle || probe.bundleId !== bundle.sha256)) {
+      console.log(
+        `[remote] reinstalling on ${host}: installed bundle ${probe.bundleId ?? "unknown"} ` +
+          `does not match ${bundle?.sha256 ?? "the bundle this build ships"}`,
+      );
+    }
     if (!bundle) {
       return (
         `PDV has no remote components for linux-${probe.arch} to install. ` +

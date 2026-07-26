@@ -8,6 +8,7 @@
  * tests below exist purely to pin that ordering.
  */
 
+import * as crypto from "crypto";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -259,7 +260,7 @@ describe("bootstrap", () => {
     expect(phases()).toContain("preparing");
   }, 30_000);
 
-  it("skips the install when the host already has this version", async () => {
+  it("skips the install when the host already has this exact bundle", async () => {
     setEnv("FAKE_SSH_MASTER", "alive");
     fakeLinuxHost();
     const fakeHome = path.join(dir, "home");
@@ -268,11 +269,22 @@ describe("bootstrap", () => {
     setEnv("HOME", fakeHome);
     const bundleDir = path.join(dir, "bundles");
     fs.mkdirSync(bundleDir, { recursive: true });
-    fs.writeFileSync(path.join(bundleDir, "index.json"), JSON.stringify({ bundles: [] }));
+    // A bundle must exist and its sha must match what the host recorded:
+    // matching on the version alone would keep a stale rebuild in place.
+    const tarball = path.join(bundleDir, "pdv-server-linux-x64.tar.gz");
+    fs.writeFileSync(tarball, "bundle-bytes");
+    const sha = crypto.createHash("sha256").update("bundle-bytes").digest("hex");
+    fs.writeFileSync(path.join(fakeHome, ".pdv-server", "9.9.9", ".bundle-id"), sha);
+    fs.writeFileSync(
+      path.join(bundleDir, "index.json"),
+      JSON.stringify({
+        bundles: [{ arch: "x64", file: "pdv-server-linux-x64.tar.gz", sha256: sha }],
+      }),
+    );
 
     const manager = makeManager({ appVersion: "9.9.9", bundleDir });
-    // The probe finds a cached verdict, so no bundle is needed even though
-    // none exists — this is the second-connect path, and it must be cheap.
+    // The probe finds a matching verdict, so nothing is uploaded — this is
+    // the second-connect path, and it must be cheap.
     await expect(manager.connect("flux")).resolves.toMatchObject({ ok: true });
   }, 30_000);
 });

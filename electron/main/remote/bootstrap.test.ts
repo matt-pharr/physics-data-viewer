@@ -94,6 +94,33 @@ describe("probeHost", () => {
     expect((await probeHost(control, opts())).installed).toBe(true);
   }, 30_000);
 
+  it("reports which bundle the host actually has", async () => {
+    // Version alone cannot distinguish a rebuild from the build it replaced.
+    // A same-version rebuild that was never reinstalled is exactly how a
+    // successful connect ends in "server stream ended": the host answers with
+    // a bundle that predates the subcommand the shell is about to use.
+    const dir = path.join(home, ".pdv-server", TEST_PDV_VERSION);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, ".selfcheck.json"), "{}");
+    fs.writeFileSync(path.join(dir, ".bundle-id"), "abc123");
+
+    const probe = await probeHost(control, opts());
+    expect(probe.installed).toBe(true);
+    expect(probe.bundleId).toBe("abc123");
+  }, 30_000);
+
+  it("reports a null bundle id when the host recorded none", async () => {
+    // An install from before ids were recorded. Null forces a reinstall
+    // rather than being mistaken for a match.
+    const dir = path.join(home, ".pdv-server", TEST_PDV_VERSION);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, ".selfcheck.json"), "{}");
+
+    const probe = await probeHost(control, opts());
+    expect(probe.installed).toBe(true);
+    expect(probe.bundleId).toBeNull();
+  }, 30_000);
+
   it("does not treat an unpacked-but-unverified directory as installed", async () => {
     // The directory exists but never passed a check. Believing it would skip
     // the install and fail later, opaquely.

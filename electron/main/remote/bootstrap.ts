@@ -74,6 +74,17 @@ export interface HostProbe {
   freeBytes: number | null;
   /** True when this exact version is installed and its self-check passed. */
   installed: boolean;
+  /**
+   * sha256 of the bundle the host actually has, or null when none is
+   * recorded.
+   *
+   * Compared by the caller against the bundle it would install. Version
+   * alone is not enough: a rebuild that does not bump the version would
+   * otherwise never replace the installed copy, leaving the host serving a
+   * bundle missing whatever the shell has since come to depend on — which is
+   * exactly how a working connect ends in "server stream ended".
+   */
+  bundleId: string | null;
   /** Set when `ok` is false: an operator-facing explanation. */
   problem: string | null;
 }
@@ -135,9 +146,16 @@ if [ -w "$home" ]; then hw=true; else hw=false; fi
 free=$(df -kP "$home" 2>/dev/null | tail -1 | awk '{print $4}')
 [ -z "$free" ] && free=0
 inst=false
-if [ -f "$home/${REMOTE_ROOT}/${version}/.selfcheck.json" ]; then inst=true; fi
-printf '{"pdv":"probe","n":"%s","sys":"%s","mach":"%s","libc":"%s","home":"%s","homeWritable":%s,"freeKB":%s,"installed":%s}\\n' \\
-  "${nonce}" "$sys" "$mach" "$libc" "$home" "$hw" "$free" "$inst"
+bid=none
+# The recorded id is the installed tarball's sha256. It is reported rather
+# than compared here because the caller only knows which bundle it *would*
+# install once this probe has told it the architecture.
+if [ -f "$home/${REMOTE_ROOT}/${version}/.selfcheck.json" ]; then
+  inst=true
+  bid=$(cat "$home/${REMOTE_ROOT}/${version}/.bundle-id" 2>/dev/null || echo none)
+fi
+printf '{"pdv":"probe","n":"%s","sys":"%s","mach":"%s","libc":"%s","home":"%s","homeWritable":%s,"freeKB":%s,"installed":%s,"bundleId":"%s"}\\n' \\
+  "${nonce}" "$sys" "$mach" "$libc" "$home" "$hw" "$free" "$inst" "$bid"
 `;
 }
 
@@ -199,15 +217,16 @@ export async function probeHost(
   options.onProgress?.({ stage: "probing", message: `Checking ${control.host}…` });
 
   const nonce = `pdvp${crypto.randomBytes(6).toString("hex")}`;
-  const result = await execViaSsh(control, probeScript(options.version, nonce), {
-    ...options,
-    timeoutMs: options.timeoutMs ?? 60_000,
-  });
+  const result = await execViaSsh(
+    control,
+    probeScript(options.version, nonce),
+    { ...options, timeoutMs: options.timeoutMs ?? 60_000 },
+  );
 
   const empty: HostProbe = {
     ok: false, sys: null, machine: null, arch: null, libc: null,
     home: null, homeWritable: false, freeBytes: null, installed: false,
-    problem: null,
+    bundleId: null, problem: null,
   };
 
   if (result.failure) {
@@ -235,6 +254,10 @@ export async function probeHost(
     homeWritable: reply.homeWritable === true,
     freeBytes: typeof reply.freeKB === "number" ? reply.freeKB * 1024 : null,
     installed: reply.installed === true,
+    bundleId:
+      typeof reply.bundleId === "string" && reply.bundleId !== "none"
+        ? reply.bundleId
+        : null,
     problem: null,
   };
 
@@ -419,7 +442,11 @@ export async function installBundle(
   // trip. Written only after a pass — never as an assumption.
   await execViaSsh(
     control,
-    `printf '%s' '${JSON.stringify(verdict).replace(/'/g, "")}' > "${target}/.selfcheck.json"`,
+    // The bundle id is written alongside the verdict and only after the
+    // self-check passed: the probe treats its *value* as proof that this
+    // exact bundle — not merely this version — works on this host.
+    `printf '%s' '${JSON.stringify(verdict).replace(/'/g, "")}' > "${target}/.selfcheck.json" && ` +
+      `printf '%s' '${sha256}' > "${target}/.bundle-id"`,
     options,
   );
 

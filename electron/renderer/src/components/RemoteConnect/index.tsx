@@ -50,7 +50,11 @@ export const RemoteConnect: React.FC<RemoteConnectProps> = ({ onClose }) => {
   const connected = phase === 'connected';
   const [starting, setStarting] = useState(false);
   const [sessionError, setSessionError] = useState<string | null>(null);
-  const sessionRunning = useStore((s) => s.connectionState !== 'local');
+  // Only a *healthy* remote session counts as running. Treating
+  // 'remote-reconnecting' or 'remote-lost' as running told the user their
+  // session was on the host while the channel was dead underneath it, and
+  // hid the button that would let them try again.
+  const sessionRunning = useStore((s) => s.connectionState === 'remote-connected');
 
   /** Move the session onto the connected host. */
   const startSession = async (): Promise<void> => {
