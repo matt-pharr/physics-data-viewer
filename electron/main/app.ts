@@ -295,7 +295,19 @@ export async function createWindow(
   // otherwise every macOS close → activate → re-create cycle stacks another
   // handler whose destroyed-window branch flips isQuittingGlobal before the
   // live window's guard has decided whether to block the quit.
+  // A dying renderer is indistinguishable from a user-closed window without
+  // this: on Linux `window-all-closed` then quits the whole app, and the
+  // only trace is a silent exit. Name the killer in the log.
+  win.webContents.on("render-process-gone", (_event, details) => {
+    console.error(
+      `[PDV] renderer process gone: reason=${details.reason} exitCode=${String(details.exitCode)}`
+    );
+  });
+  win.webContents.on("unresponsive", () => {
+    console.error("[PDV] renderer unresponsive");
+  });
   win.on("closed", () => {
+    console.error("[PDV] main window closed");
     app.removeListener("before-quit", beforeQuitGuard);
     // Detach the bridge with the window it belongs to. The handlers close
     // over this BrowserWindow; leaving them attached means a server-side
