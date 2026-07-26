@@ -64,6 +64,30 @@ function createPair(
 const delay = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
 
+/**
+ * Record request ids as they go over the wire.
+ *
+ * Ids are epoch-prefixed and deliberately unguessable from outside, so a
+ * test that needs one reads it from the stream rather than assuming a
+ * counter — which is also what stops these tests from silently pinning the
+ * id format.
+ */
+function recordRequestIds(c2s: PassThrough): string[] {
+  const ids: string[] = [];
+  c2s.on("data", (chunk: Buffer) => {
+    for (const line of chunk.toString("utf8").split("\n")) {
+      if (!line.trim()) continue;
+      try {
+        const msg = JSON.parse(line) as { id?: string; channel?: string };
+        if (msg.id && msg.channel) ids.push(msg.id);
+      } catch {
+        // Partial frame; the next chunk completes it.
+      }
+    }
+  });
+  return ids;
+}
+
 describe("RpcClient ⇄ RpcServer", () => {
   beforeEach(() => {
     removeAllInvokeHandlers();
@@ -428,23 +452,24 @@ describe("RpcClient ⇄ RpcServer", () => {
       });
       handleInvoke("test:fast", () => "quick");
 
-      const { client, server } = createPair();
+      const { client, server, c2s } = createPair();
+      const ids = recordRequestIds(c2s);
       await client.waitForHello(1000);
 
       const slow = client.invoke("test:slow");
       await client.invoke("test:fast");
       await delay(10);
 
-      // "1" is the slow invoke (still running), "2" the fast one (settled).
-      expect(server.reconcile("1")).toBe("in-flight");
-      expect(server.reconcile("2")).toBe("completed");
+      const [slowId, fastId] = ids;
+      expect(server.reconcile(slowId)).toBe("in-flight");
+      expect(server.reconcile(fastId)).toBe("completed");
       // Treating this as "not in-flight ⇒ failed" would reject work that
       // actually completed — the failure mode three states exist to avoid.
-      expect(server.reconcile("999")).toBe("unknown");
+      expect(server.reconcile("never-issued")).toBe("unknown");
 
       release?.();
       await expect(slow).resolves.toBe("finished");
-      expect(server.reconcile("1")).toBe("completed");
+      expect(server.reconcile(slowId)).toBe("completed");
       client.close();
     });
 
@@ -460,7 +485,8 @@ describe("RpcClient ⇄ RpcServer", () => {
         return { rows: 3 };
       });
 
-      const { client, server, s2c } = createPair();
+      const { client, server, s2c, c2s } = createPair();
+      const ids = recordRequestIds(c2s);
       await client.waitForHello(1000);
       const pending = client.invoke("test:slow");
       await delay(10);
@@ -473,9 +499,10 @@ describe("RpcClient ⇄ RpcServer", () => {
       release?.();
       await delay(20);
 
-      expect(server.reconcile("1")).toBe("completed");
-      expect(JSON.parse(String(server.responses.get("1")?.frame))).toEqual({
-        id: "1",
+      const [slowId] = ids;
+      expect(server.reconcile(slowId)).toBe("completed");
+      expect(JSON.parse(String(server.responses.get(slowId)?.frame))).toEqual({
+        id: slowId,
         result: { rows: 3 },
       });
     });

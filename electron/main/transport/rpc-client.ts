@@ -18,6 +18,7 @@
  * supervisor does), or interpret application payloads.
  */
 
+import { randomBytes } from "crypto";
 import type { Readable, Writable } from "stream";
 import {
   LineDecoder,
@@ -69,6 +70,34 @@ export interface RpcClientOptions {
   pingMaxMisses?: number;
   /** Override the decoder's max-line guard (tests). */
   maxLineBytes?: number;
+  /**
+   * What happens to invokes still in flight when the connection closes.
+   *
+   * `"reject"` (the default, and today's behaviour) settles them with the
+   * close reason — correct for local mode, where the server dying means the
+   * work died with it.
+   *
+   * `"park"` leaves them unsettled for a reattach to resolve. A remote
+   * session outlives its connection, so a `script.run` that was running when
+   * the channel dropped is still running on the daemon; rejecting it would
+   * report completed work as failed. Whoever parks them owns settling them —
+   * see {@link rejectParked}.
+   */
+  pendingPolicy?: "reject" | "park";
+  /**
+   * Seed the push cursor across a reconnect, so gap detection is meaningful
+   * from the first frame rather than from −1.
+   */
+  initialLastSeq?: number;
+  /**
+   * Called when a push arrives with a seq that is not the expected next one.
+   *
+   * A live detector, not a diagnostic: the replay handshake is supposed to
+   * make gaps impossible, so if one appears the invariant is already broken
+   * and the client learns on the very next frame instead of quietly missing
+   * state. Receiving this means resync, not retry.
+   */
+  onSequenceGap?: (expected: number, received: number) => void;
 }
 
 /** A not-yet-settled invoke. */
@@ -101,8 +130,23 @@ export class RpcClient {
   private readonly opts: RpcClientOptions;
   private readonly pending = new Map<string, PendingInvoke>();
   private nextId = 0;
+  /**
+   * Per-connection prefix for request ids.
+   *
+   * Ids are per-connection monotonic integers that restart at 1 on every
+   * reconnect, so without a prefix a parked id from the previous connection
+   * would collide with a fresh one and a reattach could settle the wrong
+   * promise. Random rather than a timestamp: two attaches can land in the
+   * same millisecond after a wake.
+   */
+  private readonly idEpoch: string = randomBytes(4).toString("hex");
+  /**
+   * Invokes held across a connection drop under `pendingPolicy: "park"`.
+   * Settled by {@link settleParked} or {@link rejectParked} — never dropped.
+   */
+  private readonly parked = new Map<string, PendingInvoke>();
   /** Highest push seq received (−1 before any push). */
-  private lastSeqReceived = -1;
+  private lastSeqReceived: number;
   private closed = false;
 
   private helloPayload: RpcHello | null = null;
@@ -128,6 +172,7 @@ export class RpcClient {
    */
   constructor(readable: Readable, writable: Writable, opts: RpcClientOptions) {
     this.opts = opts;
+    this.lastSeqReceived = opts.initialLastSeq ?? -1;
     this.writer = new LineWriter(writable);
     const decoder = new LineDecoder({
       onMessage: (msg) => this.onMessage(msg),
@@ -155,7 +200,7 @@ export class RpcClient {
     if (this.closed) {
       return Promise.reject(new Error("RPC connection closed"));
     }
-    const id = String(++this.nextId);
+    const id = `${this.idEpoch}-${++this.nextId}`;
     const request: RpcRequest = { id, channel, args };
     return new Promise<unknown>((resolve, reject) => {
       this.pending.set(id, { resolve, reject });
@@ -243,13 +288,72 @@ export class RpcClient {
   }
 
   /**
-   * Highest push seq received so far (−1 before any push). Recorded for
-   * the future reconnect/replay handshake.
+   * Highest push seq received so far (−1 before any push).
+   *
+   * Authoritative on the client, never on the server: the server's cursor
+   * records what it handed a writer, not what crossed the network. That is
+   * also what makes a half-written frame at disconnect safe — the client
+   * never counted it, so the reattach replays it whole.
    *
    * @returns The last seq.
    */
   get lastSeq(): number {
     return this.lastSeqReceived;
+  }
+
+  /**
+   * Request ids currently parked across a drop.
+   *
+   * @returns The parked ids, for the attach handshake's `pendingRequests`.
+   */
+  get parkedIds(): string[] {
+    return [...this.parked.keys()];
+  }
+
+  /**
+   * Settle a parked invoke with a result the session retained for it.
+   *
+   * @param id - The parked request id.
+   * @param result - The retained result.
+   * @returns True if an invoke was waiting under that id.
+   */
+  settleParked(id: string, result: unknown): boolean {
+    const invoke = this.parked.get(id);
+    if (!invoke) return false;
+    this.parked.delete(id);
+    invoke.resolve(result);
+    return true;
+  }
+
+  /**
+   * Fail a parked invoke whose fate the session could not account for.
+   *
+   * @param id - The parked request id.
+   * @param err - Why it could not be resolved.
+   * @returns True if an invoke was waiting under that id.
+   */
+  rejectParkedId(id: string, err: Error): boolean {
+    const invoke = this.parked.get(id);
+    if (!invoke) return false;
+    this.parked.delete(id);
+    invoke.reject(err);
+    return true;
+  }
+
+  /**
+   * Fail every parked invoke — a reconnect that will not be retried.
+   *
+   * Called when the owner gives up. Leaving them parked forever would hang
+   * the renderer on a spinner with no error and no way back.
+   *
+   * @param err - Why the reconnect failed.
+   * @returns How many invokes were settled.
+   */
+  rejectParked(err: Error): number {
+    const count = this.parked.size;
+    for (const { reject } of this.parked.values()) reject(err);
+    this.parked.clear();
+    return count;
   }
 
   /**
@@ -265,8 +369,19 @@ export class RpcClient {
     this.stopPing();
     this.detachDecoder();
     const err = new Error(reason);
-    for (const { reject } of this.pending.values()) reject(err);
-    this.pending.clear();
+    if (this.opts.pendingPolicy === "park") {
+      // Held, not settled: the work may still be running on a daemon that
+      // outlived this connection, so rejecting would report completed work
+      // as failed. They move to `parked`, where the owner either resolves
+      // them from the reattach reconciliation or gives up via
+      // rejectParked() — a promise that never settles at all is worse than
+      // one that fails.
+      for (const [id, invoke] of this.pending) this.parked.set(id, invoke);
+      this.pending.clear();
+    } else {
+      for (const { reject } of this.pending.values()) reject(err);
+      this.pending.clear();
+    }
     const helloWaiters = this.helloWaiters;
     this.helloWaiters = [];
     for (const { reject } of helloWaiters) reject(err);
@@ -281,8 +396,15 @@ export class RpcClient {
       // the cursor to −1, and the next reattach would then ask to replay the
       // entire session from the start — or be told it cannot be, and force a
       // needless full resync.
-      if (msg.seq > this.lastSeqReceived) {
-        this.lastSeqReceived = msg.seq;
+      if (msg.seq >= 0) {
+        const expected = this.lastSeqReceived + 1;
+        if (msg.seq !== expected && this.lastSeqReceived >= 0) {
+          // The replay handshake is meant to make this unreachable. Reaching
+          // it means state has already been missed, so say so now rather
+          // than let the renderer drift.
+          this.opts.onSequenceGap?.(expected, msg.seq);
+        }
+        if (msg.seq > this.lastSeqReceived) this.lastSeqReceived = msg.seq;
       }
       if (msg.event === RPC_CHANNELS.hello) {
         const hello = msg.payload as RpcHello;
