@@ -404,6 +404,83 @@ describe("RpcClient ⇄ RpcServer", () => {
     });
   });
 
+  describe("retained settlements", () => {
+    it("retains every settlement it writes", async () => {
+      const { client, server } = createPair();
+      handleInvoke("test:ok", () => ({ done: true }));
+      await client.waitForHello(1000);
+      await client.invoke("test:ok");
+
+      // The client's id generator is private, but there has been exactly one
+      // invoke, so the store holds exactly one settlement.
+      expect(server.responses.size).toBe(1);
+      client.close();
+    });
+
+    it("classifies an id three ways, not two", async () => {
+      let release: (() => void) | undefined;
+      const blocked = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      handleInvoke("test:slow", async () => {
+        await blocked;
+        return "finished";
+      });
+      handleInvoke("test:fast", () => "quick");
+
+      const { client, server } = createPair();
+      await client.waitForHello(1000);
+
+      const slow = client.invoke("test:slow");
+      await client.invoke("test:fast");
+      await delay(10);
+
+      // "1" is the slow invoke (still running), "2" the fast one (settled).
+      expect(server.reconcile("1")).toBe("in-flight");
+      expect(server.reconcile("2")).toBe("completed");
+      // Treating this as "not in-flight ⇒ failed" would reject work that
+      // actually completed — the failure mode three states exist to avoid.
+      expect(server.reconcile("999")).toBe("unknown");
+
+      release?.();
+      await expect(slow).resolves.toBe("finished");
+      expect(server.reconcile("1")).toBe("completed");
+      client.close();
+    });
+
+    it("retains a settlement produced after the connection dropped", async () => {
+      // The whole reason the store exists: a script that finishes while the
+      // laptop is asleep has still really run.
+      let release: (() => void) | undefined;
+      const blocked = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      handleInvoke("test:slow", async () => {
+        await blocked;
+        return { rows: 3 };
+      });
+
+      const { client, server, s2c } = createPair();
+      await client.waitForHello(1000);
+      const pending = client.invoke("test:slow");
+      await delay(10);
+
+      // Kill the connection out from under the running handler.
+      s2c.destroy();
+      client.close("connection dropped");
+      await expect(pending).rejects.toThrow(/connection dropped/);
+
+      release?.();
+      await delay(20);
+
+      expect(server.reconcile("1")).toBe("completed");
+      expect(JSON.parse(String(server.responses.get("1")?.frame))).toEqual({
+        id: "1",
+        result: { rows: 3 },
+      });
+    });
+  });
+
   describe("ping liveness (fake timers)", () => {
     beforeEach(() => {
       vi.useFakeTimers();

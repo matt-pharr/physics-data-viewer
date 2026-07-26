@@ -37,6 +37,7 @@ import {
   MAX_LINE_BYTES,
 } from "./line-codec";
 import { PushJournal } from "./push-journal";
+import { ResponseStore } from "./response-store";
 import {
   RPC_CHANNELS,
   RPC_PROTOCOL_MIN,
@@ -86,6 +87,12 @@ export interface RpcServerOptions {
    * survive a reconnect.
    */
   journal?: PushJournal;
+  /**
+   * The session's retained-settlement store. Like the journal, it belongs to
+   * the session rather than the connection — that is what lets a result
+   * produced during a disconnect reach the client that reattaches.
+   */
+  responses?: ResponseStore;
   /** Session id advertised in the hello push; `null` for local mode. */
   session?: string | null;
 }
@@ -118,6 +125,21 @@ export class RpcServer {
   readonly journal: PushJournal;
 
   /**
+   * Recent settlements, retained so a result produced during a disconnect
+   * can still be delivered. Exposed for the attach handshake's three-state
+   * reconciliation.
+   */
+  readonly responses: ResponseStore;
+
+  /**
+   * Request ids currently being dispatched. A reattaching client asking
+   * about an id needs three distinct answers — still running, already
+   * settled (here is the result), or unknown — and two-state reconciliation
+   * is silently wrong: it rejects work that in fact completed.
+   */
+  private readonly inFlight = new Set<string>();
+
+  /**
    * The connection's `PushSender` — inject this as server handlers' `push`.
    * Bound, so it can be passed around bare.
    */
@@ -136,6 +158,20 @@ export class RpcServer {
     this.opts = opts;
     this.writer = new LineWriter(writable);
     this.journal = opts.journal ?? new PushJournal();
+    this.responses = opts.responses ?? new ResponseStore();
+  }
+
+  /**
+   * Classify a request id a reattaching client is still waiting on.
+   *
+   * @param id - The request id from the client's pending set.
+   * @returns `"in-flight"` (keep waiting), `"completed"` (settlement
+   *   available via {@link responses}), or `"unknown"` — never seen or aged
+   *   out, which the client must surface rather than silently retry.
+   */
+  reconcile(id: string): "in-flight" | "completed" | "unknown" {
+    if (this.inFlight.has(id)) return "in-flight";
+    return this.responses.get(id) ? "completed" : "unknown";
   }
 
   /**
@@ -227,14 +263,30 @@ export class RpcServer {
   /** Dispatch one request and write its settlement. */
   private async handleRequest(request: RpcRequest): Promise<void> {
     const { id, channel, args } = request;
+    this.inFlight.add(id);
     try {
       const result = await this.dispatchChannel(channel, args);
       const response: RpcResponse =
         result === undefined ? { id } : { id, result };
-      this.writer.write(response);
+      this.settle(response);
     } catch (err) {
-      this.writer.write({ id, error: serializeError(err) } as RpcResponse);
+      this.settle({ id, error: serializeError(err) });
+    } finally {
+      this.inFlight.delete(id);
     }
+  }
+
+  /**
+   * Record a settlement, then write it.
+   *
+   * The order is the point. A result produced while the connection is down
+   * is still a real result — the handler ran, the kernel executed, the Tree
+   * changed — so it must exist somewhere the next connection can find it
+   * before it is handed to a writer that may be gone.
+   */
+  private settle(response: RpcResponse): void {
+    const entry = this.responses.record(response, this.journal.lastSeq);
+    this.writer.writeFrame(entry.frame);
   }
 
   /** Handle reserved channels inline; everything else goes to dispatch. */
