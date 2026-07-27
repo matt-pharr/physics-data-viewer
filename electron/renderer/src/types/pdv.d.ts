@@ -193,6 +193,10 @@ export interface RecentProjectEntry {
   host: string | null;
   /** Absolute project directory path, interpreted on `host`. */
   path: string;
+  /** Kernel language the project was last opened with (recorded at
+   *  remember-time — the only channel that works offline for remote
+   *  entries). Absent on entries from before the field existed. */
+  language?: "python" | "julia";
 }
 
 /** File-menu action event payload emitted by `menu.onAction`. */
@@ -232,6 +236,8 @@ export interface WindowChromeInfo {
   showMenuBar: boolean;
   showWindowControls: boolean;
   isMaximized: boolean;
+  /** True when remote sessions are enabled (the PDV_REMOTE release gate). */
+  remoteEnabled: boolean;
 }
 
 /** Progress update payload pushed during save/load operations. */

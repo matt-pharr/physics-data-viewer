@@ -79,7 +79,16 @@ export const RemoteConnect: React.FC<RemoteConnectProps> = ({ onClose }) => {
       const result = await window.pdv.remote.startSession();
       // A failure here leaves the local session working and the connection
       // open, so the dialog stays put and says why rather than closing.
-      if (!result.ok) setSessionError(result.message ?? 'Could not start the session.');
+      if (!result.ok) {
+        setSessionError(result.message ?? 'Could not start the session.');
+        return;
+      }
+      // Success ends this dialog's job: clicking "Run session on <host>"
+      // IS the exit, and the welcome screen behind it (with its remote
+      // banner and Disconnect button) is the landing the user asked for —
+      // a manual Close in between was a pointless extra step. Reopening
+      // the dialog later still shows the running-session management state.
+      onClose();
     } catch (err) {
       setSessionError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -126,7 +135,16 @@ export const RemoteConnect: React.FC<RemoteConnectProps> = ({ onClose }) => {
     const trimmed = target.trim();
     if (!trimmed || busy) return;
     clearRemoteLog();
-    void window.pdv.remote.connect(trimmed);
+    void (async () => {
+      const result = await window.pdv.remote.connect(trimmed);
+      // Connecting IS the intent to work there: a successful connect chains
+      // straight into moving the session, and the dialog closes itself —
+      // the "Connected to <host>, now click Run" intermission told the user
+      // nothing. A failed connect leaves the form up with the reason; a
+      // failed session start keeps the dialog open showing the error, with
+      // "Run session on <host>" as the retry.
+      if (result.ok) await startSession();
+    })();
   };
 
   const handleReply = (event: React.FormEvent): void => {
@@ -199,10 +217,17 @@ export const RemoteConnect: React.FC<RemoteConnectProps> = ({ onClose }) => {
                   : 'This session still runs on your computer. Run it on ' +
                     `${host ?? 'this host'} to use its data and compute.`}
             </div>
-            {(sessionError ?? storeSessionError) && (
-              <div className="remote-error">{sessionError ?? storeSessionError}</div>
-            )}
           </div>
+        )}
+
+        {/* Session errors render in EVERY phase, not just `connected`:
+            the store slot is written by surfaces outside this dialog (the
+            welcome screen's Disconnect, a recent-open flow), and the
+            connect flow's own phase may be mid-form or `failed` when one
+            arrives — hiding it there buried the very error the dialog was
+            opened to show. */}
+        {(sessionError ?? storeSessionError) && (
+          <div className="remote-error">{sessionError ?? storeSessionError}</div>
         )}
 
         {busy && (
@@ -293,7 +318,13 @@ export const RemoteConnect: React.FC<RemoteConnectProps> = ({ onClose }) => {
               Disconnect
             </button>
           )}
-          <button className="btn btn-secondary" onClick={onClose}>
+          {/* With the session running this dialog's job is done and Close
+              is the expected next step — primary, so it is not visually
+              identical to the destructive Shut Down beside it. */}
+          <button
+            className={sessionRunning ? "btn btn-primary" : "btn btn-secondary"}
+            onClick={onClose}
+          >
             Close
           </button>
           {connected && !sessionRunning && (

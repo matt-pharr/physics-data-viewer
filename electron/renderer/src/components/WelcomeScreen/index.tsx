@@ -73,6 +73,20 @@ interface WelcomeScreenProps {
   onDiscardSession: (orphanDir: string) => void;
   /** Called when the user clicks "Clear" beneath the recent-projects list. */
   onClearRecents: () => void;
+  /**
+   * True when remote sessions are enabled (the PDV_REMOTE release gate).
+   * Hides the Connect to Host button entirely when false, mirroring the
+   * shell's gated File-menu entry.
+   */
+  remoteEnabled?: boolean;
+  /** Called when the user clicks "Connect to Host…" (or "Reconnect to
+   *  '<host>'…" while the remote session is unreachable). Opens the
+   *  connect dialog; it never connects directly. */
+  onConnectHost: () => void;
+  /** Called when the user clicks "Disconnect from '<host>'" while the
+   *  session runs remotely. Returns this window to a fresh local session;
+   *  the remote session keeps running on the host. */
+  onDisconnectHost: () => void;
 }
 
 /** Short language badge for the recent projects list. */
@@ -119,6 +133,9 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
   onRecoverSession,
   onDiscardSession,
   onClearRecents,
+  remoteEnabled,
+  onConnectHost,
+  onDisconnectHost,
 }) => {
   const handleDiscard = (dir: string): void => {
     if (window.confirm(
@@ -175,17 +192,23 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
         </div>
 
         {remoteHost && (
-          <div className="welcome-remote-banner">
+          <div
+            className={
+              remoteReachable !== false
+                ? "welcome-remote-banner"
+                : "welcome-remote-banner welcome-remote-banner-warning"
+            }
+          >
             {remoteReachable !== false ? (
               <>
                 Connected to <strong>{remoteHost}</strong> — new and opened
-                projects will run there.
+                projects will run there. Disconnecting keeps the session
+                running for later.
               </>
             ) : (
               <>
                 Your session lives on <strong>{remoteHost}</strong> but is
-                unreachable right now — reconnect via File → Connect to
-                Remote Host.
+                unreachable right now — use Reconnect below.
               </>
             )}
           </div>
@@ -210,6 +233,35 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
           >
             Open Project…
           </button>
+          {remoteEnabled &&
+            // Three states, keyed on the same values as the banner above:
+            // no remote session → connect; running remotely → disconnect
+            // (session keeps running on the host); unreachable → reconnect
+            // via the dialog, which owns the auth flow.
+            (!remoteHost ? (
+              <button
+                className="btn btn-secondary welcome-action-btn"
+                onClick={onConnectHost}
+              >
+                Connect to Host…
+              </button>
+            ) : remoteReachable !== false ? (
+              <button
+                className="btn btn-secondary welcome-action-btn welcome-remote-btn"
+                title={`Disconnect from ‘${remoteHost}’ — the session keeps running there`}
+                onClick={onDisconnectHost}
+              >
+                Disconnect from ‘{remoteHost}’
+              </button>
+            ) : (
+              <button
+                className="btn btn-secondary welcome-action-btn welcome-remote-btn"
+                title={`Reconnect to ‘${remoteHost}’`}
+                onClick={onConnectHost}
+              >
+                Reconnect to ‘{remoteHost}’…
+              </button>
+            ))}
         </div>
 
         {recoverableSessions.length > 0 && (
@@ -268,12 +320,20 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
                     onClick={() => onOpenRecent(entry.path, entry.host)}
                     title={entry.host ? `${entry.host}:${entry.path}` : entry.path}
                   >
-                    {/* A remote entry's manifest is not read from here, so its
-                        language is genuinely unknown — show the host rather
-                        than defaulting to a language we would be guessing. */}
-                    <span className="welcome-recent-badge">
-                      [{entry.host ?? languageBadge(entry.language)}]
-                    </span>
+                    {/* Remote entries show BOTH language and host — the host
+                        must never replace the language (a user still wants to
+                        know Python vs Julia). The language rides the recents
+                        entry itself, recorded at remember-time; entries from
+                        before that field existed have genuinely unknown
+                        language and show only the host rather than a guess. */}
+                    {(entry.host === null || entry.language) && (
+                      <span className="welcome-recent-badge">
+                        [{languageBadge(entry.language)}]
+                      </span>
+                    )}
+                    {entry.host && (
+                      <span className="welcome-recent-badge">[{entry.host}]</span>
+                    )}
                     <span className="welcome-recent-name">{entry.name ?? projectName(entry.path)}</span>
                     <span className="welcome-recent-path">{projectDir(entry.path)}</span>
                   </button>

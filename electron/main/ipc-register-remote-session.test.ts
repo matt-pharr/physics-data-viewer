@@ -306,6 +306,29 @@ describe("returning to a local session", () => {
     expect(result.ok).toBe(false);
     expect(result.message).toMatch(/not running a remote session/);
   });
+
+  it("concurrent disconnects coalesce: exactly one local server is created", async () => {
+    // A double-click on either Disconnect surface fires two invokes; both
+    // used to pass the router.kind check before either swapped, spawning
+    // two local servers and abandoning the first as an orphan.
+    let created = 0;
+    register({
+      createLocalServer: async () => {
+        created += 1;
+        // Hold the spawn across a tick so the second invoke really arrives
+        // while the first is mid-swap.
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        return makeLocalHandle();
+      },
+    });
+    await invokeIpc(IPC.remote.startSession);
+    await Promise.all([
+      invokeIpc(IPC.remote.disconnect),
+      invokeIpc(IPC.remote.disconnect),
+    ]);
+    expect(created).toBe(1);
+    expect(router.kind).toBe("local");
+  });
 });
 
 describe("unreachable-session guards and recovery", () => {

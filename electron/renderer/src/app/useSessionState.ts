@@ -52,7 +52,10 @@ function toConnectionState(push: SessionStatePush): ConnectionState {
  * Subscribe to session-state pushes for the lifetime of the app.
  *
  * @param currentKernelId - Kernel to invalidate on a resync, or null.
- * @param onResync - Called on every resync AFTER the query cache is reset.
+ * @param onResync - Called on every resync AFTER the query cache is reset,
+ *   with the push's cause: 'moved' (the server behind this window changed —
+ *   any previous kernel id is meaningless) or 'recovered' (same session,
+ *   view rebuilt).
  *   App uses it to reload state that lives outside React Query — its
  *   `config` useState in particular, whose `pythonPath`/`defaultPackages`
  *   would otherwise still be the previous machine's (clearing the query
@@ -62,7 +65,7 @@ function toConnectionState(push: SessionStatePush): ConnectionState {
  */
 export function useSessionState(
   currentKernelId: string | null,
-  onResync?: () => void,
+  onResync?: (cause?: 'moved' | 'recovered') => void,
 ): void {
   const setConnectionState = useStore((s) => s.setConnectionState);
   const setRemoteHost = useStore((s) => s.setRemoteHost);
@@ -83,7 +86,7 @@ export function useSessionState(
       if (currentKernelId) {
         invalidateAllKernelState(currentKernelId, 'reconnect');
       }
-      onResync?.();
+      onResync?.(state.cause);
       // A deliberate move is not an outage — "output may be missing" after
       // clicking "Run session on <host>" read as data loss to a real user.
       const marker =

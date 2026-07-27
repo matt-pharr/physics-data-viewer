@@ -1598,6 +1598,13 @@ export interface WindowChromeInfo {
   showWindowControls: boolean;
   /** True when the main window is currently maximized. */
   isMaximized: boolean;
+  /**
+   * True when remote sessions are enabled (the `PDV_REMOTE=1` release
+   * gate). Gates renderer-side remote entry points (the welcome screen's
+   * Connect to Host button) exactly as the shell gates its menu entry —
+   * the renderer has no other view of the shell's environment.
+   */
+  remoteEnabled: boolean;
 }
 
 // ---------------------------------------------------------------------------

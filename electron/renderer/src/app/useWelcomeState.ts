@@ -55,8 +55,14 @@ export function useWelcomeState(options: UseWelcomeStateOptions) {
       recentProjectEntries.map(async (entry) => {
         // Only this machine's projects can be inspected from here; a remote
         // entry's manifest lives on its host and is read after connecting.
+        // The language recorded at remember-time still travels, so the
+        // welcome can show what kind of project it is without a connection.
         if (entry.host !== null) {
-          return { path: entry.path, host: entry.host } as RecentProject;
+          return {
+            path: entry.path,
+            host: entry.host,
+            language: entry.language,
+          } as RecentProject;
         }
         try {
           const peek = await window.pdv.project.peekManifest(entry.path);
