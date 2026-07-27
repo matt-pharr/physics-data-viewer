@@ -22,12 +22,22 @@ import {
   IPC,
   type RemoteConnectResult,
   type RemoteHostAlias,
+  type RemoteHostConfigPayload,
+  type RemoteHostConfigUpdate,
   type RemoteSessionResult,
+  type RemoteSetupTestResult,
   type RemoteStatus,
   type SessionStatePayload,
 } from "./ipc";
+import type { RemoteHostStore } from "./remote/host-config";
 import { openSessionChannel } from "./remote/remote-channel";
-import { shipSetupScript } from "./remote/setup-script";
+import {
+  listSetupScriptHosts,
+  readLocalSetupScript,
+  shipSetupScript,
+  writeLocalSetupScript,
+} from "./remote/setup-script";
+import { runSetupScriptTest } from "./remote/setup-script-test";
 import { RemoteServerHandle } from "./shell/remote-server";
 import type { ServerHandle } from "./shell/server-supervisor";
 import type { SessionRouter } from "./shell/session-router";
@@ -77,6 +87,14 @@ export interface RegisterRemoteIpcOptions {
   setupScriptDir?: string;
   /** Ships the setup script. Injected by tests. */
   shipScript?: typeof shipSetupScript;
+  /**
+   * Per-host settings store. Omitting it leaves the Remote Hosts channels
+   * answering with empty config and declining writes, which is what a build
+   * (or test) without host settings should do rather than failing.
+   */
+  hostStore?: RemoteHostStore;
+  /** Runs the setup-script dry run. Injected by tests. */
+  runScriptTest?: typeof runSetupScriptTest;
   /**
    * Starts a fresh local pdv-server. Ending a remote session (and
    * disconnecting while one runs) swaps the window back onto it; omitting
@@ -235,6 +253,93 @@ export function registerRemoteIpcHandlers(
   });
 
   handleIpc(IPC.remote.getStatus, async (): Promise<RemoteStatus> => manager.getStatus());
+
+  handleIpc(
+    IPC.remote.getHostConfig,
+    async (_event, host: string): Promise<RemoteHostConfigPayload> => {
+      if (typeof host !== "string" || !host.trim()) {
+        return { settings: {}, setupScript: "", sessionNode: null };
+      }
+      const trimmed = host.trim();
+      const record = options.hostStore?.get(trimmed) ?? {};
+      const { sessionNode, ...settings } = record;
+      return {
+        settings,
+        setupScript: options.setupScriptDir
+          ? readLocalSetupScript(options.setupScriptDir, trimmed)
+          : "",
+        sessionNode: sessionNode ?? null,
+      };
+    },
+  );
+
+  handleIpc(
+    IPC.remote.setHostConfig,
+    async (_event, host: string, update: RemoteHostConfigUpdate): Promise<void> => {
+      if (typeof host !== "string" || !host.trim()) {
+        throw new Error("No host was given.");
+      }
+      if (!update || typeof update !== "object") {
+        throw new Error("No settings were given.");
+      }
+      const trimmed = host.trim();
+      // The script is written first: it is the failure-prone half (a real
+      // file write), and settings recorded for a host whose script silently
+      // failed to save would claim more than was persisted.
+      if (options.setupScriptDir) {
+        writeLocalSetupScript(
+          options.setupScriptDir,
+          trimmed,
+          typeof update.setupScript === "string" ? update.setupScript : "",
+        );
+      }
+      options.hostStore?.setSettings(trimmed, update.settings ?? {});
+    },
+  );
+
+  handleIpc(IPC.remote.listConfiguredHosts, async (): Promise<string[]> => {
+    // Union of the two configuration surfaces: the settings store and the
+    // setup-script directory (a host configured by hand-writing a script —
+    // the only way before this tab existed — must still appear).
+    const configured = new Set<string>(options.hostStore?.listConfiguredHosts() ?? []);
+    if (options.setupScriptDir) {
+      for (const host of listSetupScriptHosts(options.setupScriptDir)) {
+        configured.add(host);
+      }
+    }
+    return [...configured].sort();
+  });
+
+  handleIpc(
+    IPC.remote.testSetupScript,
+    async (_event, host: string, script: string): Promise<RemoteSetupTestResult> => {
+      const declined = (message: string): RemoteSetupTestResult => ({
+        ok: false,
+        exitCode: null,
+        output: "",
+        before: [],
+        after: [],
+        message,
+      });
+      if (typeof host !== "string" || !host.trim()) {
+        return declined("No host was given.");
+      }
+      const status = manager.getStatus();
+      const control = manager.control;
+      if (!control || status.host !== host.trim()) {
+        return declined(
+          `Connect to ${host.trim()} first — the test runs the script in a ` +
+            "real login shell on the host.",
+        );
+      }
+      const run = options.runScriptTest ?? runSetupScriptTest;
+      return run({
+        control,
+        content: typeof script === "string" ? script : "",
+        sshPath,
+      });
+    },
+  );
 
   handleIpc(IPC.remote.startSession, async (): Promise<RemoteSessionResult> => {
     const router = options.router;

@@ -34,6 +34,7 @@ import { registerRemoteIpcHandlers } from "./ipc-register-remote";
 import { registerModuleWindowIpcHandlers } from "./ipc-register-module-windows";
 import { removeAllIpcHandlers } from "./ipc-registry";
 import { ModuleWindowManager } from "./module-window-manager";
+import { RemoteHostStore } from "./remote/host-config";
 import { readMergedConfig, registerConfigBridge } from "./shell/config-bridge";
 import { SessionRouter } from "./shell/session-router";
 import type { LocalConfigStore } from "./shell/local-config-store";
@@ -132,10 +133,13 @@ export async function registerIpcHandlers(
     // Built by `npm run build:server-bundle`. Absent in a checkout that has
     // not built them, which simply skips the bootstrap.
     bundleDir: path.join(__dirname, "..", "remote-bundles"),
-    // Per-host setup-script master copies (one `<host>.sh` per alias).
-    // Hand-edited for now; a Settings Remote Hosts tab gains an editor in a
-    // later PR of this series.
+    // Per-host setup-script master copies (one `<host>.sh` per alias),
+    // edited in Settings → Remote Hosts.
     setupScriptDir: path.join(userDataDir, "remote-setup"),
+    // Per-host settings (directories, launch config, recorded session
+    // node). Constructed per registration: a macOS window reopen builds a
+    // fresh one, which simply re-reads the file.
+    hostStore: new RemoteHostStore(userDataDir),
     // Only a router can move the session; anything else (a bare handle in a
     // test) gets connection control without session swapping rather than a
     // menu item that fails when used.
