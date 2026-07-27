@@ -31,6 +31,9 @@ interface UseProjectWorkflowOptions {
   setModulesRefreshToken: Dispatch<SetStateAction<number>>;
   /** Active kernel id — used to invalidate namespace queries after load. */
   currentKernelId: string | null;
+  /** Active kernel language — recorded into recents so remote entries
+   *  (whose manifest cannot be peeked offline) still show a language. */
+  activeLanguage: 'python' | 'julia';
   /** Clears or updates save/load progress state. */
   setProgress: Dispatch<SetStateAction<ProgressPayload | null>>;
   /** Sets error message if save/load fails. */
@@ -79,6 +82,7 @@ export function useProjectWorkflow(options: UseProjectWorkflowOptions) {
     loadedProjectTabsRef,
     normalizeLoadedCodeCells,
     flushDirtyNotes,
+    activeLanguage,
   } = options;
 
   const remoteHost = useStore((s) => s.remoteHost);
@@ -94,7 +98,11 @@ export function useProjectWorkflow(options: UseProjectWorkflowOptions) {
     // Qualify with the host the session runs on: the same path on a cluster
     // and on this machine are different projects, and opening the wrong one
     // is a confusing failure rather than an obvious one.
-    const entry: RecentProjectEntry = { host: remoteHost, path: projectDir };
+    const entry: RecentProjectEntry = {
+      host: remoteHost,
+      path: projectDir,
+      language: activeLanguage,
+    };
     const recentProjects = normalizeRecentProjects(config?.recentProjects);
     const nextRecentProjects = [
       entry,
@@ -109,7 +117,7 @@ export function useProjectWorkflow(options: UseProjectWorkflowOptions) {
     if (window.pdv?.menu) {
       await window.pdv.menu.updateRecentProjects(nextRecentProjects);
     }
-  }, [config, remoteHost, setConfig]);
+  }, [config, remoteHost, activeLanguage, setConfig]);
 
   const handleSaveProject = useCallback(async (options?: { saveAs?: boolean; directory?: string; projectName?: string }): Promise<boolean> => {
     if (kernelStatus !== 'ready') {

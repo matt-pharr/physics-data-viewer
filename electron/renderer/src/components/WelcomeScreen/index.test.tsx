@@ -130,3 +130,25 @@ describe('WelcomeScreen — remote connect/disconnect button', () => {
     expect(onDisconnectHost).not.toHaveBeenCalled();
   });
 });
+
+describe('WelcomeScreen — recents badges', () => {
+  it('shows BOTH language and host for a remote entry that knows its language', () => {
+    renderWelcome({
+      recentProjects: [
+        { path: '/mnt/homes/me/proj', host: 'feyn', language: 'julia', name: 'proj' },
+      ],
+    });
+    expect(screen.getByText('[Julia]')).toBeTruthy();
+    expect(screen.getByText('[feyn]')).toBeTruthy();
+  });
+
+  it('shows only the host when a legacy remote entry has no recorded language', () => {
+    renderWelcome({
+      recentProjects: [{ path: '/mnt/homes/me/proj', host: 'feyn', name: 'proj' }],
+    });
+    expect(screen.getByText('[feyn]')).toBeTruthy();
+    // No guessed language badge.
+    expect(screen.queryByText('[Python]')).toBeNull();
+    expect(screen.queryByText('[Julia]')).toBeNull();
+  });
+});

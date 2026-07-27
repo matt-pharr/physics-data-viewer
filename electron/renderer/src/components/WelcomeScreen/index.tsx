@@ -320,12 +320,20 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
                     onClick={() => onOpenRecent(entry.path, entry.host)}
                     title={entry.host ? `${entry.host}:${entry.path}` : entry.path}
                   >
-                    {/* A remote entry's manifest is not read from here, so its
-                        language is genuinely unknown — show the host rather
-                        than defaulting to a language we would be guessing. */}
-                    <span className="welcome-recent-badge">
-                      [{entry.host ?? languageBadge(entry.language)}]
-                    </span>
+                    {/* Remote entries show BOTH language and host — the host
+                        must never replace the language (a user still wants to
+                        know Python vs Julia). The language rides the recents
+                        entry itself, recorded at remember-time; entries from
+                        before that field existed have genuinely unknown
+                        language and show only the host rather than a guess. */}
+                    {(entry.host === null || entry.language) && (
+                      <span className="welcome-recent-badge">
+                        [{languageBadge(entry.language)}]
+                      </span>
+                    )}
+                    {entry.host && (
+                      <span className="welcome-recent-badge">[{entry.host}]</span>
+                    )}
                     <span className="welcome-recent-name">{entry.name ?? projectName(entry.path)}</span>
                     <span className="welcome-recent-path">{projectDir(entry.path)}</span>
                   </button>

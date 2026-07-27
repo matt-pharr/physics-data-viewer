@@ -1151,6 +1151,7 @@ const App: React.FC = () => {
     loadedProjectTabsRef,
     normalizeLoadedCodeCells,
     flushDirtyNotes,
+    activeLanguage,
   });
 
   // Subscribe to main-process close requests (title-bar X, OS close, Cmd+Q)
@@ -1423,27 +1424,33 @@ const App: React.FC = () => {
         tryConsumePendingOpen();
         return;
       }
-      // The dialog hosts any auth prompts the connect needs (Duo, keys).
-      setActiveDialog({ kind: 'remoteConnect' });
       const st = useStore.getState();
       const alreadyConnected = st.remotePhase === 'connected' && st.remoteConnectHost === targetHost;
       if (!alreadyConnected) {
+        // The dialog exists to host auth prompts (Duo, keys) — it opens
+        // ONLY when a connect actually has to happen. With a live master
+        // it used to flash the connected-state dialog for a frame between
+        // open and close, which read as a glitch.
+        setActiveDialog({ kind: 'remoteConnect' });
         const result = await window.pdv.remote.connect(targetHost);
         // Failures stay visible in the dialog; the pending open is dead.
         if (!result.ok) {
           if (pendingRecentOpenRef.current === mine) pendingRecentOpenRef.current = null;
           return;
         }
+        // The connect is done prompting; the session move needs no dialog.
+        closeDialog();
       }
       const session = await window.pdv.remote.startSession();
       if (!session.ok) {
         if (pendingRecentOpenRef.current === mine) pendingRecentOpenRef.current = null;
-        // The dialog is the surface the user is looking at (it hosted the
-        // connect that just succeeded) — its own error slot can only be set
-        // by its own buttons, so this goes through the store.
+        // Surface the failure in the dialog (reopening it if the connect
+        // path closed it): its error slot can only be set through the
+        // store from here.
         useStore
           .getState()
           .setRemoteSessionError(session.message ?? 'Could not run the session on the host.');
+        setActiveDialog({ kind: 'remoteConnect' });
         return;
       }
       closeDialog();

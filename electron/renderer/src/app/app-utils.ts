@@ -99,6 +99,7 @@ export function normalizeRecentProjects(data: unknown): RecentProjectEntry[] {
   const next: RecentProjectEntry[] = [];
   for (const raw of data) {
     let host: string | null = null;
+    let language: 'python' | 'julia' | undefined;
     let rawPath: unknown;
     if (typeof raw === 'string') {
       rawPath = raw;
@@ -107,6 +108,9 @@ export function normalizeRecentProjects(data: unknown): RecentProjectEntry[] {
       rawPath = entry.path;
       if (typeof entry.host === 'string' && entry.host.trim()) {
         host = entry.host.trim();
+      }
+      if (entry.language === 'python' || entry.language === 'julia') {
+        language = entry.language;
       }
     } else {
       continue;
@@ -117,7 +121,7 @@ export function normalizeRecentProjects(data: unknown): RecentProjectEntry[] {
     const key = `${host ?? ''} ${trimmed}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    next.push({ host, path: trimmed });
+    next.push(language ? { host, path: trimmed, language } : { host, path: trimmed });
     if (next.length >= MAX_RECENT_PROJECTS) break;
   }
   return next;
