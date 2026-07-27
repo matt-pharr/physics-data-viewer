@@ -1,0 +1,180 @@
+/* ===== Remote connect dialog (ARCHITECTURE.md §11.7) ===== */
+
+.remote-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* Same scrim as the other blocking overlays in dialogs.css. */
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(2px);
+}
+
+.remote-panel {
+  width: 560px;
+  max-width: 90%;
+  padding: 20px 24px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.4);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.remote-title {
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.remote-subtitle {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.remote-subtitle code {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-primary);
+}
+
+.remote-host-row,
+.remote-reply-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.remote-host-input,
+.remote-reply-input {
+  flex: 1;
+  padding: 6px 8px;
+  font-size: 12px;
+  color: var(--text-primary);
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+}
+
+.remote-host-input:focus,
+.remote-reply-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+/* The auth conversation, rendered verbatim. Monospace because it is
+   terminal output — banners and prompts are aligned by spaces. */
+.remote-log {
+  max-height: 240px;
+  overflow: auto;
+  margin: 0;
+  padding: 8px 10px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text-secondary);
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+}
+
+.remote-error {
+  color: var(--error);
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+
+.remote-connected-host {
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.remote-node {
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.remote-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* Upload progress. Shown only while bytes are moving — see RemoteConnect. */
+.remote-progress {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  overflow: hidden;
+}
+
+.remote-progress-fill {
+  height: 100%;
+  background: var(--accent);
+  transition: width 120ms linear;
+}
+
+/* ===== Remote path picker (bare-bones; replaced by the command palette) ===== */
+
+.path-picker-panel {
+  width: 640px;
+}
+
+/* Above every modal (.modal-overlay is 2000): the picker is summoned FROM
+   dialogs (Settings, Save As), and below them it is invisible yet holds
+   keyboard focus — every Browse… click appears dead. Found by screenshot. */
+.path-picker-overlay {
+  z-index: 2500;
+}
+
+.path-picker-input {
+  font-family: var(--font-mono);
+}
+
+.path-picker-list {
+  max-height: 320px;
+  overflow-y: auto;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background: var(--bg-primary);
+  display: flex;
+  flex-direction: column;
+}
+
+.path-picker-entry {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+  background: transparent;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+}
+
+.path-picker-entry:hover {
+  background: var(--bg-hover);
+}
+
+.path-picker-kind {
+  color: var(--text-secondary);
+  width: 12px;
+  flex-shrink: 0;
+}
+
+.path-picker-empty {
+  padding: 8px 10px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}

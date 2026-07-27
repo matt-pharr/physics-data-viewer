@@ -14,6 +14,12 @@ import React from 'react';
 /** Entry in the recent projects list with optional language and name metadata. */
 export interface RecentProject {
   path: string;
+  /**
+   * SSH alias the project lives on, or null for this machine. Remote entries
+   * carry no manifest metadata: reading it means connecting to the host
+   * first, which is not something the welcome screen should do on its own.
+   */
+  host?: string | null;
   language?: "python" | "julia";
   /** Project name from the manifest (falls back to folder name when absent). */
   name?: string;
@@ -44,7 +50,17 @@ interface WelcomeScreenProps {
   /** Called when the user clicks "Open Project" (shows file picker). */
   onOpenProject: () => void;
   /** Called when the user clicks a recent project entry. */
-  onOpenRecent: (path: string, language?: "python" | "julia") => void;
+  onOpenRecent: (path: string, host?: string | null) => void;
+  /**
+   * Host the session currently runs on, or null for this machine. The
+   * full-window welcome covers the status bar — without this line the
+   * post-swap landing is pixel-identical to a fresh local launch, and the
+   * user's next "New Project" targets a machine named nowhere on screen.
+   */
+  remoteHost?: string | null;
+  /** False while the remote session is unreachable — the banner must not
+   *  claim "Connected" over a dead channel. */
+  remoteReachable?: boolean;
   /** Called when the user clicks "Recover" on an orphan autosave. Receives
    *  the autosave's kernel language so the right kernel boots, and its env
    *  mode so a uv/pkg session recovers with its environment active. */
@@ -95,6 +111,8 @@ function relativeTimeLabel(iso: string): string {
 export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
   recentProjects,
   recoverableSessions,
+  remoteHost,
+  remoteReachable,
   onNewProject,
   onOpenProject,
   onOpenRecent,
@@ -155,6 +173,23 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
           </svg>
           <h1 className="welcome-title">Physics Data Viewer</h1>
         </div>
+
+        {remoteHost && (
+          <div className="welcome-remote-banner">
+            {remoteReachable !== false ? (
+              <>
+                Connected to <strong>{remoteHost}</strong> — new and opened
+                projects will run there.
+              </>
+            ) : (
+              <>
+                Your session lives on <strong>{remoteHost}</strong> but is
+                unreachable right now — reconnect via File → Connect to
+                Remote Host.
+              </>
+            )}
+          </div>
+        )}
 
         <div className="welcome-actions">
           <button
@@ -225,13 +260,20 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
             </div>
             <ul className="welcome-recent-list">
               {recentProjects.map((entry) => (
-                <li key={entry.path}>
+                // Keyed on host + path: the same path on two machines is two
+                // different projects, so path alone would collide.
+                <li key={`${entry.host ?? ''}:${entry.path}`}>
                   <button
                     className="welcome-recent-item"
-                    onClick={() => onOpenRecent(entry.path, entry.language)}
-                    title={entry.path}
+                    onClick={() => onOpenRecent(entry.path, entry.host)}
+                    title={entry.host ? `${entry.host}:${entry.path}` : entry.path}
                   >
-                    <span className="welcome-recent-badge">[{languageBadge(entry.language)}]</span>
+                    {/* A remote entry's manifest is not read from here, so its
+                        language is genuinely unknown — show the host rather
+                        than defaulting to a language we would be guessing. */}
+                    <span className="welcome-recent-badge">
+                      [{entry.host ?? languageBadge(entry.language)}]
+                    </span>
                     <span className="welcome-recent-name">{entry.name ?? projectName(entry.path)}</span>
                     <span className="welcome-recent-path">{projectDir(entry.path)}</span>
                   </button>

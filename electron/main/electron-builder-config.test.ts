@@ -91,4 +91,13 @@ describe("electron-builder.yml extraResources", () => {
     expect(unpackBlock).toMatch(/- "node_modules\/zeromq\/\*\*"/);
     expect(unpackBlock).toMatch(/- "node_modules\/cmake-ts\/\*\*"/);
   });
+
+  it("unpacks node-pty so remote sign-in works in a packaged build", () => {
+    // Two things in node-pty cannot live inside an asar: the prebuilt
+    // pty.node, and the sibling `spawn-helper` that UnixTerminal execs by
+    // path on macOS/Linux. Without this the remote connect flow fails only
+    // in packaged builds — never in dev — which is the worst way to find out.
+    const unpackBlock = configText.slice(configText.indexOf("asarUnpack:"));
+    expect(unpackBlock).toMatch(/- "node_modules\/node-pty\/\*\*"/);
+  });
 });

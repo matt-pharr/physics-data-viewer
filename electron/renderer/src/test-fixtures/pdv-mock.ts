@@ -182,6 +182,32 @@ function buildBase() {
       openIssuesPage: stub<PDVApi["about"]["openIssuesPage"]>(async () => undefined),
       openDocsPage: stub<PDVApi["about"]["openDocsPage"]>(async () => undefined),
     },
+    remote: {
+      listHosts: stub<PDVApi["remote"]["listHosts"]>(async () => []),
+      connect: stub<PDVApi["remote"]["connect"]>(async () => ({
+        ok: false,
+        failure: "not-mocked",
+        message: "",
+      })),
+      respond: stub<PDVApi["remote"]["respond"]>(async () => undefined),
+      cancel: stub<PDVApi["remote"]["cancel"]>(async () => undefined),
+      disconnect: stub<PDVApi["remote"]["disconnect"]>(async () => undefined),
+      getStatus: stub<PDVApi["remote"]["getStatus"]>(async () => ({
+        phase: "idle",
+        host: null,
+        attemptId: null,
+      })),
+      startSession: stub<PDVApi["remote"]["startSession"]>(async () => ({
+        ok: false,
+        message: "not-mocked",
+      })),
+      endSession: stub<PDVApi["remote"]["endSession"]>(async () => ({
+        ok: false,
+        message: "not-mocked",
+      })),
+      onStatus: subStub<PDVApi["remote"]["onStatus"]>(),
+      onSessionState: subStub<PDVApi["remote"]["onSessionState"]>(),
+    },
     updater: {
       checkForUpdates: stub<PDVApi["updater"]["checkForUpdates"]>(async () => undefined),
       downloadUpdate: stub<PDVApi["updater"]["downloadUpdate"]>(async () => undefined),
@@ -217,6 +243,11 @@ function buildBase() {
       pickExecutable: stub<PDVApi["files"]["pickExecutable"]>(async () => null),
       pickFile: stub<PDVApi["files"]["pickFile"]>(async () => null),
       pickDirectory: stub<PDVApi["files"]["pickDirectory"]>(async () => null),
+      listDir: stub<PDVApi["files"]["listDir"]>(async () => ({
+        path: "/home/user",
+        entries: [],
+        home: "/home/user",
+      })),
     },
     menu: {
       updateRecentProjects: stub<PDVApi["menu"]["updateRecentProjects"]>(async () => true),

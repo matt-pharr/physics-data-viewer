@@ -59,6 +59,8 @@
   padding: 10px 16px !important;
   font-size: 13px !important;
   text-align: center;
+  /* "New Python / Project" wrapping to two lines looked broken. */
+  white-space: nowrap;
 }
 
 /* Recent projects */
@@ -190,3 +192,17 @@
   flex-shrink: 0;
 }
 
+
+/* Where the session runs — the welcome covers the status bar, so this is
+   the only on-screen statement of the machine new projects will land on. */
+.welcome-remote-banner {
+  width: 100%;
+  padding: 8px 12px;
+  margin-bottom: 4px;
+  font-size: 12px;
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  text-align: center;
+}

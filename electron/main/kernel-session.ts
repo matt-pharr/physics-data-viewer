@@ -17,21 +17,35 @@ import { KernelManager } from "./kernel-manager";
 import { PDVMessageType, getAppVersion } from "./pdv-protocol";
 import { ProjectManager } from "./project-manager";
 
+// The whole snippet is wrapped in try/except that prints the traceback to
+// stderr before re-raising: the bootstrap runs as a *silent* execute, and
+// ipykernel does not publish iopub `error` messages for silent executions —
+// without the explicit print, an ImportError here (an interpreter with no
+// pdv installed) is invisible and surfaces only as an opaque pdv.ready
+// timeout. Stream output IS published for silent executes, so the printed
+// traceback reaches the handshake's boot-output tail.
 const PYTHON_BOOTSTRAP = `
-from IPython import get_ipython
-import pdv
-import pdv.comms as _pdv_comms
 try:
-    from ipykernel.comm import Comm
-except Exception:
-    from comm import Comm
-_ip = get_ipython()
-pdv.bootstrap(_ip)
-if _pdv_comms._comm is None:
-    _pdv_comm = Comm(target_name="pdv.kernel")
-    _pdv_comms._comm = _pdv_comm
-    _pdv_comm.on_msg(_pdv_comms._on_comm_message)
-    _pdv_comms.send_message("pdv.ready", {})
+    from IPython import get_ipython
+    import pdv
+    import pdv.comms as _pdv_comms
+    try:
+        from ipykernel.comm import Comm
+    except Exception:
+        from comm import Comm
+    _ip = get_ipython()
+    pdv.bootstrap(_ip)
+    if _pdv_comms._comm is None:
+        _pdv_comm = Comm(target_name="pdv.kernel")
+        _pdv_comms._comm = _pdv_comm
+        _pdv_comm.on_msg(_pdv_comms._on_comm_message)
+        _pdv_comms.send_message("pdv.ready", {})
+except BaseException:
+    import sys as _pdv_sys
+    import traceback as _pdv_traceback
+    _pdv_traceback.print_exc()
+    _pdv_sys.stderr.flush()
+    raise
 `;
 
 /**
@@ -60,6 +74,35 @@ if PDVKernel._comm[] === nothing
     ))
 end
 `;
+
+/**
+ * Read a "the kernel package is not installed" failure out of boot output.
+ *
+ * Matches only the specific modules whose absence means "this interpreter
+ * cannot host a PDV session" — a user-code ImportError must never trigger
+ * the environment-problem headline.
+ *
+ * @param bootOutput - Accumulated boot output (stderr + iopub streams).
+ * @param language - Kernel language, selecting the pattern set.
+ * @returns The missing package name, or null when boot output shows no
+ *   missing-kernel-package signature.
+ */
+export function diagnoseMissingKernelPackage(
+  bootOutput: string,
+  language: "python" | "julia",
+): string | null {
+  if (language === "julia") {
+    // `using PDVKernel` / `using IJulia` against an env without them.
+    const m = /Package (PDVKernel|IJulia) not found/.exec(bootOutput);
+    return m ? m[1] : null;
+  }
+  // Python: the bootstrap's own traceback (no pdv/IPython/comm in the env)
+  // or the interpreter dying at spawn (no ipykernel_launcher at all).
+  const m = /No module named '?(pdv|ipykernel|ipykernel_launcher|IPython|comm)\b/.exec(
+    bootOutput,
+  );
+  return m ? m[1] : null;
+}
 
 /**
  * Wait for a comm push with an activity-based deadline (§10.8): the idle
@@ -159,13 +202,31 @@ export async function initializeKernelSession(
   // can legitimately recompile for minutes when caches are stale (package
   // update, Julia upgrade, edited dev-install), streaming progress the whole
   // time. Idle silence still fails fast; visible work extends up to the cap.
-  const readyIdleMs = language === "julia" ? 60_000 : 15_000;
-  const readyMaxMs = language === "julia" ? 20 * 60_000 : 60_000;
+  //
+  // Python's silence allowance is a minute, not seconds: a cold import out
+  // of a fresh venv on an NFS home — the normal case for the first kernel
+  // on a cluster — is silent for tens of seconds (observed on a real host:
+  // a fully provisioned venv timed out at a 15 s allowance and booted fine
+  // once warm). A genuinely dead kernel still fails fast through the crash
+  // event, and a missing package speaks on stderr, so the idle timer only
+  // governs the alive-and-silent case.
+  const readyIdleMs = 60_000;
+  const readyMaxMs = language === "julia" ? 20 * 60_000 : 5 * 60_000;
 
   // Track the last iopub msg_type seen during the handshake so that, if
   // anything throws, the diagnostic message can tell the user what the
   // kernel was last doing instead of just "Kernel failed to start".
   let lastIopubMsgType: string | null = null;
+
+  // Bounded tail of everything the kernel said while booting. On failure it
+  // is appended to the error: the bootstrap's own traceback (an interpreter
+  // with no pdv), or the interpreter's dying words (no ipykernel at all),
+  // are the actual diagnosis — without them the user gets only a timeout.
+  let bootTail = "";
+  const BOOT_TAIL_MAX = 4000;
+  const recordBootOutput = (text: string): void => {
+    bootTail = (bootTail + text).slice(-BOOT_TAIL_MAX);
+  };
 
   let step: "bootstrap" | "ready" | "init" = "bootstrap";
   const ready = waitForPush(commRouter, PDVMessageType.READY, readyIdleMs, readyMaxMs);
@@ -179,13 +240,17 @@ export async function initializeKernelSession(
     if (m.header.msg_type === "stream") {
       ready.keepalive();
       const text = (m.content as { text?: unknown })?.text;
-      if (typeof text === "string" && text.length > 0) onBootOutput?.(text);
+      if (typeof text === "string" && text.length > 0) {
+        recordBootOutput(text);
+        onBootOutput?.(text);
+      }
     }
   });
   const disposeOutputObserver = kernelManager.onProcessOutput(
     kernelId,
     (_stream, data) => {
       ready.keepalive();
+      recordBootOutput(data);
       onBootOutput?.(data);
     }
   );
@@ -210,7 +275,15 @@ export async function initializeKernelSession(
     const bootstrapResult = await Promise.race([
       kernelManager.execute(kernelId, {
         code: bootstrapCode,
-        silent: true,
+        // Python runs NON-silent: ipykernel publishes no iopub `error` for a
+        // silent execution, so a failing bootstrap (an interpreter without
+        // pdv) would dissolve into a ready timeout instead of failing the
+        // execute here, immediately, with the real traceback. storeHistory
+        // keeps it out of the user's history and execution count. Julia
+        // stays silent — IJulia's error reporting does not share ipykernel's
+        // suppression, and its bootstrap output is precompile chatter.
+        silent: language === "julia",
+        storeHistory: false,
       }),
       readyDeadline,
     ]);
@@ -243,11 +316,35 @@ export async function initializeKernelSession(
     const procStr = proc
       ? `exitCode=${proc.exitCode === null ? "null" : proc.exitCode} killed=${proc.killed}`
       : "(kernel not found)";
+    // The boot output usually IS the diagnosis — lead with a plain-language
+    // headline when it names the failure everyone actually hits: an
+    // interpreter without the PDV kernel package. The signature can arrive
+    // as stream output (the bootstrap's printed traceback) or inside the
+    // execute error itself (non-silent bootstrap), so scan both.
+    const missingModule = diagnoseMissingKernelPackage(
+      `${bootTail}\n${original}`,
+      language,
+    );
+    const headline = missingModule
+      ? `This ${language === "julia" ? "Julia" : "Python"} environment cannot run ` +
+        `PDV sessions — it is missing '${missingModule}'. Choose or install an ` +
+        `environment in Settings → Runtime (PDV can install it there).\n`
+      : "";
+    const tail = bootTail.trim();
+    const tailBlock = tail
+      ? `\n  boot output (tail):\n` +
+        tail
+          .split("\n")
+          .map((line) => `    ${line}`)
+          .join("\n")
+      : "";
     throw new Error(
-      `Kernel handshake failed at step '${step}': ${original}\n` +
+      headline +
+        `Kernel handshake failed at step '${step}': ${original}\n` +
         `  process: ${procStr}\n` +
         `  kernel status: ${status}\n` +
-        `  last iopub msg_type: ${lastIopubMsgType ?? "(none)"}`
+        `  last iopub msg_type: ${lastIopubMsgType ?? "(none)"}` +
+        tailBlock
     );
   } finally {
     disposeIopubObserver();

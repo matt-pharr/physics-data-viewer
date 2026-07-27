@@ -8,12 +8,14 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { BrowserWindow } from "electron";
+import fsSync from "fs";
 import os from "os";
 import path from "path";
 
 import { registerIpcHandlers, unregisterIpcHandlers } from "./index";
 import { dispatchInvoke, type PushSender } from "./server/invoke-registry";
 import { unwireServer, wireServer } from "./server/wire";
+import { LocalConfigStore } from "./shell/local-config-store";
 import type { BridgeHandlers, ServerHandle } from "./shell/server-supervisor";
 import {
   IPC,
@@ -409,6 +411,11 @@ async function setup() {
     closeChildWindows: () => bridge?.closeChildWindows(),
   });
   const server: ServerHandle = {
+    // Wired in-process: there is no child to start or stop, so the
+    // lifecycle half of the interface is inert here.
+    kind: "local",
+    start: async () => undefined,
+    shutdown: async () => undefined,
     invoke: (channel, args = []) =>
       dispatchInvoke(channel, { push: serverPush }, args),
     sessionReset: async () => wire.sessionReset(),
@@ -419,7 +426,12 @@ async function setup() {
       bridge = null;
     },
   };
-  await registerIpcHandlers(win, server, os.tmpdir(), setAllowClose);
+  // A real store in a throwaway dir: the shell-owned half of the config is
+  // now served from here, so a stub would hide a merge regression.
+  const localConfig = new LocalConfigStore(
+    fsSync.mkdtempSync(path.join(os.tmpdir(), "pdv-index-test-")),
+  );
+  await registerIpcHandlers(win, server, localConfig, os.tmpdir(), os.tmpdir(), setAllowClose);
 
   return {
     webContentsSend,
@@ -808,8 +820,12 @@ describe("Step 5 IPC handlers", () => {
       showPrivateVariables: true,
     })) as PDVConfig;
 
-    expect(configStore.set).toHaveBeenCalledWith("theme", "dark");
+    // `theme` is shell-owned now, so it must NOT reach the server's store —
+    // on a remote session that store is the cluster's, and appearance
+    // follows the user rather than the host.
+    expect(configStore.set).not.toHaveBeenCalledWith("theme", "dark");
     expect(configStore.set).toHaveBeenCalledWith("showPrivateVariables", true);
+    // The renderer still sees one flat config with both halves merged.
     expect(result).toEqual({
       showPrivateVariables: true,
       showModuleVariables: false,

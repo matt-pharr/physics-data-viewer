@@ -16,6 +16,9 @@
   "ignoreDependencies": [
     "electronmon"
   ],
+  "ignoreBinaries": [
+    "ps"
+  ],
   "ignore": [
     "renderer/src/vite-env.d.ts",
     "main/pdv-protocol.ts"

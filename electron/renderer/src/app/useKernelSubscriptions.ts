@@ -3,6 +3,7 @@ import type { CellTab, LogEntry } from '../types';
 import type { ExecuteOutputChunk, ProgressPayload } from '../types/pdv';
 import { appendLogEntry } from './app-utils';
 import {
+  invalidateAllKernelState,
   applyTreeChange,
   invalidateCompletions,
   invalidateNamespace,
@@ -204,7 +205,11 @@ export function useKernelSubscriptions({
     });
 
     const unsubscribeReconnected = window.pdv.kernels.onReconnected(() => {
-      invalidateTree(currentKernelId);
+      // Everything kernel-scoped, not just the tree: after a system wake the
+      // namespace can have moved too, and refreshing only what is visible
+      // leaves the rest quietly wrong until something else happens to
+      // invalidate it.
+      invalidateAllKernelState(currentKernelId, 'reconnect');
       setModulesRefreshToken((prev) => prev + 1);
     });
 

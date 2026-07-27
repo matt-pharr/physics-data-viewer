@@ -36,14 +36,14 @@ import type {
  * of truth via type-only imports.
  */
 export type { NodeDescriptor } from "./pdv-protocol";
-import type { PDVConfig } from "./config";
+import type { PDVConfig, RecentProjectEntry } from "./config";
 import type {
   EnvironmentInfo,
   EnvironmentInstallResult,
   InstallOutputChunk,
 } from "./environment-detector";
 
-export type { PDVConfig } from "./config";
+export type { PDVConfig, RecentProjectEntry } from "./config";
 /**
  * Re-export the launcher types so renderer-facing type files can consume
  * them via `types/pdv.d.ts` without importing across the main↔renderer
@@ -281,6 +281,28 @@ export const IPC = {
      */
     envActivity: "pdv.environment.envActivity",
     updateStatus: "pdv.updater.status",
+    /**
+     * Shell → renderer. The live state of a remote connection attempt:
+     * streamed ssh output, prompt masking, and the final verdict.
+     *
+     * Deliberately not folded into {@link IPCChannels.push.progress}, which
+     * is a *server*-originated channel whose `operation` is a closed
+     * `"save" | "load"` union. A connection attempt happens before any
+     * server exists to originate a push, so it needs a shell-originated
+     * channel — and this is also where remote bootstrap progress (uploading
+     * and installing the server bundle) belongs, for the same reason.
+     */
+    remoteStatus: "pdv.remote.status",
+    /**
+     * Where the session now lives, and whether its connection is healthy.
+     *
+     * Distinct from {@link IPCChannels.push.remoteStatus}, which describes an
+     * ssh *connection* attempt. This describes the *session* — the thing that
+     * owns the kernel and the Tree — so the status bar can say "remote,
+     * reconnecting" instead of leaving the user looking at a UI whose backing
+     * server has quietly moved or gone away.
+     */
+    sessionState: "pdv.session.state",
     requestClose: "pdv.app.requestClose",
     autosaveTrigger: "pdv.autosave.trigger",
     /**
@@ -398,11 +420,58 @@ export const IPC = {
     /** Bootstrap juliaup via the official installer script, streamed (§10.7.5). */
     juliaupInstall: "environment:juliaupInstall",
   },
+  /**
+   * Remote-session connection control (ARCHITECTURE.md §11.7).
+   *
+   * These are shell channels, and necessarily so: they establish and tear
+   * down the ssh connection that a remote pdv-server is reached *through*,
+   * so they cannot be served by the very session they are setting up. Local
+   * mode simply never calls them.
+   *
+   * Note the split of responsibility — these channels own the *connection*,
+   * while everything a session does once connected keeps riding the
+   * existing `SERVER_CHANNELS` unchanged, through whichever `ServerHandle`
+   * is active. There is no second protocol for remote work.
+   */
+  remote: {
+    /** Host aliases harvested from `~/.ssh/config`, for the picker. */
+    listHosts: "remote:listHosts",
+    /** Begin (or reuse) a connection to a host. Progress arrives via push. */
+    connect: "remote:connect",
+    /** Answer the prompt currently displayed by an in-flight connect. */
+    respond: "remote:respond",
+    /** Abandon the in-flight connect. */
+    cancel: "remote:cancel",
+    /** Drop the connection and stop the ControlMaster PDV owns. */
+    disconnect: "remote:disconnect",
+    /** Current connection state, for renderer (re)hydration. */
+    getStatus: "remote:getStatus",
+    /**
+     * Move the session onto the connected host: attach to (or create) a
+     * session daemon there and swap the active server onto it.
+     *
+     * Separate from `connect` on purpose. Reaching a host and *running the
+     * session there* are different steps with different failure modes, and
+     * keeping them apart is what lets a failed session start leave the user
+     * with a working local session and a live connection rather than
+     * neither.
+     */
+    startSession: "remote:startSession",
+    /** Leave the remote session running and return to a local session. */
+    endSession: "remote:endSession",
+  },
   /** Native file/directory picker channels. */
   files: {
     pickExecutable: "files:pickExecutable",
     pickFile: "files:pickFile",
     pickDirectory: "files:pickDirectory",
+    /**
+     * List a directory on the machine the session runs on — the remote
+     * path picker's one data source. Server-side (unlike its native-dialog
+     * siblings above), because the filesystem being browsed is the
+     * session's, not the window's.
+     */
+    listDir: "files:listDir",
   },
 } as const;
 
@@ -426,7 +495,16 @@ export const SHELL_CHANNELS: readonly string[] = [
   ...Object.values(IPC.about),
   ...Object.values(IPC.updater),
   ...Object.values(IPC.themes),
-  ...Object.values(IPC.files),
+  // Explicit, not `...Object.values(IPC.files)`: that spread silently
+  // auto-assigned any new `IPC.files.*` entry to the shell while the
+  // partition test kept passing — exactly how `files.listDir` (a session
+  // concern) would have landed on the wrong process.
+  IPC.files.pickExecutable,
+  IPC.files.pickFile,
+  IPC.files.pickDirectory,
+  // The ssh client lives in the shell. These set up the connection a remote
+  // session is reached through, so they can never be served by that session.
+  ...Object.values(IPC.remote),
   ...Object.values(IPC.app),
   ...Object.values(IPC.launchers),
   ...Object.values(IPC.moduleWindows),
@@ -438,6 +516,13 @@ export const SHELL_CHANNELS: readonly string[] = [
   // re-routed to a local editor with remote capabilities (e.g.
   // `code --remote`) — a remote-mode follow-up, not handled here.
   IPC.script.edit,
+  // Served by `shell/config-bridge.ts`, which merges two stores: the
+  // shell-owned keys (theme, shortcuts, launchers — they follow the user)
+  // and the server-owned rest (pythonPath, workingDirBase, mcp — they
+  // belong to whichever host runs the session). The server still registers
+  // these channel names in its own invoke registry; the bridge calls them
+  // over the transport for its half.
+  ...Object.values(IPC.config),
 ];
 
 /** Invoke channels handled by the pdv-server core. */
@@ -451,7 +536,6 @@ export const SERVER_CHANNELS: readonly string[] = [
   ...Object.values(IPC.modules),
   ...Object.values(IPC.namelist),
   ...Object.values(IPC.project),
-  ...Object.values(IPC.config),
   ...Object.values(IPC.mcp),
   ...Object.values(IPC.autosave),
   ...Object.values(IPC.codeCells),
@@ -459,6 +543,8 @@ export const SERVER_CHANNELS: readonly string[] = [
   ...Object.values(IPC.environment),
   IPC.guiEditor.read,
   IPC.guiEditor.save,
+  // The remote path picker browses the session's filesystem.
+  IPC.files.listDir,
 ];
 
 /**
@@ -495,6 +581,8 @@ export const SHELL_PUSH_CHANNELS: readonly string[] = [
   IPC.push.menuAction,
   IPC.push.chromeStateChanged,
   IPC.push.updateStatus,
+  IPC.push.remoteStatus,
+  IPC.push.sessionState,
   IPC.push.requestClose,
   IPC.push.moduleExecuteRequest,
 ];
@@ -525,16 +613,207 @@ export const BROADCAST_PUSH_CHANNELS: readonly string[] = [
  * - `resetSessionState` — light session reset on renderer load/reload
  *   (clears in-session closures, keeps per-kernel state on disk). The full
  *   reset rides the reserved `pdv.rpc.sessionReset` channel instead.
+ * - `serverConfigGet` / `serverConfigSet` — the *server-owned half* of the
+ *   config. The renderer-facing `config:get`/`config:set` are shell
+ *   channels served by `shell/config-bridge.ts`, which merges this half
+ *   with the shell-owned one (theme, launchers, …). Keeping them under
+ *   distinct names means "the config the session's host owns" and "the
+ *   config the user sees" never get confused for each other.
  */
+/**
+ * Channels a reconnecting client may safely re-issue when the session cannot
+ * say whether the original ran.
+ *
+ * Strictly reads, and strictly ones whose result depends only on current
+ * state. Everything absent from this list is treated as unsafe to retry, and
+ * that default is deliberate: re-issuing a mutation whose fate is unknown
+ * could run the same script twice against one kernel, with both writes
+ * landing in the Tree. Silent corruption is exactly what the reconnect
+ * design exists to prevent, so an unknown mutation is surfaced to the user
+ * instead ("the result of this operation is unknown — check the Tree").
+ *
+ * Adding a channel here is a claim that calling it twice is indistinguishable
+ * from calling it once. Verify that before adding one.
+ */
+export const IDEMPOTENT_CHANNELS: readonly string[] = [
+  IPC.tree.list,
+  IPC.tree.get,
+  IPC.namespace.query,
+  IPC.namespace.inspect,
+  IPC.kernels.list,
+  // The path picker's only call. Without it, a listing in flight at a
+  // connection drop rejected with "check the Tree before retrying" —
+  // mutation language for a directory read.
+  IPC.files.listDir,
+  IPC.autosave.check,
+  IPC.environment.check,
+];
+
+/**
+ * Whether a channel may be transparently re-issued after a reconnect.
+ *
+ * @param channel - Channel name to classify.
+ * @returns True only for channels in {@link IDEMPOTENT_CHANNELS}.
+ */
+export function isIdempotentChannel(channel: string): boolean {
+  return IDEMPOTENT_CHANNELS.includes(channel);
+}
+
 export const INTERNAL_CHANNELS = {
   launcherContext: "pdv.internal.launcherContext",
   resolveTreeFile: "pdv.internal.resolveTreeFile",
   systemResumed: "pdv.internal.systemResumed",
   resetSessionState: "pdv.internal.resetSessionState",
+  serverConfigGet: "pdv.internal.serverConfigGet",
+  serverConfigSet: "pdv.internal.serverConfigSet",
 } as const;
 
 // Re-export for preload and renderer use.
 export type { ExecuteOutputChunk };
+
+// ---------------------------------------------------------------------------
+// Remote session types
+// ---------------------------------------------------------------------------
+
+/**
+ * A host alias offered by the connect picker.
+ *
+ * `hostName`/`user` are display hints harvested from the same `Host` block
+ * and are frequently absent, because PDV deliberately does not implement
+ * ssh_config inheritance. Never build a connection from them — `alias` is
+ * what gets handed to `ssh`, which resolves the rest itself.
+ */
+export interface RemoteHostAlias {
+  alias: string;
+  hostName: string | null;
+  user: string | null;
+}
+
+/** Where a connection attempt currently stands. */
+export type RemotePhase =
+  /** No connection and no attempt in flight. */
+  | "idle"
+  /** Contacting the host; nothing is being asked of the user yet. */
+  | "connecting"
+  /** ssh is waiting on the user — a passphrase, a Duo choice, a push. */
+  | "prompting"
+  /**
+   * Signed in, and now getting PDV's components onto the host — probing,
+   * uploading, installing, verifying. Distinct from `connected` because the
+   * connection is up but nothing can use it yet, and on a first connect this
+   * is by far the longest wait.
+   */
+  | "preparing"
+  /** A ControlMaster is up and the host is ready to run a session. */
+  | "connected"
+  /** The attempt ended without a usable connection. */
+  | "failed";
+
+/**
+ * Live state of the remote connection, pushed on
+ * {@link IPCChannels.push.remoteStatus}.
+ *
+ * `output` carries ssh's own bytes for display. It never contains anything
+ * the user typed: replies go straight to the pty and are not echoed back
+ * here, which is what keeps a password out of the renderer, out of logs,
+ * and out of any screenshot attached to a bug report.
+ */
+export interface RemoteStatus {
+  phase: RemotePhase;
+  /** The host this state refers to, or null when idle. */
+  host: string | null;
+  /** Identifies the attempt, so a stale push cannot drive current UI. */
+  attemptId: string | null;
+  /**
+   * The machine that actually answered, when known.
+   *
+   * A load-balanced alias resolves to one of several nodes, and everything
+   * multiplexes over the single connection that reached it — so a session is
+   * pinned to that node. Surfacing it lets a reconnect that lands elsewhere
+   * be recognised, instead of showing up later as missing state.
+   */
+  node?: string | null;
+  /** Incremental ssh output to append to the connection log. */
+  output?: string;
+  /**
+   * True when the prompt on screen is asking for something secret and the
+   * input field must be masked. Deliberately eager — masking an innocuous
+   * prompt costs nothing, failing to mask a real one puts a password on screen.
+   */
+  secret?: boolean;
+  /** Human-readable explanation, set on `connected` and `failed`. */
+  message?: string;
+  /**
+   * Byte counts while uploading during `preparing`. Absent for stages that
+   * have no meaningful measure — a probe or a checksum is over before a
+   * progress bar would mean anything.
+   */
+  progress?: { transferred: number; total: number };
+}
+
+/** Payload of {@link IPCChannels.push.sessionState}. */
+export interface SessionStatePayload {
+  /** Where the session runs now. */
+  kind: "local" | "remote";
+  /** Host the session runs on, or null for local. */
+  host: string | null;
+  /** Health of the connection carrying it. */
+  state: "connected" | "reconnecting" | "auth-required" | "disconnected";
+  /**
+   * True when the client's view could not be resumed and must be rebuilt.
+   *
+   * Push-backed state (execution status, kernel status) is not covered by
+   * query invalidation, so a resync that skipped it would leave a spinner
+   * running forever on an execution that finished while the client was away.
+   */
+  resync?: boolean;
+  /**
+   * Why the resync happened: `moved` is a deliberate session swap the user
+   * asked for; `recovered` is a reattach whose view could not be resumed.
+   * The console marker wording depends on it — "output may be missing"
+   * after an intentional move read as data loss.
+   */
+  cause?: "moved" | "recovered";
+}
+
+/** Result of {@link PDVApi.remote.startSession} / `endSession`. */
+export interface RemoteSessionResult {
+  /** True when the session now runs where the caller asked. */
+  ok: boolean;
+  /** Session id on the host, when one was started. */
+  sessionId?: string;
+  /** Actionable failure text, shown verbatim. */
+  message?: string;
+}
+
+/** Result of {@link PDVApi.remote.connect}. */
+export interface RemoteConnectResult {
+  ok: boolean;
+  /** Set when `ok` is false; one of the failure kinds from the ssh layer. */
+  failure: string | null;
+  message: string;
+}
+
+/** One entry in a {@link ListDirResult}. */
+export interface ListDirEntry {
+  /** Base name within the listed directory. */
+  name: string;
+  /** Directory or file; a symlink reports its target's kind. */
+  kind: "dir" | "file";
+}
+
+/**
+ * Result of `files.listDir` — the remote path picker's one data source.
+ * Listed on the machine the session runs on, which is the whole point.
+ */
+export interface ListDirResult {
+  /** The absolute directory that was listed (the input path, resolved). */
+  path: string;
+  /** Entries, directories first, each group sorted by name. */
+  entries: ListDirEntry[];
+  /** The session user's home directory (the picker's default seed). */
+  home: string;
+}
 
 // ---------------------------------------------------------------------------
 // Kernel request/response helper types
@@ -1271,11 +1550,18 @@ export interface MenuActionPayload {
     | "project:save"
     | "project:saveAs"
     | "recentProjects:clear"
+    // Opens the connect dialog. Shell-side only until the session can move.
+    | "remote:connect"
     | "modules:import"
     | "modules:newEmpty"
     | "settings:open";
   /** Project directory path for open-recent actions. */
   path?: string;
+  /**
+   * Host the open-recent `path` lives on: an SSH alias, or null for this
+   * machine. Absent for every other action.
+   */
+  host?: string | null;
 }
 
 /**
@@ -2877,6 +3163,35 @@ export interface PDVApi {
     openDocsPage(): Promise<void>;
   };
 
+  /** Remote-session connection control (ARCHITECTURE.md §11.7). */
+  remote: {
+    /** Host aliases from `~/.ssh/config`, for the connect picker. */
+    listHosts(): Promise<RemoteHostAlias[]>;
+    /**
+     * Connect to a host, reusing an existing ControlMaster when there is
+     * one. Resolves when the attempt settles; watch
+     * {@link PDVApi.remote.onStatus} for prompts and streamed output while
+     * it is in flight.
+     */
+    connect(host: string): Promise<RemoteConnectResult>;
+    /** Move the session onto the connected host. */
+    startSession(): Promise<RemoteSessionResult>;
+    /** Leave the remote session running and return to a local session. */
+    endSession(): Promise<RemoteSessionResult>;
+    /** Where the session lives and whether its connection is healthy. */
+    onSessionState(callback: (state: SessionStatePayload) => void): () => void;
+    /** Answer the prompt currently on screen. */
+    respond(text: string): Promise<void>;
+    /** Abandon the in-flight attempt. */
+    cancel(): Promise<void>;
+    /** Disconnect and stop the ControlMaster PDV owns. */
+    disconnect(): Promise<void>;
+    /** Current state, for hydrating a freshly loaded renderer. */
+    getStatus(): Promise<RemoteStatus>;
+    /** Subscribe to connection state and streamed ssh output. */
+    onStatus(callback: (status: RemoteStatus) => void): () => void;
+  };
+
   /** App auto-update operations. */
   updater: {
     /** Trigger an update check against GitHub Releases. */
@@ -3028,17 +3343,27 @@ export interface PDVApi {
      * @returns Selected directory path, or null if cancelled.
      */
     pickDirectory(defaultPath?: string): Promise<string | null>;
+    /**
+     * List a directory on the machine the session runs on (the remote
+     * path picker's data source; server-side, unlike the native pickers).
+     *
+     * @param dirPath - Absolute directory to list, or omitted for the
+     *   session user's home directory.
+     * @returns The resolved directory and its entries.
+     */
+    listDir(dirPath?: string): Promise<ListDirResult>;
   };
 
   /** App menu integration. */
   menu: {
     /**
-     * Push the latest recent-project paths into the File → Open Recent submenu.
+     * Push the latest recent projects into the File → Open Recent submenu.
      *
-     * @param paths - Recent project directories (most recent first).
+     * @param entries - Recent projects (most recent first), each qualified
+     *   by the host it lives on (`host: null` for this machine).
      * @returns True when the menu was updated.
      */
-    updateRecentProjects(paths: string[]): Promise<boolean>;
+    updateRecentProjects(entries: RecentProjectEntry[]): Promise<boolean>;
     /**
      * Update enabled/disabled state for File-menu items.
      *

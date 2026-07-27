@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
+import { pickServerPath } from "../../services/pick-path";
 import type {
   ImportedModuleDescriptor,
   ModuleDescriptor,
@@ -110,7 +111,7 @@ export const ImportModuleDialog: React.FC<ImportModuleDialogProps> = ({
 
   const handleInstallLocal = async (): Promise<void> => {
     try {
-      const localPath = await window.pdv.files.pickDirectory();
+      const localPath = await pickServerPath({ mode: 'directory', title: 'Choose a module folder' });
       if (!localPath) return;
       setInstallDuplicate(null);
       const result = await window.pdv.modules.install({

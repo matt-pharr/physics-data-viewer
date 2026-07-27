@@ -257,6 +257,18 @@ const api: PDVApi = {
     openIssuesPage: () => invoke(IPC.about.openIssuesPage),
     openDocsPage: () => invoke(IPC.about.openDocsPage),
   },
+  remote: {
+    listHosts: () => invoke(IPC.remote.listHosts),
+    connect: (host) => invoke(IPC.remote.connect, host),
+    respond: (text) => invoke(IPC.remote.respond, text),
+    cancel: () => invoke(IPC.remote.cancel),
+    disconnect: () => invoke(IPC.remote.disconnect),
+    getStatus: () => invoke(IPC.remote.getStatus),
+    startSession: () => invoke(IPC.remote.startSession),
+    endSession: () => invoke(IPC.remote.endSession),
+    onStatus: (cb) => onPush(IPC.push.remoteStatus, cb),
+    onSessionState: (cb) => onPush(IPC.push.sessionState, cb),
+  },
   updater: {
     checkForUpdates: () => invoke(IPC.updater.checkForUpdates),
     downloadUpdate: () => invoke(IPC.updater.downloadUpdate),
@@ -292,6 +304,7 @@ const api: PDVApi = {
     pickExecutable: () => invoke(IPC.files.pickExecutable),
     pickFile: () => invoke(IPC.files.pickFile),
     pickDirectory: (defaultPath) => invoke(IPC.files.pickDirectory, defaultPath),
+    listDir: (dirPath) => invoke(IPC.files.listDir, dirPath),
   },
   menu: {
     updateRecentProjects: (paths) =>

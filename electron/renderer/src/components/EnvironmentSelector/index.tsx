@@ -13,6 +13,7 @@
  */
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { pickServerPath } from '../../services/pick-path';
 import type { EnvironmentInfo, InstallOutputChunk, JuliaRuntimeInfo } from '../../types';
 
 // ---------------------------------------------------------------------------
@@ -322,7 +323,7 @@ export const EnvironmentSelector: React.FC<EnvironmentSelectorProps> = ({
   // -- Browse for executable -------------------------------------------------
   const handleBrowse = useCallback(async () => {
     try {
-      const filePath = await window.pdv.files.pickExecutable();
+      const filePath = await pickServerPath({ mode: 'executable', title: 'Choose a Python interpreter' });
       if (!filePath) return;
 
       // Probe the selected path
@@ -482,7 +483,7 @@ export const EnvironmentSelector: React.FC<EnvironmentSelectorProps> = ({
 
   const handleJuliaBrowse = useCallback(async () => {
     try {
-      const filePath = await window.pdv.files.pickExecutable();
+      const filePath = await pickServerPath({ mode: 'executable', title: 'Choose a Julia executable' });
       if (!filePath) return;
       const info = await window.pdv.environment.checkJulia(filePath);
       if (!mountedRef.current) return;

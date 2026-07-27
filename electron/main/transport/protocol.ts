@@ -24,8 +24,31 @@
  * push; bumped only when the envelope shapes here change incompatibly.
  * Distinct from the unified app version (which the hello also carries and
  * which the shell checks for an exact match).
+ *
+ * 2 — push seq became session-owned rather than per-connection, and hello no
+ * longer consumes seq 0 (see {@link UNSEQUENCED_SEQ}).
  */
-export const RPC_PROTOCOL_VERSION = 1;
+export const RPC_PROTOCOL_VERSION = 2;
+
+/**
+ * Oldest protocol version this build can still serve, advertised alongside
+ * {@link RPC_PROTOCOL_VERSION} so a peer sees a *range* rather than a point.
+ *
+ * This exists now, before any peer needs it, on purpose: a range cannot be
+ * retrofitted once long-lived daemons are running in the wild. A client that
+ * only learns the server's exact version has no way to tell "older but still
+ * compatible" from "incompatible", so it must refuse — which would strand a
+ * running session with a live kernel on every app upgrade.
+ */
+export const RPC_PROTOCOL_MIN = 2;
+
+/**
+ * Seq stamped on frames that are deliberately outside the sequenced stream
+ * (see {@link UNSEQUENCED_CHANNELS}). Negative so it can never collide with
+ * a real seq, and so a client recording `lastSeq` can reject it with a
+ * single comparison instead of a channel lookup.
+ */
+export const UNSEQUENCED_SEQ = -1;
 
 /** Serialized error carried in an {@link RpcResponse}. */
 export interface RpcError {
@@ -68,7 +91,7 @@ export interface RpcPush {
   event: string;
   /** Push payload exactly as handed to the server's `PushSender`. */
   payload: unknown;
-  /** Per-connection monotonic sequence number, stamped on every push. */
+  /** Session-owned monotonic sequence number (survives reconnects), stamped on every sequenced push; -1 for the unsequenced control channels. */
   seq: number;
 }
 
@@ -80,7 +103,7 @@ export const RPC_CHANNEL_PREFIX = "pdv.rpc.";
  * shell bridge consumes them.
  */
 export const RPC_CHANNELS = {
-  /** First push on every connection (seq 0): an {@link RpcHello} payload. */
+  /** First push on every connection (unsequenced, seq -1): an {@link RpcHello} payload. */
   hello: "pdv.rpc.hello",
   /** Liveness invoke; result is an {@link RpcPingResult}. */
   ping: "pdv.rpc.ping",
@@ -97,7 +120,61 @@ export const RPC_CHANNELS = {
    * editor/viewer). Emitted by server-side session/project resets.
    */
   closeChildWindows: "pdv.rpc.closeChildWindows",
+  /**
+   * Push rejecting an attach attempt (unknown session, protocol out of
+   * range, replay impossible). Unsequenced: it describes why the sequenced
+   * stream cannot start, so it cannot be part of it.
+   */
+  attachError: "pdv.rpc.attachError",
+  /**
+   * Push telling a connection that a newer one took over its session. Sent
+   * immediately before the older connection is closed, and unsequenced for
+   * the same reason: the connection it addresses is leaving the stream.
+   */
+  superseded: "pdv.rpc.superseded",
+  /**
+   * Invoke that (re)joins a session: the client states what it last saw and
+   * what it is still waiting on, and the session answers with a replay or a
+   * demand to resync. A request/response on a reserved channel rather than a
+   * new envelope shape, so it rides the existing correlation machinery.
+   */
+  attach: "pdv.rpc.attach",
 } as const;
+
+/**
+ * The complete set of channels exempt from push sequencing — closed by
+ * construction rather than checked at each call site, so adding a fourth is
+ * a deliberate edit here and not an accident somewhere else.
+ *
+ * Membership is narrow on purpose. These three frames describe the state of
+ * the *connection*, so they must flow even when the sequenced stream cannot
+ * (before attach completes, or after it has failed). Everything else is
+ * session state and must be journalled, replayable, and gap-detectable.
+ *
+ * `confirmRequest` is the tempting fourth member and is deliberately absent:
+ * a native confirm parked on a dropped connection is session state, and must
+ * survive a reconnect rather than evaporate with the connection that asked.
+ */
+export const UNSEQUENCED_CHANNELS = [
+  RPC_CHANNELS.hello,
+  RPC_CHANNELS.attachError,
+  RPC_CHANNELS.superseded,
+] as const;
+
+/** A channel exempt from sequencing (see {@link UNSEQUENCED_CHANNELS}). */
+export type UnsequencedChannel = (typeof UNSEQUENCED_CHANNELS)[number];
+
+/**
+ * Whether a channel is exempt from push sequencing.
+ *
+ * @param channel - Channel name to classify.
+ * @returns True when `channel` is one of {@link UNSEQUENCED_CHANNELS}.
+ */
+export function isUnsequencedChannel(
+  channel: string
+): channel is UnsequencedChannel {
+  return (UNSEQUENCED_CHANNELS as readonly string[]).includes(channel);
+}
 
 /** Payload of a {@link RPC_CHANNELS.confirmRequest} push. */
 export interface RpcConfirmRequest {
@@ -134,9 +211,100 @@ export interface RpcHello {
   pid: number;
   /** {@link RPC_PROTOCOL_VERSION} of the server. */
   protocol: number;
+  /** {@link RPC_PROTOCOL_MIN} — oldest version this server still serves. */
+  protocolMin: number;
   /** Session identifier; always `null` for local mode (remote is additive). */
   session: string | null;
+  /**
+   * Identifies this *incarnation* of the session, regenerated on every
+   * server start and never reused.
+   *
+   * This is the guard against the one failure that loses data silently. A
+   * daemon that died and was recreated restarts its seq at 0, so a client
+   * holding `lastSeq: 4000` would compute `4001 >= firstRetainedSeq (0)`,
+   * conclude it is replayable, receive nothing, and believe it is caught up
+   * — while the entire session it was watching is gone. Comparing epochs
+   * catches that before any seq arithmetic is allowed to run.
+   */
+  sessionEpoch: string;
 }
+
+/** Payload of a {@link RPC_CHANNELS.attach} invoke (first arg). */
+export interface RpcAttachRequest {
+  /**
+   * The session incarnation the client believes it is rejoining, or `null`
+   * on a first attach. Any mismatch is stale — see {@link RpcHello.sessionEpoch}.
+   */
+  sessionEpoch: string | null;
+  /**
+   * Highest push seq the client actually received (−1 if none). Authoritative
+   * on the *client*: the server's cursor only records what it handed a
+   * writer, not what crossed the network. This is also what makes a
+   * half-written frame at disconnect safe — the client never counted it, so
+   * the reattach replays it whole.
+   */
+  lastSeq: number;
+  /** Request ids the client is still waiting on, for reconciliation. */
+  pendingRequests: string[];
+  /** {@link RPC_PROTOCOL_VERSION} the client speaks. */
+  protocol: number;
+}
+
+/** How a client's pending request was classified on reattach. */
+export type RpcPendingVerdict = "in-flight" | "completed" | "unknown";
+
+/** Result of a {@link RPC_CHANNELS.attach} invoke. */
+export type RpcAttachResult =
+  | {
+      /** The client is rejoined; missed pushes follow, then parked responses. */
+      status: "ok";
+      /** The session incarnation the client is now attached to. */
+      sessionEpoch: string;
+      /** Verdict per id from {@link RpcAttachRequest.pendingRequests}. */
+      pending: Record<string, RpcPendingVerdict>;
+      /** Highest seq the session has assigned. */
+      lastSeq: number;
+    }
+  | {
+      /**
+       * The client cannot be caught up and must discard its view and
+       * resync from scratch. Distinct from an error: the session is healthy,
+       * only this client's continuity is broken.
+       */
+      status: "stale";
+      /** The session incarnation the client is now attached to. */
+      sessionEpoch: string;
+      /** Why continuity was lost, for the reconnect UX and logs. */
+      reason: RpcStaleReason;
+      /** Verdicts still apply — a blown ring must not lose a settled result. */
+      pending: Record<string, RpcPendingVerdict>;
+      /** Highest seq the session has assigned. */
+      lastSeq: number;
+    };
+
+/**
+ * Payload of an {@link RPC_CHANNELS.attachError} push: the attach was
+ * refused outright, as opposed to accepted-but-stale. The client cannot fix
+ * this by resyncing — the two ends do not speak a common protocol — so the
+ * shell must re-bootstrap the host rather than retry.
+ */
+export interface RpcAttachError {
+  /** Human-readable reason, surfaced in the reconnect UX. */
+  message: string;
+  /** {@link RPC_PROTOCOL_VERSION} of the session. */
+  protocol: number;
+  /** {@link RPC_PROTOCOL_MIN} of the session. */
+  protocolMin: number;
+}
+
+/** Why an attach could not resume the client's stream. */
+export type RpcStaleReason =
+  /** No prior session state — a cold client attaching for the first time. */
+  | "no-cursor"
+  /** The session restarted; the client's seq belongs to a dead incarnation. */
+  | "epoch-mismatch"
+  /** The client's next frame had already been evicted from the replay ring. */
+  | "replay-gap";
 
 /** Result of a {@link RPC_CHANNELS.ping} invoke. */
 export interface RpcPingResult {

@@ -2,6 +2,8 @@
   "name": "physics-data-viewer",
   "version": "0.2.0",
   "uvVersion": "0.11.6",
+  "remoteNodeVersion": "v22.23.1",
+  "remoteNodeAbi": "127",
   "private": true,
   "author": {
     "name": "Matthew Pharr",
@@ -19,10 +21,11 @@
     "url": "https://github.com/matt-pharr/physics-data-viewer"
   },
   "scripts": {
-    "dev": "node ./node_modules/concurrently/dist/bin/concurrently.js -k \"npm:dev:main\" \"npm:dev:renderer\"",
+    "dev": "node ./node_modules/concurrently/dist/bin/index.js -k \"npm:dev:main\" \"npm:dev:renderer\"",
     "dev:main": "node ./node_modules/cross-env/dist/bin/cross-env.js NODE_ENV=development node ./node_modules/electronmon/bin/cli.js .",
     "dev:renderer": "cd renderer && node ../node_modules/vite/bin/vite.js",
     "generate:icon:mac": "sh ./scripts/generate-mac-icon.sh && sh ./scripts/build-icon.sh",
+    "postinstall": "node scripts/fix-node-pty-perms.mjs",
     "fetch:uv": "node scripts/fetch-uv.mjs --host",
     "build:pdv-wheel": "node scripts/build-pdv-wheel.mjs",
     "prebuild": "node scripts/fetch-uv.mjs && node scripts/build-pdv-wheel.mjs",
@@ -30,6 +33,8 @@
     "build:renderer": "cd renderer && node ../node_modules/vite/bin/vite.js build",
     "build:main": "node ./node_modules/typescript/bin/tsc -p tsconfig.json",
     "build:server": "node scripts/build-server.mjs",
+    "build:server-bundle": "node scripts/build-server-bundle.mjs",
+    "fetch:remote-node": "node scripts/fetch-remote-node.mjs",
     "verify:server-bundle": "node scripts/verify-server-bundle.mjs",
     "build:e2e": "npm run build",
     "test:e2e": "node ./node_modules/@playwright/test/cli.js test --config=playwright.config.ts",
@@ -81,6 +86,7 @@
     "marked": "^18.0.6",
     "marked-katex-extension": "^5.1.10",
     "monaco-editor": "^0.55.1",
+    "node-pty": "^1.1.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-window": "^2.2.7",

@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, vi } from "vitest";
-import { initializeKernelSession } from "./kernel-session";
+import { diagnoseMissingKernelPackage, initializeKernelSession } from "./kernel-session";
 import type { KernelManager, KernelExecuteResult } from "./kernel-manager";
 import type { CommRouter } from "./comm-router";
 import type { QueryRouter } from "./query-router";
@@ -144,6 +144,117 @@ describe("initializeKernelSession diagnostics", () => {
   });
 });
 
+describe("diagnoseMissingKernelPackage", () => {
+  it("reads a missing pdv out of the bootstrap traceback", () => {
+    const traceback =
+      "Traceback (most recent call last):\n" +
+      '  File "<string>", line 3, in <module>\n' +
+      "ModuleNotFoundError: No module named 'pdv'\n";
+    expect(diagnoseMissingKernelPackage(traceback, "python")).toBe("pdv");
+  });
+
+  it("reads a missing ipykernel out of the interpreter's dying words", () => {
+    // A bare system python dies at spawn, unquoted form.
+    expect(
+      diagnoseMissingKernelPackage(
+        "/usr/bin/python3: No module named ipykernel_launcher\n",
+        "python",
+      ),
+    ).toBe("ipykernel_launcher");
+  });
+
+  it("reads a missing PDVKernel out of Julia's package error", () => {
+    expect(
+      diagnoseMissingKernelPackage(
+        "ERROR: ArgumentError: Package PDVKernel not found in current path.\n",
+        "julia",
+      ),
+    ).toBe("PDVKernel");
+  });
+
+  it("never blames the environment for a user-package ImportError", () => {
+    // numpy missing is a package problem, not "this interpreter cannot
+    // host PDV" — the headline must not fire.
+    expect(
+      diagnoseMissingKernelPackage(
+        "ModuleNotFoundError: No module named 'numpy'\n",
+        "python",
+      ),
+    ).toBeNull();
+    // 'commonmark' must not match the 'comm' pattern.
+    expect(
+      diagnoseMissingKernelPackage(
+        "ModuleNotFoundError: No module named 'commonmark'\n",
+        "python",
+      ),
+    ).toBeNull();
+  });
+});
+
+describe("boot-output tail in handshake failures", () => {
+  it("a ready timeout carries the bootstrap traceback and the plain-language headline", async () => {
+    // The exact feyn shape: the interpreter exists and boots ipykernel, but
+    // `import pdv` fails inside the SILENT bootstrap execute — ipykernel
+    // publishes no iopub error for silent executions, so without the tail
+    // the user sees only an opaque pdv.ready timeout.
+    vi.useFakeTimers();
+    try {
+      const outputListeners: Array<
+        (stream: "stdout" | "stderr", data: string) => void
+      > = [];
+      const km = makeKernelManager({
+        onProcessOutput: vi.fn((_id, cb) => {
+          outputListeners.push(
+            cb as (stream: "stdout" | "stderr", data: string) => void
+          );
+          return () => undefined;
+        }),
+      });
+      const pending = initializeKernelSession(
+        km as unknown as KernelManager,
+        makeCommRouter(),
+        makeQueryRouter(),
+        makeProjectManager(),
+        "k1",
+        new Map()
+      );
+      const assertion = expect(pending).rejects.toThrow(
+        /missing 'pdv'[\s\S]*boot output \(tail\):[\s\S]*No module named 'pdv'/
+      );
+      outputListeners[0]?.(
+        "stderr",
+        "Traceback (most recent call last):\nModuleNotFoundError: No module named 'pdv'\n",
+      );
+      await vi.advanceTimersByTimeAsync(60_200);
+      await assertion;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("omits the tail block when the kernel said nothing", async () => {
+    vi.useFakeTimers();
+    try {
+      const pending = initializeKernelSession(
+        makeKernelManager() as unknown as KernelManager,
+        makeCommRouter(),
+        makeQueryRouter(),
+        makeProjectManager(),
+        "k1",
+        new Map()
+      );
+      const assertion = pending.catch((e: Error) => e.message);
+      await vi.advanceTimersByTimeAsync(60_200);
+      const msg = await assertion;
+      expect(msg).toContain("no kernel activity for 60 s");
+      expect(msg).not.toContain("boot output (tail)");
+      expect(msg).not.toContain("cannot run PDV sessions");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
 describe("activity-based ready deadline (§10.8)", () => {
   /**
    * Comm router whose pdv.ready never arrives, so the ready wait is governed
@@ -170,9 +281,9 @@ describe("activity-based ready deadline (§10.8)", () => {
         new Map()
       );
       const assertion = expect(pending).rejects.toThrow(
-        /no kernel activity for 15 s/
+        /no kernel activity for 60 s/
       );
-      await vi.advanceTimersByTimeAsync(15_100);
+      await vi.advanceTimersByTimeAsync(60_100);
       await assertion;
     } finally {
       vi.useRealTimers();
@@ -198,9 +309,9 @@ describe("activity-based ready deadline (§10.8)", () => {
         new Map()
       );
       const assertion = expect(pending).rejects.toThrow(
-        /failed at step 'bootstrap': .*no kernel activity for 15 s/
+        /failed at step 'bootstrap': .*no kernel activity for 60 s/
       );
-      await vi.advanceTimersByTimeAsync(15_100);
+      await vi.advanceTimersByTimeAsync(60_100);
       await assertion;
     } finally {
       vi.useRealTimers();
@@ -235,14 +346,14 @@ describe("activity-based ready deadline (§10.8)", () => {
         (text) => bootOutput.push(text)
       );
       const assertion = expect(pending).rejects.toThrow(
-        /still absent after 60 s/
+        /still absent after 300 s/
       );
 
-      // Emit stream traffic every 10 s — each one inside the 15 s idle
-      // allowance, so the wait must survive far past 15 s and fail only at
-      // the 60 s hard cap.
+      // Emit stream traffic every 50 s — each one inside the 60 s idle
+      // allowance, so the wait must survive far past 60 s and fail only at
+      // the 300 s hard cap.
       for (let i = 0; i < 7; i++) {
-        await vi.advanceTimersByTimeAsync(10_000);
+        await vi.advanceTimersByTimeAsync(50_000);
         iopubListeners[0]?.({
           header: { msg_type: "stream" },
           content: { text: `Precompiling chunk ${i}\n` },
@@ -284,15 +395,15 @@ describe("activity-based ready deadline (§10.8)", () => {
         (text) => bootOutput.push(text)
       );
       const assertion = expect(pending).rejects.toThrow(
-        /no kernel activity for 15 s/
+        /no kernel activity for 60 s/
       );
 
       // One burst of process output at t=10 s pushes the idle deadline to
-      // t=25 s; silence after that fails at the idle allowance, proving the
-      // reset happened (a flat deadline would have fired at t=15 s).
+      // t=70 s; silence after that fails at the idle allowance, proving the
+      // reset happened (a flat deadline would have fired at t=60 s).
       await vi.advanceTimersByTimeAsync(10_000);
       outputListeners[0]?.("stderr", "Precompiling IJulia...\n");
-      await vi.advanceTimersByTimeAsync(15_100);
+      await vi.advanceTimersByTimeAsync(60_100);
       await assertion;
       expect(bootOutput.join("")).toContain("Precompiling IJulia");
     } finally {

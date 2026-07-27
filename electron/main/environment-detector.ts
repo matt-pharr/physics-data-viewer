@@ -478,7 +478,13 @@ export class EnvironmentDetector {
   static resolveBundledPDVWheelPath(): string | null {
     const findWheel = (dir: string): string | null => {
       try {
-        const wheel = fs.readdirSync(dir).find((name) => name.endsWith(".whl"));
+        // Skip dotfiles: macOS bsdtar writes AppleDouble metadata entries
+        // ("._pdv_python-….whl") into tarballs, and on a Linux host those
+        // extract as real files that match a bare `endsWith(".whl")` — uv
+        // then dies on "invalid package name" (observed on a real cluster).
+        const wheel = fs
+          .readdirSync(dir)
+          .find((name) => name.endsWith(".whl") && !name.startsWith("."));
         return wheel ? path.join(dir, wheel) : null;
       } catch {
         return null;

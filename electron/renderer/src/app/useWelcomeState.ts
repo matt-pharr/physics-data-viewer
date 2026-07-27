@@ -38,7 +38,7 @@ export function useWelcomeState(options: UseWelcomeStateOptions) {
   const [showWelcome, setShowWelcome] = useState(true);
   const [forceWelcome, setForceWelcome] = useState(false);
 
-  const recentProjectPaths = useMemo(
+  const recentProjectEntries = useMemo(
     () => normalizeRecentProjects(config?.recentProjects),
     [config?.recentProjects],
   );
@@ -46,25 +46,35 @@ export function useWelcomeState(options: UseWelcomeStateOptions) {
   /** Build RecentProject[] with language and name metadata from project.json files. */
   const [recentProjects, setRecentProjects] = useState<RecentProject[]>([]);
   useEffect(() => {
-    if (recentProjectPaths.length === 0) {
+    if (recentProjectEntries.length === 0) {
       setRecentProjects([]);
       return;
     }
     let cancelled = false;
     Promise.all(
-      recentProjectPaths.map(async (p) => {
+      recentProjectEntries.map(async (entry) => {
+        // Only this machine's projects can be inspected from here; a remote
+        // entry's manifest lives on its host and is read after connecting.
+        if (entry.host !== null) {
+          return { path: entry.path, host: entry.host } as RecentProject;
+        }
         try {
-          const peek = await window.pdv.project.peekManifest(p);
-          return { path: p, language: peek.language, name: peek.projectName } as RecentProject;
+          const peek = await window.pdv.project.peekManifest(entry.path);
+          return {
+            path: entry.path,
+            host: null,
+            language: peek.language,
+            name: peek.projectName,
+          } as RecentProject;
         } catch {
-          return { path: p } as RecentProject;
+          return { path: entry.path, host: null } as RecentProject;
         }
       })
     ).then((results) => {
       if (!cancelled) setRecentProjects(results);
     });
     return () => { cancelled = true; };
-  }, [recentProjectPaths]);
+  }, [recentProjectEntries]);
 
   // Orphaned autosaves available on the welcome screen. Refreshed on mount,
   // again when the kernel becomes ready (in case scan races with kernel start),

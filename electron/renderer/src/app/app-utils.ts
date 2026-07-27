@@ -5,7 +5,7 @@
  * config merge helpers. These are side-effect-free and have no React dependency.
  */
 
-import type { CellTab, Config, LogEntry } from '../types';
+import type { CellTab, Config, LogEntry, RecentProjectEntry } from '../types';
 import { MAX_IMAGE_LOG_ENTRIES, MAX_LOG_ENTRIES, MAX_RECENT_PROJECTS } from './constants';
 
 /**
@@ -86,20 +86,49 @@ export function normalizeLoadedCodeCells(data: unknown): { tabs: CellTab[]; acti
   return { tabs: normalizedTabs, activeTabId };
 }
 
-/** Normalize the recent-project list (unique, trimmed, capped). */
-export function normalizeRecentProjects(data: unknown): string[] {
+/**
+ * Normalize the recent-project list (unique per host + path, trimmed, capped).
+ *
+ * Accepts the legacy `string[]` form — written before recents recorded which
+ * host a project lives on — and treats those entries as local, so an existing
+ * list survives the upgrade rather than appearing empty.
+ */
+export function normalizeRecentProjects(data: unknown): RecentProjectEntry[] {
   if (!Array.isArray(data)) return [];
-  const unique = new Set<string>();
-  const next: string[] = [];
-  for (const entry of data) {
-    if (typeof entry !== 'string') continue;
-    const trimmed = entry.trim();
-    if (!trimmed || unique.has(trimmed)) continue;
-    unique.add(trimmed);
-    next.push(trimmed);
+  const seen = new Set<string>();
+  const next: RecentProjectEntry[] = [];
+  for (const raw of data) {
+    let host: string | null = null;
+    let rawPath: unknown;
+    if (typeof raw === 'string') {
+      rawPath = raw;
+    } else if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+      const entry = raw as Record<string, unknown>;
+      rawPath = entry.path;
+      if (typeof entry.host === 'string' && entry.host.trim()) {
+        host = entry.host.trim();
+      }
+    } else {
+      continue;
+    }
+    if (typeof rawPath !== 'string') continue;
+    const trimmed = rawPath.trim();
+    if (!trimmed) continue;
+    const key = `${host ?? ''} ${trimmed}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    next.push({ host, path: trimmed });
     if (next.length >= MAX_RECENT_PROJECTS) break;
   }
   return next;
+}
+
+/** Whether two recent entries name the same project on the same host. */
+export function isSameRecentProject(
+  a: RecentProjectEntry,
+  b: RecentProjectEntry,
+): boolean {
+  return a.host === b.host && a.path === b.path;
 }
 
 /**

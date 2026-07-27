@@ -13,7 +13,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 
-import { ConfigStore } from "./config";
+import { ConfigStore, MAX_RECENT_PROJECTS, normalizeRecentProjects } from "./config";
 
 const tempDirs: string[] = [];
 
@@ -89,7 +89,12 @@ describe("ConfigStore", () => {
     expect(store.getAll()).toEqual({
       pythonPath: "/usr/bin/python3",
       projectRoot: "/tmp/project",
-      recentProjects: ["/tmp/project", "/tmp/other"],
+      // Written in the legacy `string[]` form; normalized to host-qualified
+      // entries on load so an existing install keeps its list.
+      recentProjects: [
+        { host: null, path: "/tmp/project" },
+        { host: null, path: "/tmp/other" },
+      ],
       showPrivateVariables: true,
       showModuleVariables: true,
       showCallableVariables: false,
@@ -378,4 +383,46 @@ describe("ConfigStore", () => {
     expect(store.get("defaultJuliaPackages")).toEqual(["DataFrames@1.6"]);
   });
 
+});
+
+describe("normalizeRecentProjects", () => {
+  it("returns [] for anything that is not an array", () => {
+    expect(normalizeRecentProjects(null)).toEqual([]);
+    expect(normalizeRecentProjects("/a")).toEqual([]);
+    expect(normalizeRecentProjects(undefined)).toEqual([]);
+  });
+
+  it("treats legacy string entries as local, trimming and deduping", () => {
+    expect(normalizeRecentProjects([" /a ", "/b", "/a"])).toEqual([
+      { host: null, path: "/a" },
+      { host: null, path: "/b" },
+    ]);
+  });
+
+  it("keeps the same path on different hosts as distinct entries", () => {
+    // This is the reason recents are host-qualified at all: without it,
+    // opening a recent could silently target the wrong machine's filesystem.
+    expect(
+      normalizeRecentProjects([
+        { host: "flux", path: "/scratch/run" },
+        { host: null, path: "/scratch/run" },
+        { host: "feyn", path: "/scratch/run" },
+      ]),
+    ).toEqual([
+      { host: "flux", path: "/scratch/run" },
+      { host: null, path: "/scratch/run" },
+      { host: "feyn", path: "/scratch/run" },
+    ]);
+  });
+
+  it("drops malformed entries and blank hosts rather than failing", () => {
+    expect(
+      normalizeRecentProjects([null, 5, { host: "flux" }, { path: 7 }, { host: "  ", path: "/a" }]),
+    ).toEqual([{ host: null, path: "/a" }]);
+  });
+
+  it("caps the list", () => {
+    const input = Array.from({ length: MAX_RECENT_PROJECTS + 5 }, (_, i) => `/p${String(i)}`);
+    expect(normalizeRecentProjects(input)).toHaveLength(MAX_RECENT_PROJECTS);
+  });
 });

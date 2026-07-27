@@ -28,6 +28,17 @@ export interface UpdateStatus {
 /** Script `run(...)` parameter metadata. Canonical: `pdv-protocol.ts`. */
 export type { ScriptParameter } from '../../../main/ipc';
 
+/** Remote-session connection types. Canonical: `main/ipc.ts`. */
+export type {
+  RemoteConnectResult,
+  RemoteHostAlias,
+  RemotePhase,
+  RemoteStatus,
+} from '../../../main/ipc';
+
+/** Remote path-picker listing types. Canonical: `main/ipc.ts`. */
+export type { ListDirEntry, ListDirResult } from '../../../main/ipc';
+
 /** Tree node descriptor returned by `pdv.tree.list`. Canonical: `pdv-protocol.ts`. */
 export type { NodeDescriptor } from '../../../main/ipc';
 
@@ -176,12 +187,25 @@ export interface CodeCellData {
   activeTabId: number;
 }
 
+/** One entry in the recent-projects list. */
+export interface RecentProjectEntry {
+  /** SSH host alias, or null when the project is on this machine. */
+  host: string | null;
+  /** Absolute project directory path, interpreted on `host`. */
+  path: string;
+}
+
 /** File-menu action event payload emitted by `menu.onAction`. */
 export interface MenuActionPayload {
   /** Discriminated menu action identifier. */
-  action: "project:new" | "project:open" | "project:openRecent" | "project:save" | "project:saveAs" | "recentProjects:clear" | "modules:import" | "modules:newEmpty" | "settings:open";
+  action: "project:new" | "project:open" | "project:openRecent" | "project:save" | "project:saveAs" | "recentProjects:clear" | "remote:connect" | "modules:import" | "modules:newEmpty" | "settings:open";
   /** Optional path argument for path-bearing menu actions. */
   path?: string;
+  /**
+   * Host the open-recent `path` lives on: an SSH alias, or null for this
+   * machine. Absent for every other action.
+   */
+  host?: string | null;
 }
 
 /** Partial map of menu item IDs to enabled/disabled state. */
@@ -384,8 +408,12 @@ export interface Config {
   cwd?: string;
   /** Whether current project is trusted for script execution. */
   trusted?: boolean;
-  /** Most-recent project paths for menu quick access. */
-  recentProjects?: string[];
+  /**
+   * Most-recent projects for menu quick access, most recent first. Each is
+   * qualified by the host it lives on (`host: null` for this machine), so
+   * the same path on two machines stays two distinct projects.
+   */
+  recentProjects?: RecentProjectEntry[];
   /** Python executable configured by user. */
   pythonPath?: string;
   /** Julia executable configured by user. */
@@ -1286,6 +1314,25 @@ export interface PDVApi {
     openIssuesPage(): Promise<void>;
     openDocsPage(): Promise<void>;
   };
+  remote: {
+    listHosts(): Promise<import('../../../main/ipc').RemoteHostAlias[]>;
+    connect(host: string): Promise<import('../../../main/ipc').RemoteConnectResult>;
+    respond(text: string): Promise<void>;
+    cancel(): Promise<void>;
+    disconnect(): Promise<void>;
+    getStatus(): Promise<import('../../../main/ipc').RemoteStatus>;
+    /** Move the session onto the connected host. */
+    startSession(): Promise<import('../../../main/ipc').RemoteSessionResult>;
+    /** Leave the remote session running and return to a local session. */
+    endSession(): Promise<import('../../../main/ipc').RemoteSessionResult>;
+    /** Where the session lives and whether its connection is healthy. */
+    onSessionState(
+      callback: (state: import('../../../main/ipc').SessionStatePayload) => void,
+    ): () => void;
+    onStatus(
+      callback: (status: import('../../../main/ipc').RemoteStatus) => void,
+    ): () => void;
+  };
   updater: {
     checkForUpdates(): Promise<void>;
     downloadUpdate(): Promise<void>;
@@ -1321,9 +1368,11 @@ export interface PDVApi {
     pickExecutable(): Promise<string | null>;
     pickFile(): Promise<string | null>;
     pickDirectory(defaultPath?: string): Promise<string | null>;
+    /** Lists on the session's machine — the remote path picker's source. */
+    listDir(dirPath?: string): Promise<import('../../../main/ipc').ListDirResult>;
   };
   menu: {
-    updateRecentProjects(paths: string[]): Promise<boolean>;
+    updateRecentProjects(entries: RecentProjectEntry[]): Promise<boolean>;
     updateEnabled(state: MenuEnabledState): Promise<boolean>;
     getModel(): Promise<AppMenuTopLevel[]>;
     popup(menuId: AppMenuTopLevel["id"], x: number, y: number): Promise<boolean>;
