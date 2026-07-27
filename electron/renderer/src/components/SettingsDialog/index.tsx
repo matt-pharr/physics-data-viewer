@@ -71,6 +71,8 @@ interface SettingsDialogProps {
    * Shows the Remote Hosts tab; mirrors the welcome screen's gated button.
    */
   remoteEnabled?: boolean;
+  /** Host the session runs on, or null — see GeneralTab's directory note. */
+  remoteHost?: string | null;
 }
 
 /** Top-level settings modal used by the App shell. */
@@ -88,6 +90,7 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
   environmentMode,
   kernelRunning = false,
   remoteEnabled = false,
+  remoteHost = null,
 }) => {
   const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab);
   const [editedShortcuts, setEditedShortcuts] = useState<Shortcuts>(shortcuts);
@@ -512,6 +515,7 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
         <div className="dialog-body">
           {activeTab === 'general' ? (
             <GeneralTab
+              remoteHost={remoteHost}
               editorPresetId={editorPresetId}
               editorCustomCommand={editorCustomCommand}
               editorCustomIsTui={editorCustomIsTui}

@@ -25,7 +25,11 @@
   background-color: var(--bg-secondary);
   border: 1px solid var(--border-color);
   border-radius: 8px;
-  width: 760px;
+  /* Wide enough for all eight tabs on one row with real macOS font
+     metrics (760px wrapped "About" onto a second row on a live system —
+     the flex-wrap below stays as the graceful fallback for narrow
+     windows, not the expected state). */
+  width: 860px;
   max-width: 92%;
   /* Fixed height so the dialog (and its tab bar / footer) stays put
      regardless of which tab is active. */
