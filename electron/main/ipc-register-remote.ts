@@ -382,6 +382,7 @@ export function registerRemoteIpcHandlers(
     // harder bug to diagnose. (The one unshipped path left is the handle's
     // internal reconnect loop; a daemon resurrected there sources the last
     // startSession's copy, which is also the newest one ever shipped.)
+    let shippedScript = false;
     if (options.setupScriptDir && host) {
       const ship = options.shipScript ?? shipSetupScript;
       const shipped = await ship({
@@ -394,6 +395,7 @@ export function registerRemoteIpcHandlers(
       if (!shipped.ok) {
         return { ok: false, message: shipped.message };
       }
+      shippedScript = shipped.shipped;
     }
 
     if (router.kind === "remote") {
@@ -419,6 +421,17 @@ export function registerRemoteIpcHandlers(
     }
 
     const open = options.openChannel ?? openSessionChannel;
+
+    // Set once the attach reports the daemon's state, and carried on every
+    // subsequent session push for this handle — a reconnect push without it
+    // would silently clear a warning that is still true. A ref rather than
+    // a variable so the handle's callbacks (created below, before the
+    // warning can be known) see the later value.
+    const scriptWarning = { current: undefined as string | undefined };
+    const withWarning = (payload: SessionStatePayload): SessionStatePayload =>
+      scriptWarning.current
+        ? { ...payload, setupScriptWarning: scriptWarning.current }
+        : payload;
 
     // Tail of the attach channel's stderr, kept for failure diagnosis: the
     // wrong-node refusal arrives there as a `PDV_WRONG_NODE node=<host>`
@@ -449,7 +462,7 @@ export function registerRemoteIpcHandlers(
       onState: (state) => {
         if (state === "connecting") return; // Not yet a session state.
         if (router.active !== handle) return;
-        pushSessionState({ kind: "remote", host, state });
+        pushSessionState(withWarning({ kind: "remote", host, state }));
       },
       onStale: (reason) => {
         // A first attach is always stale ("no-cursor") — there is nothing to
@@ -459,17 +472,19 @@ export function registerRemoteIpcHandlers(
         if (reason === "no-cursor") return;
         if (router.active !== handle) return;
         console.error(`[remote] session resync required: ${reason}`);
-        pushSessionState({
-          kind: "remote",
-          host,
-          state: "connected",
-          resync: true,
-          cause: "recovered",
-        });
+        pushSessionState(
+          withWarning({
+            kind: "remote",
+            host,
+            state: "connected",
+            resync: true,
+            cause: "recovered",
+          }),
+        );
       },
       onReattached: () => {
         if (router.active !== handle) return;
-        pushSessionState({ kind: "remote", host, state: "connected" });
+        pushSessionState(withWarning({ kind: "remote", host, state: "connected" }));
       },
     });
 
@@ -528,15 +543,28 @@ export function registerRemoteIpcHandlers(
       return { ok: false, message: (err as Error).message };
     }
 
+    // Only now can the warning be composed: the attach result is what says
+    // whether the daemon sourced a script, and `shippedScript` says whether
+    // one should have been. `false` from an old daemon that predates the
+    // field reads as null and stays silent — no evidence, no accusation.
+    if (shippedScript && handle.setupScriptApplied === false) {
+      scriptWarning.current =
+        `Your setup script for ${host ?? "this host"} is not active in ` +
+        "this session — the session daemon started without it. Shut the " +
+        "remote session down and start it again to apply the script.";
+    }
+
     const previous = router.swap(handle);
     recordSessionNode();
-    pushSessionState({
-      kind: "remote",
-      host,
-      state: "connected",
-      resync: true,
-      cause: "moved",
-    });
+    pushSessionState(
+      withWarning({
+        kind: "remote",
+        host,
+        state: "connected",
+        resync: true,
+        cause: "moved",
+      }),
+    );
     if (previous instanceof RemoteServerHandle) {
       // The fresh-handle recovery path replaced a dead remote handle. Only
       // close it locally — a shutdown here would be delivered by the NEW

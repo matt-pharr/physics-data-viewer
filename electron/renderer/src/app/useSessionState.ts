@@ -30,6 +30,7 @@ interface SessionStatePush {
   state: 'connected' | 'reconnecting' | 'auth-required' | 'disconnected';
   resync?: boolean;
   cause?: 'moved' | 'recovered';
+  setupScriptWarning?: string;
 }
 
 /** Map a pushed session state onto the store's connection state. */
@@ -69,12 +70,17 @@ export function useSessionState(
 ): void {
   const setConnectionState = useStore((s) => s.setConnectionState);
   const setRemoteHost = useStore((s) => s.setRemoteHost);
+  const setRemoteSetupWarning = useStore((s) => s.setRemoteSetupWarning);
 
   useEffect(() => {
     const unsubscribe = window.pdv.remote.onSessionState((push) => {
       const state = push as SessionStatePush;
       setConnectionState(toConnectionState(state));
       setRemoteHost(state.kind === 'remote' ? state.host : null);
+      // Every push restates (or clears) the warning, so a session that
+      // moves back to local — or to a daemon that DID source the script —
+      // stops warning without a separate clear path.
+      setRemoteSetupWarning(state.setupScriptWarning ?? null);
 
       if (!state.resync) return;
       // Rebuild everything: the server backing this window either changed or
@@ -106,5 +112,5 @@ export function useSessionState(
       ]);
     });
     return unsubscribe;
-  }, [currentKernelId, onResync, setConnectionState, setRemoteHost]);
+  }, [currentKernelId, onResync, setConnectionState, setRemoteHost, setRemoteSetupWarning]);
 }

@@ -788,6 +788,15 @@ export interface SessionStatePayload {
    * after an intentional move read as data loss.
    */
   cause?: "moved" | "recovered";
+  /**
+   * Set when a setup script is configured for the host but the session's
+   * daemon started without sourcing it (its capture failed, or the daemon
+   * predates the script) — the session is running without the user's
+   * environment and they must be told, since the failure otherwise
+   * surfaces as mysteriously missing modules. Absent means no warning:
+   * the renderer clears any displayed warning on a push without one.
+   */
+  setupScriptWarning?: string;
 }
 
 /** Result of {@link PDVApi.remote.startSession} / `endSession`. */

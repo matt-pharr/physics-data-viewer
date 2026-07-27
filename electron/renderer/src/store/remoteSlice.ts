@@ -46,6 +46,15 @@ export interface RemoteSlice {
    * flows, which is how a failure ended up visible nowhere.
    */
   remoteSessionError: string | null;
+  /**
+   * The session runs remotely WITHOUT the configured setup script (the
+   * daemon started before the script was in place, or its capture failed).
+   * Driven by the session-state push; cleared by any push without one.
+   * Rendered wherever the session's location is stated — the welcome
+   * banner and the connect dialog — because the failure otherwise surfaces
+   * as mysteriously missing modules.
+   */
+  remoteSetupWarning: string | null;
 
   /** Fold a pushed status into the slice. */
   applyRemoteStatus: (status: RemoteStatus) => void;
@@ -53,6 +62,8 @@ export interface RemoteSlice {
   clearRemoteLog: () => void;
   /** Set or clear the session-level failure message. */
   setRemoteSessionError: (message: string | null) => void;
+  /** Set or clear the setup-script warning (session-state push handler). */
+  setRemoteSetupWarning: (message: string | null) => void;
 }
 
 export const createRemoteSlice: AppSlice<RemoteSlice> = (set) => ({
@@ -65,6 +76,7 @@ export const createRemoteSlice: AppSlice<RemoteSlice> = (set) => ({
   remoteAttemptId: null,
   remoteProgress: null,
   remoteSessionError: null,
+  remoteSetupWarning: null,
 
   applyRemoteStatus: (status) =>
     set((state) => {
@@ -96,4 +108,6 @@ export const createRemoteSlice: AppSlice<RemoteSlice> = (set) => ({
   clearRemoteLog: () => set({ remoteLog: '', remoteMessage: null, remoteSessionError: null }),
 
   setRemoteSessionError: (message) => set({ remoteSessionError: message }),
+
+  setRemoteSetupWarning: (message) => set({ remoteSetupWarning: message }),
 });

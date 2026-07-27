@@ -53,6 +53,8 @@ export const RemoteConnect: React.FC<RemoteConnectProps> = ({ onClose }) => {
   // Failures raised by flows OUTSIDE this dialog (an open-recent whose
   // startSession failed) land in the store; render them in the same slot.
   const storeSessionError = useStore((s) => s.remoteSessionError);
+  // The session runs without its configured setup script (see remoteSlice).
+  const setupWarning = useStore((s) => s.remoteSetupWarning);
   // Two-step shutdown: the button ends a session (and any unsaved work on
   // the host) in one action, so the first click only arms the second.
   const [confirmingShutdown, setConfirmingShutdown] = useState(false);
@@ -218,6 +220,13 @@ export const RemoteConnect: React.FC<RemoteConnectProps> = ({ onClose }) => {
                     `${host ?? 'this host'} to use its data and compute.`}
             </div>
           </div>
+        )}
+
+        {/* The session runs, but without the configured setup script — a
+            caution, not a failure, so it renders beside (not instead of)
+            whatever else this dialog is saying. */}
+        {setupWarning && sessionRunning && (
+          <div className="remote-warning">{setupWarning}</div>
         )}
 
         {/* Session errors render in EVERY phase, not just `connected`:

@@ -407,6 +407,10 @@ async function runSessionHost(args: string[]): Promise<void> {
     paths,
     sessionId,
     version,
+    // Reported to every attaching client, so the shell can warn when a
+    // configured setup script is not in effect (capture failed, or the
+    // script arrived after this daemon booted).
+    setupScriptApplied,
     onNoClients: () => idle.onClientsGone(),
     onClientAttached: () => idle.onClientAttached(),
     onSessionReset: () => wire.sessionReset(),

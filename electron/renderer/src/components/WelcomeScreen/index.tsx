@@ -61,6 +61,10 @@ interface WelcomeScreenProps {
   /** False while the remote session is unreachable — the banner must not
    *  claim "Connected" over a dead channel. */
   remoteReachable?: boolean;
+  /** Set when the session runs remotely WITHOUT the configured setup
+   *  script. Shown as its own warning banner: the failure otherwise
+   *  surfaces later as mysteriously missing modules. */
+  remoteSetupWarning?: string | null;
   /** Called when the user clicks "Recover" on an orphan autosave. Receives
    *  the autosave's kernel language so the right kernel boots, and its env
    *  mode so a uv/pkg session recovers with its environment active. */
@@ -127,6 +131,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
   recoverableSessions,
   remoteHost,
   remoteReachable,
+  remoteSetupWarning,
   onNewProject,
   onOpenProject,
   onOpenRecent,
@@ -211,6 +216,12 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
                 unreachable right now — use Reconnect below.
               </>
             )}
+          </div>
+        )}
+
+        {remoteHost && remoteSetupWarning && (
+          <div className="welcome-remote-banner welcome-remote-banner-warning">
+            {remoteSetupWarning}
           </div>
         )}
 

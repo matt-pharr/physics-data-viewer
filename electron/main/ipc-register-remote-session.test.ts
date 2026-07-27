@@ -483,6 +483,77 @@ describe("setup-script shipping at session start", () => {
   });
 });
 
+describe("setup-script warning", () => {
+  /** Rebuild the live host as a daemon that did (not) source a script. */
+  async function rebuildHostWithScriptState(applied: boolean): Promise<void> {
+    await host.close();
+    host = new SessionHost({
+      paths,
+      sessionId: SESSION,
+      version: "9.9.9-test",
+      setupScriptApplied: applied,
+    });
+    await host.listen();
+  }
+
+  /** The remote session-state pushes the renderer received. */
+  function remotePushes(): Array<Record<string, unknown>> {
+    return sendSpy.mock.calls
+      .filter(([channel]) => channel === IPC.push.sessionState)
+      .map(([, payload]) => payload as Record<string, unknown>)
+      .filter((p) => p.kind === "remote");
+  }
+
+  function shipReporting(shipped: boolean) {
+    return (async () => ({ ok: true as const, shipped })) as unknown as Parameters<
+      typeof registerRemoteIpcHandlers
+    >[0]["shipScript"];
+  }
+
+  it("warns when a shipped script is not active in the session", async () => {
+    // The daemon booted without the script (it arrived after boot, or the
+    // capture failed) — exactly the state that otherwise surfaces later as
+    // mysteriously missing modules.
+    await rebuildHostWithScriptState(false);
+    register({ setupScriptDir: workDir, shipScript: shipReporting(true) });
+
+    const result = (await invokeIpc(IPC.remote.startSession)) as { ok: boolean };
+    expect(result.ok).toBe(true);
+    const moved = remotePushes().find((p) => p.cause === "moved");
+    expect(moved?.setupScriptWarning).toMatch(/setup script/);
+    expect(moved?.setupScriptWarning).toMatch(/testhost/);
+  });
+
+  it("stays silent when the daemon really sourced the script", async () => {
+    await rebuildHostWithScriptState(true);
+    register({ setupScriptDir: workDir, shipScript: shipReporting(true) });
+
+    await invokeIpc(IPC.remote.startSession);
+    // Only THIS start's pushes: a previous test's handle can emit late
+    // state pushes while its dead channel winds down, and those carry that
+    // test's warning.
+    const moved = remotePushes().filter((p) => p.cause === "moved");
+    expect(moved.length).toBeGreaterThan(0);
+    for (const push of moved) {
+      expect(push.setupScriptWarning).toBeUndefined();
+    }
+  });
+
+  it("stays silent when no script is configured — no evidence, no accusation", async () => {
+    // `setupScriptApplied: false` from the daemon is expected when the host
+    // has no script; warning here would nag every scriptless session.
+    await rebuildHostWithScriptState(false);
+    register({ setupScriptDir: workDir, shipScript: shipReporting(false) });
+
+    await invokeIpc(IPC.remote.startSession);
+    const moved = remotePushes().filter((p) => p.cause === "moved");
+    expect(moved.length).toBeGreaterThan(0);
+    for (const push of moved) {
+      expect(push.setupScriptWarning).toBeUndefined();
+    }
+  });
+});
+
 describe("session-node pin", () => {
   /** The manager on a connection whose `hostname` answered `node-a`. */
   function managerOnNodeA(): RemoteConnectionManager {

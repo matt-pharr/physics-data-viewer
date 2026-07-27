@@ -1503,6 +1503,7 @@ const App: React.FC = () => {
   // where the project lives.
   const connectionStateNow = useStore((s) => s.connectionState);
   const remoteHostNow = useStore((s) => s.remoteHost);
+  const remoteSetupWarningNow = useStore((s) => s.remoteSetupWarning);
   useEffect(() => {
     tryConsumePendingOpen();
   }, [connectionStateNow, remoteHostNow, tryConsumePendingOpen]);
@@ -2139,6 +2140,7 @@ const App: React.FC = () => {
            recoverableSessions={recoverableSessions}
            remoteHost={connectionStateNow === 'local' ? null : remoteHostNow}
            remoteReachable={connectionStateNow === 'remote-connected'}
+           remoteSetupWarning={remoteSetupWarningNow}
            onNewProject={handleWelcomeNewProject}
            onOpenProject={handleOpenWithPicker}
            onOpenRecent={handleOpenRecent}
