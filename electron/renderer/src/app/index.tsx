@@ -2099,6 +2099,7 @@ const App: React.FC = () => {
          activeLanguage={activeLanguage}
          environmentMode={environmentMode}
          kernelRunning={currentKernelId !== null && kernelStatus === 'ready'}
+         remoteEnabled={chromeInfo?.remoteEnabled ?? false}
          config={config}
          shortcuts={shortcuts}
          onClose={() => setShowSettings(false)}
