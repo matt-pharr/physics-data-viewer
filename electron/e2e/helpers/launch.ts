@@ -169,10 +169,36 @@ export async function launchPDV(opts: LaunchOptions = {}): Promise<LaunchedApp> 
   await window.waitForLoadState("domcontentloaded");
 
   const cleanup = async (): Promise<void> => {
+    // electronApp.close() must be bounded. On CI Linux, closing an app whose
+    // session was REMOTE at close time hung forever: the quit tracer showed
+    // the app reaching app.exit(0) 3ms after Playwright's inspector-evaluated
+    // app.quit() — a remote disconnect is instant, unlike the ~1s local
+    // server shutdown — and close()'s promise never resolved, eating the
+    // whole test budget inside afterEach and failing specs whose bodies had
+    // already passed. Race it against a timeout, record whether the Electron
+    // process is genuinely still alive (an app that lingers after
+    // app.exit(0) would be a real bug, not a Playwright close race), and
+    // fall back to SIGKILL either way.
+    const proc = app.process();
+    let closeTimer: NodeJS.Timeout | undefined;
     try {
-      await app.close();
+      const outcome = await Promise.race([
+        app.close().then(() => "closed" as const),
+        new Promise<"timeout">((resolve) => {
+          closeTimer = setTimeout(() => resolve("timeout"), 15_000);
+        }),
+      ]);
+      if (outcome === "timeout") {
+        console.error(
+          `[e2e] electronApp.close() did not resolve within 15s; ` +
+            `process exitCode=${String(proc.exitCode)} killed=${String(proc.killed)}; killing it`,
+        );
+        proc.kill("SIGKILL");
+      }
     } catch {
       // Already closed (test may have done it explicitly).
+    } finally {
+      if (closeTimer) clearTimeout(closeTimer);
     }
     // app.close() resolves before the OS has necessarily flushed every last
     // write the closing session made under HOME/.PDV (a final autosave, the
