@@ -501,7 +501,9 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
           <button className={`tab ${activeTab === 'appearance' ? 'active' : ''}`} onClick={() => setActiveTab('appearance')}>Appearance</button>
           <button className={`tab ${activeTab === 'agents' ? 'active' : ''}`} onClick={() => setActiveTab('agents')}>Agents</button>
           {remoteEnabled && (
-            <button className={`tab ${activeTab === 'remote' ? 'active' : ''}`} onClick={() => setActiveTab('remote')}>Remote Hosts</button>
+            /* "Remote", not "Remote Hosts": the eighth tab has to fit the
+               one-row strip at the default dialog width. */
+            <button className={`tab ${activeTab === 'remote' ? 'active' : ''}`} onClick={() => setActiveTab('remote')}>Remote</button>
           )}
           <button className={`tab ${activeTab === 'runtime' ? 'active' : ''}`} onClick={() => setActiveTab('runtime')}>Default Runtime</button>
           <button className={`tab ${activeTab === 'packages' ? 'active' : ''}`} onClick={() => setActiveTab('packages')}>Project Environment</button>

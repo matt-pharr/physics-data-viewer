@@ -539,6 +539,19 @@ describe("setup-script warning", () => {
     }
   });
 
+  it("stays silent when the daemon predates the applied field", async () => {
+    // The beforeEach host sets no `setupScriptApplied` at all — the shape
+    // of a pre-B3 daemon. Shipped + no evidence must stay silent; only an
+    // explicit `false` is an accusation.
+    register({ setupScriptDir: workDir, shipScript: shipReporting(true) });
+    await invokeIpc(IPC.remote.startSession);
+    const moved = remotePushes().filter((p) => p.cause === "moved");
+    expect(moved.length).toBeGreaterThan(0);
+    for (const push of moved) {
+      expect(push.setupScriptWarning).toBeUndefined();
+    }
+  });
+
   it("stays silent when no script is configured — no evidence, no accusation", async () => {
     // `setupScriptApplied: false` from the daemon is expected when the host
     // has no script; warning here would nag every scriptless session.
@@ -682,6 +695,46 @@ describe("session-node pin", () => {
     const result = (await invokeIpc(IPC.remote.startSession)) as { ok: boolean };
     expect(result.ok).toBe(true);
     expect(dispatched).not.toContain("pdv.internal.serverConfigSet");
+  });
+
+  it("clears a directory it once pushed, and never touches keys it never did", async () => {
+    await host.close();
+    const dispatched: Array<{ channel: string; args: unknown[] }> = [];
+    host = new SessionHost({
+      paths,
+      sessionId: SESSION,
+      version: "9.9.9-test",
+      dispatch: async (channel, _ctx, args) => {
+        dispatched.push({ channel, args });
+        return {};
+      },
+    });
+    await host.listen();
+
+    const hostStore = new RemoteHostStore(workDir);
+    hostStore.setSettings("testhost", { workingDirBase: "/scratch/local/m" });
+    register({ manager: managerOnNodeA(), hostStore });
+    await invokeIpc(IPC.remote.startSession);
+    expect(hostStore.get("testhost").pushedDirKeys).toEqual(["workingDirBase"]);
+
+    // The user blanks the field. The next session start must CLEAR the key
+    // on the host — a stale scratch path lingering in the host's config IS
+    // the silent-data-placement bug. defaultSaveLocation was never pushed,
+    // so it must never be touched (the user may manage it on the host).
+    hostStore.setSettings("testhost", {});
+    removeAllIpcHandlers();
+    router = new SessionRouter(makeLocalHandle());
+    register({ manager: managerOnNodeA(), hostStore });
+    await invokeIpc(IPC.remote.startSession);
+
+    const sets = dispatched
+      .filter((d) => d.channel === "pdv.internal.serverConfigSet")
+      .map((d) => d.args);
+    expect(sets).toEqual([
+      [{ workingDirBase: "/scratch/local/m" }],
+      [{ workingDirBase: "" }],
+    ]);
+    expect(hostStore.get("testhost").pushedDirKeys).toBeUndefined();
   });
 
   it("fails the start loudly when the directory settings cannot be applied", async () => {

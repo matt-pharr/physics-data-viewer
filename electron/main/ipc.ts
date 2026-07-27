@@ -466,6 +466,11 @@ export const IPC = {
     /** Hosts with anything configured, to seed the tab's host list. */
     listConfiguredHosts: "remote:listConfiguredHosts",
     /**
+     * Delete a host's settings, setup script and recorded state on this
+     * machine. Nothing on the host itself is touched.
+     */
+    forgetHost: "remote:forgetHost",
+    /**
      * Source a candidate setup script in a real login shell on the
      * connected host and report what it did. The daemon's own capture
      * discards the script's output on purpose (`server/login-env.ts`), so
@@ -3317,6 +3322,8 @@ export interface PDVApi {
     setHostConfig(host: string, update: RemoteHostConfigUpdate): Promise<void>;
     /** Hosts with anything configured, to seed the tab's host list. */
     listConfiguredHosts(): Promise<string[]>;
+    /** Forget a host: delete its settings, script and recorded state here. */
+    forgetHost(host: string): Promise<void>;
     /**
      * Source a candidate script in a login shell on the connected host and
      * report its output and the interpreters it made visible. Requires a

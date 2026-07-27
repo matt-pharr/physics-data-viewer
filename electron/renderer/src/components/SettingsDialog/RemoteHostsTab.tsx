@@ -33,9 +33,40 @@ interface HostDraft {
   baseline: string;
 }
 
-/** The dirty-comparison view of a draft. */
-const serialize = (draft: Pick<HostDraft, 'settings' | 'setupScript'>): string =>
-  JSON.stringify({ settings: draft.settings, setupScript: draft.setupScript });
+/**
+ * The dirty-comparison view of a draft. Canonical key order, so clearing a
+ * field and retyping the identical value compares clean — JSON.stringify
+ * of the raw objects was insertion-order-sensitive.
+ */
+const serialize = (draft: Pick<HostDraft, 'settings' | 'setupScript'>): string => {
+  const launch = draft.settings.launch;
+  return JSON.stringify({
+    workingDirBase: draft.settings.workingDirBase ?? null,
+    defaultSaveLocation: draft.settings.defaultSaveLocation ?? null,
+    launch: launch
+      ? {
+          mode: launch.mode,
+          allocationCommand: launch.allocationCommand ?? null,
+          account: launch.account ?? null,
+          partition: launch.partition ?? null,
+        }
+      : null,
+    setupScript: draft.setupScript,
+  });
+};
+
+/**
+ * Dirty drafts survive the component unmounting — module scope on purpose.
+ * The dirty dot advertises that a parked edit is safe; letting a peek at
+ * the Appearance tab (which unmounts this one) destroy it would make that
+ * a lie. Clean entries are never cached, so a fresh mount refetches them.
+ */
+const parkedDrafts = new Map<string, HostDraft>();
+
+/** Test-only: reset the module-scoped draft cache between tests. */
+export function clearParkedDraftsForTests(): void {
+  parkedDrafts.clear();
+}
 
 /** Interpreter rows worth calling out: what the script changed. */
 function probeChange(
@@ -59,7 +90,9 @@ export const RemoteHostsTab: React.FC = () => {
   const [configured, setConfigured] = useState<string[]>([]);
   const [extraHosts, setExtraHosts] = useState<string[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
-  const [drafts, setDrafts] = useState<Record<string, HostDraft>>({});
+  const [drafts, setDrafts] = useState<Record<string, HostDraft>>(() =>
+    Object.fromEntries(parkedDrafts),
+  );
   const [addText, setAddText] = useState('');
   const [saveStatus, setSaveStatus] = useState<string | null>(null);
   const [testRunning, setTestRunning] = useState(false);
@@ -133,11 +166,22 @@ export const RemoteHostsTab: React.FC = () => {
   const draft = selected !== null ? drafts[selected] : undefined;
   const dirty = draft !== undefined && serialize(draft) !== draft.baseline;
 
+  // Mirror dirty drafts into the module cache (see parkedDrafts).
+  useEffect(() => {
+    for (const [host, draft] of Object.entries(drafts)) {
+      if (serialize(draft) !== draft.baseline) parkedDrafts.set(host, draft);
+      else parkedDrafts.delete(host);
+    }
+  }, [drafts]);
+
   /** Apply a partial edit to the selected host's draft. */
   const edit = useCallback(
     (change: Partial<Pick<HostDraft, 'settings' | 'setupScript'>>): void => {
       if (selected === null) return;
       setSaveStatus(null);
+      // A verdict describes the exact bytes that were tested; editing them
+      // makes it a statement about text that no longer exists.
+      setTestResult(null);
       setDrafts((prev) => {
         const current = prev[selected];
         if (!current) return prev;
@@ -168,15 +212,16 @@ export const RemoteHostsTab: React.FC = () => {
 
   const save = useCallback(async (): Promise<void> => {
     if (selected === null || !draft) return;
+    // Baseline what was actually SENT, not the post-await draft: keystrokes
+    // that land during the round trip must stay dirty, or they read as
+    // saved while only the older snapshot reached disk.
+    const sent = { settings: draft.settings, setupScript: draft.setupScript };
     try {
-      await window.pdv.remote.setHostConfig(selected, {
-        settings: draft.settings,
-        setupScript: draft.setupScript,
-      });
+      await window.pdv.remote.setHostConfig(selected, sent);
       setDrafts((prev) => {
         const current = prev[selected];
         if (!current) return prev;
-        return { ...prev, [selected]: { ...current, baseline: serialize(current) } };
+        return { ...prev, [selected]: { ...current, baseline: serialize(sent) } };
       });
       setConfigured(await window.pdv.remote.listConfiguredHosts().catch(() => configured));
       setSaveStatus('Saved. Directory and script changes apply the next time a session starts on this host.');
@@ -205,6 +250,38 @@ export const RemoteHostsTab: React.FC = () => {
     }
   }, [selected, draft]);
 
+  const forget = useCallback(
+    async (host: string): Promise<void> => {
+      if (
+        !window.confirm(
+          `Forget ${host}? Its setup script and settings on this computer ` +
+            `are deleted. Nothing on ${host} itself is touched.`,
+        )
+      ) {
+        return;
+      }
+      try {
+        await window.pdv.remote.forgetHost(host);
+      } catch {
+        return; // Nothing was deleted; leave the UI as it was.
+      }
+      parkedDrafts.delete(host);
+      setDrafts((prev) => {
+        const next = { ...prev };
+        delete next[host];
+        return next;
+      });
+      setExtraHosts((prev) => prev.filter((h) => h !== host));
+      setConfigured(await window.pdv.remote.listConfiguredHosts().catch(() => []));
+      if (selected === host) {
+        setSelected(null); // The default-selection effect picks a survivor.
+        setTestResult(null);
+        setSaveStatus(null);
+      }
+    },
+    [selected],
+  );
+
   const launch = draft?.settings.launch;
   const launchMode = launch?.mode ?? 'login-node';
 
@@ -228,13 +305,29 @@ export const RemoteHostsTab: React.FC = () => {
                     setSaveStatus(null);
                   }}
                 >
-                  <span className="settings-remote-host-name">{host}</span>
+                  <span className="settings-remote-host-name" title={host}>
+                    {host}
+                  </span>
                   {hostDirty && (
                     <span
                       className="settings-remote-host-dirty"
                       title="Unsaved changes"
                     >
                       ●
+                    </span>
+                  )}
+                  {(configured.includes(host) || extraHosts.includes(host)) && (
+                    <span
+                      className="settings-remote-host-remove"
+                      role="button"
+                      aria-label={`Forget ${host}`}
+                      title={`Forget ${host}`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void forget(host);
+                      }}
+                    >
+                      ×
                     </span>
                   )}
                 </button>
@@ -255,6 +348,10 @@ export const RemoteHostsTab: React.FC = () => {
               if (!trimmed) return;
               setExtraHosts((prev) => (prev.includes(trimmed) ? prev : [...prev, trimmed]));
               setSelected(trimmed);
+              // Same clears as the list-button path — a verdict from the
+              // previous host must not sit under this one's empty script.
+              setTestResult(null);
+              setSaveStatus(null);
               setAddText('');
             }}
           />
@@ -303,19 +400,25 @@ export const RemoteHostsTab: React.FC = () => {
                 type="button"
                 disabled={!connectedToSelected || testRunning || !draft.setupScript.trim()}
                 title={
-                  connectedToSelected
-                    ? 'Source this script in a login shell on the host and report what it changes'
-                    : `Connect to ${selected} first — the test runs on the host`
+                  !connectedToSelected
+                    ? `Connect to ${selected} first — the test runs on the host`
+                    : !draft.setupScript.trim()
+                      ? 'Write a script first, then test it here'
+                      : 'Source this script in a login shell on the host and report what it changes'
                 }
                 onClick={() => void runTest()}
               >
                 {testRunning ? 'Testing…' : 'Test on host'}
               </button>
-              {!connectedToSelected && (
-                <span className="settings-general-desc">
+              {!connectedToSelected ? (
+                <span className="settings-remote-inline-hint">
                   Connect to {selected} to test the script.
                 </span>
-              )}
+              ) : !draft.setupScript.trim() ? (
+                <span className="settings-remote-inline-hint">
+                  Write a script first, then test it here.
+                </span>
+              ) : null}
             </div>
 
             {testResult && (
@@ -338,9 +441,17 @@ export const RemoteHostsTab: React.FC = () => {
                   </div>
                 )}
                 {testResult.output && (
-                  <pre className="settings-remote-test-output">{testResult.output}</pre>
+                  <>
+                    <div className="settings-remote-output-label">
+                      Output from the script
+                    </div>
+                    <pre className="settings-remote-test-output">{testResult.output}</pre>
+                  </>
                 )}
-                {testResult.after.length > 0 && (
+                {/* No probe table under a message: the probes did not run
+                    (or cannot be trusted), and "python3: not found" rows
+                    would read as the script BREAKING python. */}
+                {!testResult.message && testResult.after.length > 0 && (
                   <table className="settings-remote-probe-table">
                     <thead>
                       <tr>
@@ -502,7 +613,7 @@ export const RemoteHostsTab: React.FC = () => {
                 Save {selected}
               </button>
               {saveStatus && (
-                <span className="settings-general-desc">{saveStatus}</span>
+                <span className="settings-remote-inline-hint">{saveStatus}</span>
               )}
             </div>
           </>

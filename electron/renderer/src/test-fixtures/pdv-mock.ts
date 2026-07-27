@@ -214,6 +214,7 @@ function buildBase() {
       })),
       setHostConfig: stub<PDVApi["remote"]["setHostConfig"]>(async () => undefined),
       listConfiguredHosts: stub<PDVApi["remote"]["listConfiguredHosts"]>(async () => []),
+      forgetHost: stub<PDVApi["remote"]["forgetHost"]>(async () => undefined),
       testSetupScript: stub<PDVApi["remote"]["testSetupScript"]>(async () => ({
         ok: false,
         exitCode: null,

@@ -106,7 +106,7 @@ test("connects to a host and moves the session onto it", async () => {
   // applied).
   const setupContent = "export E2E_SETUP_MARKER='shipped and sourced'\n";
   await sendMenuAction(app, { action: "settings:open" });
-  await page.getByRole("button", { name: "Remote Hosts" }).click();
+  await page.getByRole("button", { name: "Remote", exact: true }).click();
   // The temp HOME has no ssh config, so the host list starts empty and the
   // free-typed destination path is what gets exercised.
   const addHost = page.getByPlaceholder("user@host");
@@ -318,5 +318,5 @@ test("does not offer remote mode unless it is enabled", async () => {
   // And so does the Settings → Remote Hosts tab.
   await sendMenuAction(app, { action: "settings:open" });
   await expect(page.getByRole("button", { name: "Close settings" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Remote Hosts" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Remote", exact: true })).toHaveCount(0);
 });

@@ -2084,7 +2084,9 @@ const App: React.FC = () => {
          <SaveAsDialog
            defaultLocation={currentProjectDir
              ? currentProjectDir.replace(/\/[^/]+\/?$/, '')
-             : config?.defaultSaveLocation ?? null}
+             // `||`, not `??`: an empty string means "cleared" (the per-host
+             // push writes "" to un-set a key) and must fall through to null.
+             : config?.defaultSaveLocation || null}
            defaultName={currentProjectName ?? undefined}
            onSave={async (projectName, saveDir) => {
              closeDialog();

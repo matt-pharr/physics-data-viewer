@@ -86,7 +86,7 @@ export function readLocalSetupScript(setupScriptDir: string, host: string): stri
   try {
     return fs
       .readFileSync(localSetupScriptPath(setupScriptDir, host), "utf8")
-      .replace(/\r\n/g, "\n");
+      .replace(/\r\n?/g, "\n");
   } catch {
     return "";
   }
@@ -116,7 +116,7 @@ export function writeLocalSetupScript(
     return;
   }
   fs.mkdirSync(setupScriptDir, { recursive: true });
-  atomicWriteFileSync(filePath, content.replace(/\r\n/g, "\n"));
+  atomicWriteFileSync(filePath, content.replace(/\r\n?/g, "\n"));
 }
 
 /**
@@ -170,7 +170,7 @@ export async function shipSetupScript(
     // embeds itself in every exported value (`FOO=bar\r`) or breaks
     // `module load python\r` invisibly — the capture discards the output
     // where the error would have shown.
-    const raw = fs.readFileSync(localPath, "utf8").replace(/\r\n/g, "\n");
+    const raw = fs.readFileSync(localPath, "utf8").replace(/\r\n?/g, "\n");
     content = raw.trim().length > 0 ? raw : null;
   } catch {
     content = null; // No master copy: treat as unconfigured.

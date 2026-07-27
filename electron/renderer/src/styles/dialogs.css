@@ -38,6 +38,10 @@
 
 .settings-tabs {
   display: flex;
+  /* Whole tabs may wrap to a second row on narrow windows; labels never
+     wrap WITHIN a tab — eight tabs squeezed into one flex row used to
+     break four labels onto two lines each, on every tab. */
+  flex-wrap: wrap;
   gap: 8px;
   padding: 10px 20px;
   border-bottom: 1px solid var(--border-color);
@@ -48,6 +52,9 @@
 .settings-tabs .tab,
 .settings-tabs .tab.active {
   font-weight: 500;
+  white-space: nowrap;
+  padding-left: 8px;
+  padding-right: 8px;
 }
 
 .settings-grid {
@@ -1625,9 +1632,14 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
-  border-right: 1px solid var(--border-color);
   padding-right: 12px;
   min-width: 0;
+  /* The rail stays put while the (taller) form scrolls in the dialog body.
+     Sticky against the scrolling ancestor, not height games — the tab body
+     owns the scroll. */
+  position: sticky;
+  top: 0;
+  align-self: start;
 }
 
 .settings-remote-hosts-heading {
@@ -1685,6 +1697,43 @@
 .settings-remote-host-dirty {
   font-size: 10px;
   flex-shrink: 0;
+  color: var(--warning);
+}
+
+/* Forget-host affordance; quiet until hovered. */
+.settings-remote-host-remove {
+  flex-shrink: 0;
+  padding: 0 3px;
+  border-radius: 3px;
+  font-size: 13px;
+  line-height: 1;
+  color: var(--text-secondary);
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.settings-remote-host:hover .settings-remote-host-remove {
+  opacity: 1;
+}
+
+.settings-remote-host-remove:hover {
+  color: var(--error);
+  background-color: var(--bg-hover);
+}
+
+/* Hints beside buttons in flex rows. Deliberately NOT
+   .settings-general-desc, whose grid-column/negative-margin rules fight
+   flex centering. */
+.settings-remote-inline-hint {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+/* P3: caption for the script's captured output. */
+.settings-remote-output-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
 }
 
 .settings-remote-add-row input {
@@ -1710,6 +1759,10 @@
   flex-direction: column;
   gap: 10px;
   min-width: 0;
+  /* The divider lives on the taller pane so it spans the whole tab instead
+     of ending where the (short) host list does. */
+  border-left: 1px solid var(--border-color);
+  padding-left: 16px;
 }
 
 .settings-remote-node-note {
@@ -1792,6 +1845,19 @@
   border-collapse: collapse;
   font-size: 11px;
   width: 100%;
+  /* Fixed layout so the columns do not reflow between runs with different
+     path lengths. */
+  table-layout: fixed;
+}
+
+.settings-remote-probe-table th:first-child {
+  width: 70px;
+}
+
+.settings-remote-probe-table td {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .settings-remote-probe-table th,
@@ -1818,4 +1884,12 @@
   align-items: center;
   gap: 10px;
   margin-top: 4px;
+}
+
+/* A pathological alias must not grow the button without bound. */
+.settings-remote-save-row .btn {
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

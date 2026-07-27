@@ -74,7 +74,11 @@ function parseProbes(stdout: string): RemoteSetupTestInterpreter[] {
 
 /** Extract the script's captured output from between its markers. */
 function parseScriptOutput(stdout: string): { exitCode: number | null; output: string } {
-  const rc = /^PDVSOURCERC:(-?\d+)$/m.exec(stdout);
+  // LAST match on purpose: the script's replayed output precedes the
+  // genuine line, so a script that itself prints `PDVSOURCERC:0` must not
+  // spoof the verdict. (Same reason `end` is a lastIndexOf.)
+  const rcs = [...stdout.matchAll(/^PDVSOURCERC:(-?\d+)$/gm)];
+  const rc = rcs.length > 0 ? rcs[rcs.length - 1] : null;
   const begin = stdout.indexOf("PDVOUTPUT-BEGIN\n");
   const end = stdout.lastIndexOf("PDVOUTPUT-END");
   let output = "";
@@ -102,7 +106,9 @@ export async function runSetupScriptTest(
 ): Promise<RemoteSetupTestResult> {
   const exec = options.exec ?? execViaSsh;
   const muxOptions = { sshPath: options.sshPath, timeoutMs: TEST_TIMEOUT_MS };
-  const content = options.content.replace(/\r\n/g, "\n");
+  // Lone \r normalized too — a mac-classic line ending is as corrosive
+  // inside an exported value as a CRLF.
+  const content = options.content.replace(/\r\n?/g, "\n");
 
   const baselineRun = await exec(
     options.control,
@@ -152,6 +158,13 @@ export async function runSetupScriptTest(
     };
   }
 
+  // Probes are parsed only AFTER the output-replay region: a script that
+  // prints its own `PDVPROBE:`/`PDVVERSION:` lines would otherwise inject
+  // rows into the report (the replay precedes the genuine probes).
+  const probeRegion = (() => {
+    const end = scriptedRun.stdout.lastIndexOf("PDVOUTPUT-END");
+    return end === -1 ? scriptedRun.stdout : scriptedRun.stdout.slice(end);
+  })();
   const { exitCode, output } = parseScriptOutput(scriptedRun.stdout);
   if (exitCode === null) {
     // The shell died before the markers were printed. The overwhelmingly
@@ -163,7 +176,7 @@ export async function runSetupScriptTest(
       exitCode: scriptedRun.exitCode,
       output,
       before,
-      after: parseProbes(scriptedRun.stdout),
+      after: parseProbes(probeRegion),
       message:
         "The script ended the shell before the test could finish. Setup " +
         "scripts are sourced, so an `exit` line closes the session's shell " +
@@ -175,6 +188,6 @@ export async function runSetupScriptTest(
     exitCode,
     output,
     before,
-    after: parseProbes(scriptedRun.stdout),
+    after: parseProbes(probeRegion),
   };
 }

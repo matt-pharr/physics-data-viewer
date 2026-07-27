@@ -205,6 +205,30 @@ describe("remote:listConfiguredHosts", () => {
   });
 });
 
+describe("remote:forgetHost", () => {
+  it("deletes the settings record and the script file", async () => {
+    register();
+    await invokeIpc(IPC.remote.setHostConfig, "old-cluster", {
+      settings: { workingDirBase: "/scratch" },
+      setupScript: "module load x\n",
+    });
+    hostStore.setSessionNode("old-cluster", "node1");
+    expect(fs.existsSync(path.join(setupScriptDir, "old-cluster.sh"))).toBe(true);
+
+    await invokeIpc(IPC.remote.forgetHost, "old-cluster");
+
+    // Everything local is gone — settings, recorded state, script file.
+    expect(hostStore.get("old-cluster")).toEqual({});
+    expect(fs.existsSync(path.join(setupScriptDir, "old-cluster.sh"))).toBe(false);
+    expect(await invokeIpc(IPC.remote.listConfiguredHosts)).toEqual([]);
+  });
+
+  it("declines with no host rather than deleting under ''", async () => {
+    register();
+    await expect(invokeIpc(IPC.remote.forgetHost, "")).rejects.toThrow(/host/i);
+  });
+});
+
 describe("remote:testSetupScript", () => {
   it("declines when not connected", async () => {
     register({ manager: managerIn("idle") });

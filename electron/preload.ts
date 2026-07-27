@@ -269,6 +269,7 @@ const api: PDVApi = {
     getHostConfig: (host) => invoke(IPC.remote.getHostConfig, host),
     setHostConfig: (host, update) => invoke(IPC.remote.setHostConfig, host, update),
     listConfiguredHosts: () => invoke(IPC.remote.listConfiguredHosts),
+    forgetHost: (host) => invoke(IPC.remote.forgetHost, host),
     testSetupScript: (host, script) => invoke(IPC.remote.testSetupScript, host, script),
     onStatus: (cb) => onPush(IPC.push.remoteStatus, cb),
     onSessionState: (cb) => onPush(IPC.push.sessionState, cb),

@@ -30,7 +30,8 @@ import {
   type RemoteStatus,
   type SessionStatePayload,
 } from "./ipc";
-import type { RemoteHostStore } from "./remote/host-config";
+import type { PushedDirKey, RemoteHostStore } from "./remote/host-config";
+import { WRONG_NODE_MARKER } from "./server/attach-cli";
 import { openSessionChannel } from "./remote/remote-channel";
 import {
   listSetupScriptHosts,
@@ -267,7 +268,8 @@ export function registerRemoteIpcHandlers(
       }
       const trimmed = host.trim();
       const record = options.hostStore?.get(trimmed) ?? {};
-      const { sessionNode, ...settings } = record;
+      // Recorded state stays out of the editable settings payload.
+      const { sessionNode, pushedDirKeys: _pushed, ...settings } = record;
       return {
         settings,
         setupScript: options.setupScriptDir
@@ -313,6 +315,17 @@ export function registerRemoteIpcHandlers(
       }
     }
     return [...configured].sort();
+  });
+
+  handleIpc(IPC.remote.forgetHost, async (_event, host: string): Promise<void> => {
+    if (typeof host !== "string" || !host.trim()) {
+      throw new Error("No host was given.");
+    }
+    const trimmed = host.trim();
+    options.hostStore?.forget(trimmed);
+    if (options.setupScriptDir) {
+      writeLocalSetupScript(options.setupScriptDir, trimmed, "");
+    }
   });
 
   handleIpc(
@@ -422,15 +435,24 @@ export function registerRemoteIpcHandlers(
 
     const open = options.openChannel ?? openSessionChannel;
 
-    // Set once the attach reports the daemon's state, and carried on every
-    // subsequent session push for this handle — a reconnect push without it
-    // would silently clear a warning that is still true. A ref rather than
-    // a variable so the handle's callbacks (created below, before the
-    // warning can be known) see the later value.
-    const scriptWarning = { current: undefined as string | undefined };
+    // Computed at PUSH time from the handle's LATEST attach result, not
+    // once at start: the handle's internal reconnect loop can resurrect the
+    // daemon (which sources the last-shipped script) or land on one whose
+    // capture failed, flipping the truth in either direction — a warning
+    // frozen at start would then lie until the next explicit startSession.
+    // A ref because the handle's callbacks are created before the handle
+    // variable exists.
+    const handleRef: { current: RemoteServerHandle | null } = { current: null };
     const withWarning = (payload: SessionStatePayload): SessionStatePayload =>
-      scriptWarning.current
-        ? { ...payload, setupScriptWarning: scriptWarning.current }
+      shippedScript && handleRef.current?.setupScriptApplied === false
+        ? {
+            ...payload,
+            setupScriptWarning:
+              `Your setup script for ${host ?? "this host"} is not active ` +
+              "in this session — the session daemon started without it. " +
+              "Shut the remote session down and start it again to apply " +
+              "the script.",
+          }
         : payload;
 
     // Tail of the attach channel's stderr, kept for failure diagnosis: the
@@ -488,8 +510,14 @@ export function registerRemoteIpcHandlers(
       },
     });
 
+    handleRef.current = handle;
+
     try {
       await handle.start();
+      // The daemon can only have been reached on the node this connection
+      // landed on — record it NOW, before anything below can fail, so even
+      // a declined move teaches the next connect where the session lives.
+      recordSessionNode();
 
       // Apply this host's directory settings to ITS server config before
       // the window swaps onto it. `~/.PDV/preferences.json` on the host is
@@ -499,17 +527,28 @@ export function registerRemoteIpcHandlers(
       // failure is loud and leaves the local session untouched: a kernel
       // quietly writing to an NFS home the user pointed at scratch is the
       // harder bug to notice.
-      const hostSettings = host ? options.hostStore?.get(host) : undefined;
+      //
+      // Clearing propagates too: a key this code once pushed and the user
+      // has since blanked is pushed as "" (every consumer treats an empty
+      // string as unset), because the stale scratch path lingering in the
+      // host's config IS the silent-data-placement bug. A key never pushed
+      // is never touched — the user may have set it on the host themselves.
+      const hostRecord = host ? options.hostStore?.get(host) : undefined;
       const dirOverrides: Record<string, string> = {};
-      if (hostSettings?.workingDirBase) {
-        dirOverrides.workingDirBase = hostSettings.workingDirBase;
-      }
-      if (hostSettings?.defaultSaveLocation) {
-        dirOverrides.defaultSaveLocation = hostSettings.defaultSaveLocation;
+      const nowPushed: PushedDirKey[] = [];
+      for (const key of ["workingDirBase", "defaultSaveLocation"] as const) {
+        const value = hostRecord?.[key];
+        if (value) {
+          dirOverrides[key] = value;
+          nowPushed.push(key);
+        } else if (hostRecord?.pushedDirKeys?.includes(key)) {
+          dirOverrides[key] = "";
+        }
       }
       if (Object.keys(dirOverrides).length > 0) {
         try {
           await handle.invoke(INTERNAL_CHANNELS.serverConfigSet, [dirOverrides]);
+          if (host) options.hostStore?.setPushedDirKeys(host, nowPushed);
         } catch (err) {
           void handle.disconnect().catch(() => undefined);
           return {
@@ -525,7 +564,9 @@ export function registerRemoteIpcHandlers(
       // The local session is untouched: nothing was swapped, so a failed
       // start leaves the user working exactly as before rather than with
       // neither session.
-      const wrongNode = /PDV_WRONG_NODE node=(\S+)/.exec(attachStderrTail);
+      const wrongNode = new RegExp(`${WRONG_NODE_MARKER} node=(\\S+)`).exec(
+        attachStderrTail,
+      );
       if (wrongNode && host) {
         // Teach the pin now, so the very next connect aims at the right
         // node even though THIS one could not.
@@ -543,19 +584,7 @@ export function registerRemoteIpcHandlers(
       return { ok: false, message: (err as Error).message };
     }
 
-    // Only now can the warning be composed: the attach result is what says
-    // whether the daemon sourced a script, and `shippedScript` says whether
-    // one should have been. `false` from an old daemon that predates the
-    // field reads as null and stays silent — no evidence, no accusation.
-    if (shippedScript && handle.setupScriptApplied === false) {
-      scriptWarning.current =
-        `Your setup script for ${host ?? "this host"} is not active in ` +
-        "this session — the session daemon started without it. Shut the " +
-        "remote session down and start it again to apply the script.";
-    }
-
     const previous = router.swap(handle);
-    recordSessionNode();
     pushSessionState(
       withWarning({
         kind: "remote",

@@ -59,6 +59,40 @@ import {
   type PtyModule,
 } from "./ssh-pty";
 
+/**
+ * ssh's connection-level complaints — the node itself is unreachable, as
+ * opposed to reachable-but-refusing-credentials.
+ *
+ * Matched against the pty transcript to decide whether a failed PINNED
+ * attempt is worth retrying against the bare alias. This is stderr pattern
+ * matching, normally forbidden here ("the -O check ladder gets it right") —
+ * but no exit-code signal distinguishes a drained node from a mistyped
+ * password (both end in a nonzero ssh exit), and the stakes are asymmetric:
+ * a missed match means no retry (the user reconnects by hand), while
+ * matching a credential failure would fire a surprise second password/Duo
+ * prompt. So the match gates only the retry, and not matching is the safe
+ * default. `timeout` never falls back either — it means a prompt sat
+ * unanswered for the full budget, and a retry would silently double it.
+ */
+const CONNECTION_LEVEL_FAILURE = new RegExp(
+  [
+    "Could not resolve hostname",
+    "Connection refused",
+    "Connection timed out",
+    "No route to host",
+    "Network is unreachable",
+    "Connection closed by remote host",
+  ].join("|"),
+  "i",
+);
+
+/** Whether a failed pinned attempt should be retried against the alias. */
+function pinFallbackWorthwhile(result: PtyAuthResult): boolean {
+  if (result.failure === "cancelled" || result.failure === "pty-unavailable") return false;
+  if (result.failure === "timeout") return false;
+  return CONNECTION_LEVEL_FAILURE.test(result.transcript);
+}
+
 /** Options for {@link RemoteConnectionManager}. */
 export interface RemoteConnectionOptions {
   /** Directory for PDV-owned control sockets (typically under userData). */
@@ -363,13 +397,13 @@ export class RemoteConnectionManager {
 
     // Aim at the recorded session node when there is one (see the option's
     // JSDoc). The pin is best-effort: a node that stopped answering must
-    // not brick the alias, so a failed pinned attempt falls back to the
-    // alias below — where the wrong-node attach guard keeps a live session
-    // from being forked, and a dead one is simply recreated wherever the
-    // alias lands.
+    // not brick the alias, so a pinned attempt that failed AT THE
+    // CONNECTION LEVEL falls back to the alias below — where the
+    // wrong-node attach guard keeps a live session from being forked, and
+    // a dead one is simply recreated wherever the alias lands.
     const pin = this.options.sessionNodeFor?.(host) ?? null;
     let result = await this.runAuthAttempt(host, attemptId, controlPath, pin);
-    if (!result.ok && pin && result.failure !== "cancelled" && result.failure !== "pty-unavailable") {
+    if (!result.ok && pin && pinFallbackWorthwhile(result)) {
       this.emit({
         phase: "connecting",
         host,
@@ -452,7 +486,12 @@ export class RemoteConnectionManager {
    * @returns The remote hostname, or null when it cannot be determined.
    */
   private async resolveNode(control: SshControl): Promise<string | null> {
-    const result = await execViaSsh(control, "hostname", {
+    // `-f` first: the recorded node becomes an `-o HostName=` target on the
+    // NEXT connect, and a short name (`flux-login1`) that only resolves
+    // inside the cluster makes every pinned attempt DNS-fail from the
+    // laptop. Clusters whose `hostname` has no `-f` fall back to the short
+    // form — the pin ladder tolerates it, just less efficiently.
+    const result = await execViaSsh(control, "hostname -f 2>/dev/null || hostname", {
       ...this.muxOptions(),
       timeoutMs: 15_000,
     });

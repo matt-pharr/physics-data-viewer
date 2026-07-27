@@ -267,13 +267,13 @@ describe("session-node pinning", () => {
     await manager.disconnect();
   }, 30_000);
 
-  it("falls back to the bare alias when the pinned node fails", async () => {
+  it("falls back to the bare alias when the pinned node is unreachable", async () => {
     // The pin must be best-effort: a login node that was rebooted or
     // drained must not brick the whole alias. Both attempts fail here (the
     // fixture cannot succeed selectively), which still proves the retry —
     // one pinned master attempt, then one unpinned.
     setEnv("FAKE_SSH_MASTER", "stateful");
-    setEnv("FAKE_SSH_AUTH", "fail");
+    setEnv("FAKE_SSH_AUTH", "unreachable");
     const logPath = path.join(dir, "ssh-args.log");
     setEnv("FAKE_SSH_LOG", logPath);
     const manager = makeManager({
@@ -290,6 +290,26 @@ describe("session-node pinning", () => {
     const narration = statuses.map((s) => s.output ?? "").join("");
     expect(narration).toContain("flux-login1.pppl.gov");
     expect(narration).toContain("trying flux directly");
+  }, 30_000);
+
+  it("does NOT fall back after a credential failure — no surprise second prompt", async () => {
+    // A mistyped password or a denied Duo push means the NODE was fine;
+    // retrying against the alias would fire a second interactive auth
+    // attempt (a second Duo push) the user never asked for, under a
+    // "could not reach the node" narration that would be false.
+    setEnv("FAKE_SSH_MASTER", "stateful");
+    setEnv("FAKE_SSH_AUTH", "fail");
+    const logPath = path.join(dir, "ssh-args.log");
+    setEnv("FAKE_SSH_LOG", logPath);
+    const manager = makeManager({
+      sessionNodeFor: () => "flux-login1.pppl.gov",
+    });
+
+    const result = await manager.connect("flux");
+    expect(result).toMatchObject({ ok: false, failure: "auth-failed" });
+    const masters = masterInvocations(logPath);
+    expect(masters).toHaveLength(1);
+    expect(masters[0]).toContain("HostName=flux-login1.pppl.gov");
   }, 30_000);
 });
 

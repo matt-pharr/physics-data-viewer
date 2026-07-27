@@ -34,6 +34,9 @@ import * as path from "path";
 import { atomicWriteFileSync } from "../atomic-write";
 import type { RemoteHostLaunchConfig, RemoteHostSettings } from "../ipc";
 
+/** Directory keys the session-start push manages on the host. */
+export type PushedDirKey = "workingDirBase" | "defaultSaveLocation";
+
 /** Everything recorded for one host: settings plus PDV-recorded state. */
 export interface RemoteHostRecord extends RemoteHostSettings {
   /**
@@ -43,6 +46,15 @@ export interface RemoteHostRecord extends RemoteHostSettings {
    * node-local, so a reconnect must aim at THIS machine, not the alias.
    */
   sessionNode?: string;
+  /**
+   * Directory keys the session-start push has written to this host's
+   * server config. This is what makes *clearing* a setting propagate: a
+   * key that was pushed once and later blanked must be pushed as a clear,
+   * while a key PDV never touched must stay untouched — the user may have
+   * set it on the host themselves, and stomping it from a tab they never
+   * opened would be the opposite of a master copy.
+   */
+  pushedDirKeys?: PushedDirKey[];
 }
 
 /** The keys `setSettings` owns; everything else is recorded state. */
@@ -65,6 +77,12 @@ function parseRecord(raw: unknown): RemoteHostRecord | null {
   for (const key of ["workingDirBase", "defaultSaveLocation", "sessionNode"] as const) {
     const value = obj[key];
     if (typeof value === "string" && value.trim()) out[key] = value;
+  }
+  if (Array.isArray(obj.pushedDirKeys)) {
+    const keys = obj.pushedDirKeys.filter(
+      (k): k is PushedDirKey => k === "workingDirBase" || k === "defaultSaveLocation",
+    );
+    if (keys.length > 0) out.pushedDirKeys = keys;
   }
   const launch = obj.launch;
   if (launch && typeof launch === "object" && !Array.isArray(launch)) {
@@ -135,8 +153,9 @@ export class RemoteHostStore {
    */
   setSettings(host: string, settings: RemoteHostSettings): void {
     const next: RemoteHostRecord = {};
-    const sessionNode = this.hosts[host]?.sessionNode;
-    if (sessionNode) next.sessionNode = sessionNode;
+    const recorded = this.hosts[host];
+    if (recorded?.sessionNode) next.sessionNode = recorded.sessionNode;
+    if (recorded?.pushedDirKeys) next.pushedDirKeys = recorded.pushedDirKeys;
     for (const key of SETTINGS_KEYS) {
       const value = settings[key];
       if (value !== undefined) {
@@ -166,6 +185,41 @@ export class RemoteHostStore {
     else delete record.sessionNode;
     if (Object.keys(record).length > 0) this.hosts[host] = record;
     else delete this.hosts[host];
+    this.persist();
+  }
+
+  /**
+   * Record which directory keys the session-start push now owns on a host.
+   *
+   * @param host - Host alias.
+   * @param keys - Keys just pushed with real values; empty when everything
+   *   the push once wrote has been cleared.
+   * @returns Nothing.
+   * @throws {Error} When the file cannot be written.
+   */
+  setPushedDirKeys(host: string, keys: PushedDirKey[]): void {
+    const record = this.hosts[host] ?? {};
+    if (keys.length > 0) record.pushedDirKeys = [...keys];
+    else delete record.pushedDirKeys;
+    if (Object.keys(record).length > 0) this.hosts[host] = record;
+    else delete this.hosts[host];
+    this.persist();
+  }
+
+  /**
+   * Delete everything recorded for a host — settings AND recorded state.
+   *
+   * The "forget host" action: nothing on the host itself is touched, and a
+   * running session there keeps running (its pin dies with the record, so
+   * the next connect simply follows the alias and the attach guard's
+   * refusal re-teaches it if needed).
+   *
+   * @param host - Host alias.
+   * @returns Nothing.
+   * @throws {Error} When the file cannot be written.
+   */
+  forget(host: string): void {
+    delete this.hosts[host];
     this.persist();
   }
 

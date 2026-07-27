@@ -13,7 +13,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { RemoteHostsTab } from "./RemoteHostsTab";
+import { clearParkedDraftsForTests, RemoteHostsTab } from "./RemoteHostsTab";
 import { useStore } from "../../store";
 import type { RemoteHostConfigPayload, RemoteSetupTestResult } from "../../types";
 
@@ -30,6 +30,7 @@ const remote = {
       hostConfigs[host] ?? { settings: {}, setupScript: "", sessionNode: null },
   ),
   setHostConfig: vi.fn(async () => undefined),
+  forgetHost: vi.fn(async () => undefined),
   testSetupScript: vi.fn(
     async (): Promise<RemoteSetupTestResult> => ({
       ok: true,
@@ -43,6 +44,7 @@ const remote = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  clearParkedDraftsForTests();
   for (const key of Object.keys(hostConfigs)) delete hostConfigs[key];
   (window as unknown as { pdv: unknown }).pdv = { remote };
   useStore.setState({ remotePhase: "idle", remoteConnectHost: null });
@@ -177,6 +179,142 @@ describe("RemoteHostsTab", () => {
         setupScript: "",
       }),
     );
+  });
+
+  it("clears a test verdict the moment the script is edited", async () => {
+    // A verdict describes the exact bytes that were tested; a green
+    // "sourced cleanly" under text that was never tested invites shipping
+    // an untested script.
+    useStore.setState({ remotePhase: "connected", remoteConnectHost: "flux" });
+    await renderLoaded();
+    fireEvent.change(screen.getByPlaceholderText(/module load/), {
+      target: { value: "module load python\n" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Test on host" }));
+    await waitFor(() => expect(screen.getByText("Script sourced cleanly.")).toBeTruthy());
+
+    fireEvent.change(screen.getByPlaceholderText(/module load/), {
+      target: { value: "module load python\nmodule load julia\n" },
+    });
+    expect(screen.queryByText("Script sourced cleanly.")).toBeNull();
+  });
+
+  it("does not leak a test verdict onto a host added via the input", async () => {
+    useStore.setState({ remotePhase: "connected", remoteConnectHost: "flux" });
+    await renderLoaded();
+    fireEvent.change(screen.getByPlaceholderText(/module load/), {
+      target: { value: "module load python\n" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Test on host" }));
+    await waitFor(() => expect(screen.getByText("Script sourced cleanly.")).toBeTruthy());
+
+    const input = screen.getByPlaceholderText("user@host");
+    fireEvent.change(input, { target: { value: "otherhost" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(screen.queryByText("Script sourced cleanly.")).toBeNull();
+  });
+
+  it("suppresses the probe table when the test could not finish", async () => {
+    // "python3: not found" rows under an exit-line diagnosis read as "my
+    // script breaks python" — those probes never ran.
+    remote.testSetupScript.mockResolvedValueOnce({
+      ok: false,
+      exitCode: 0,
+      output: "about to bail",
+      before: [{ name: "python3", path: "/usr/bin/python3", version: "3.12" }],
+      after: [{ name: "python3", path: null, version: null }],
+      message: "The script ended the shell before the test could finish.",
+    });
+    useStore.setState({ remotePhase: "connected", remoteConnectHost: "flux" });
+    await renderLoaded();
+    fireEvent.change(screen.getByPlaceholderText(/module load/), {
+      target: { value: "exit 0\n" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Test on host" }));
+
+    await waitFor(() =>
+      expect(screen.getByText(/ended the shell before/)).toBeTruthy(),
+    );
+    expect(screen.getByText("about to bail")).toBeTruthy();
+    expect(screen.queryByText("not found")).toBeNull();
+    expect(screen.queryByText("With script")).toBeNull();
+  });
+
+  it("keystrokes during a save round trip stay dirty", async () => {
+    // The save baselines what was SENT; text typed while the IPC call was
+    // in flight must not be marked clean without being persisted.
+    let releaseSave: () => void = () => undefined;
+    remote.setHostConfig.mockImplementationOnce(
+      () =>
+        new Promise<undefined>((resolve) => {
+          releaseSave = () => resolve(undefined);
+        }),
+    );
+    await renderLoaded();
+    fireEvent.change(screen.getByPlaceholderText(/module load/), {
+      target: { value: "module load python\n" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Save flux/ }));
+    // Typed mid-flight:
+    fireEvent.change(screen.getByPlaceholderText(/module load/), {
+      target: { value: "module load python\nmodule load julia\n" },
+    });
+    releaseSave();
+
+    // Still dirty: the Save button stays enabled for the unsent tail.
+    await waitFor(() => {
+      const button = screen.getByRole("button", { name: /Save flux/ }) as HTMLButtonElement;
+      expect(button.disabled).toBe(false);
+    });
+  });
+
+  it("dirty drafts survive an unmount and remount (tab switch)", async () => {
+    const view = render(<RemoteHostsTab />);
+    await waitFor(() => expect(screen.getByLabelText("Working directory")).toBeTruthy());
+    fireEvent.change(screen.getByLabelText("Working directory"), {
+      target: { value: "/scratch/parked" },
+    });
+    view.unmount(); // The user peeks at the Appearance tab...
+
+    render(<RemoteHostsTab />);
+    await waitFor(() =>
+      expect((screen.getByLabelText("Working directory") as HTMLInputElement).value).toBe(
+        "/scratch/parked",
+      ),
+    );
+    // ...and the parked edit is still dirty, not silently baselined.
+    expect(
+      (screen.getByRole("button", { name: /Save flux/ }) as HTMLButtonElement).disabled,
+    ).toBe(false);
+  });
+
+  it("forgets a configured host after confirmation", async () => {
+    hostConfigs["old-cluster"] = {
+      settings: { workingDirBase: "/scratch" },
+      setupScript: "",
+      sessionNode: null,
+    };
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    await renderLoaded();
+
+    fireEvent.click(screen.getByRole("button", { name: "Forget old-cluster" }));
+    await waitFor(() => expect(remote.forgetHost).toHaveBeenCalledWith("old-cluster"));
+    expect(confirmSpy).toHaveBeenCalled();
+    confirmSpy.mockRestore();
+  });
+
+  it("does not forget a host when the confirmation is declined", async () => {
+    hostConfigs["old-cluster"] = {
+      settings: { workingDirBase: "/scratch" },
+      setupScript: "",
+      sessionNode: null,
+    };
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+    await renderLoaded();
+
+    fireEvent.click(screen.getByRole("button", { name: "Forget old-cluster" }));
+    expect(remote.forgetHost).not.toHaveBeenCalled();
+    confirmSpy.mockRestore();
   });
 
   it("adds a free-typed destination to the list", async () => {

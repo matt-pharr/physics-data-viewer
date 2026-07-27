@@ -1355,6 +1355,8 @@ export interface PDVApi {
     ): Promise<void>;
     /** Hosts with anything configured, to seed the tab's host list. */
     listConfiguredHosts(): Promise<string[]>;
+    /** Forget a host: delete its settings, script and recorded state here. */
+    forgetHost(host: string): Promise<void>;
     /** Source a candidate script on the connected host and report on it. */
     testSetupScript(
       host: string,
