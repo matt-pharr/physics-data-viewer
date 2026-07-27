@@ -59,6 +59,7 @@ import { setAppVersion } from "../pdv-protocol";
 import { RPC_CHANNELS } from "../transport/protocol";
 import { RpcServer } from "../transport/rpc-server";
 import { runSelfCheck } from "./self-check";
+import { applyLoginEnv, captureLoginEnv } from "./login-env";
 import { attachToSession, proxyStdio } from "./attach-cli";
 import { SessionHost } from "./session-host";
 import { resolveSessionPaths } from "./session-paths";
@@ -352,6 +353,23 @@ async function runSessionHost(args: string[]): Promise<void> {
   const pdvDir = process.env.PDV_PDV_DIR ?? path.join(os.homedir(), ".PDV");
   fs.mkdirSync(pdvDir, { recursive: true });
   setAppVersion(version);
+
+  // A daemon spawned over an ssh exec channel never ran a login shell, so
+  // Lmod/juliaup/conda PATH entries are invisible to it and to every kernel
+  // and probe it spawns. Capture the login environment (sourcing the
+  // session's setup script when one was shipped) BEFORE any manager exists —
+  // process.env is what every spawn call site builds from. A failed capture
+  // is logged and survived: the daemon then behaves exactly as before.
+  const captured = await captureLoginEnv({
+    setupScriptPath: paths.setupScriptPath,
+  });
+  if (captured) {
+    const changed = applyLoginEnv(captured);
+    console.log(
+      `[session-host] applied login environment (${changed} variables ` +
+        `added or changed${fs.existsSync(paths.setupScriptPath) ? ", setup.sh sourced" : ""})`,
+    );
+  }
 
   const commRouter = new CommRouter();
   const queryRouter = new QueryRouter();

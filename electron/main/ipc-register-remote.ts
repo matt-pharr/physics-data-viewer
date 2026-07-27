@@ -27,6 +27,7 @@ import {
   type SessionStatePayload,
 } from "./ipc";
 import { openSessionChannel } from "./remote/remote-channel";
+import { shipSetupScript } from "./remote/setup-script";
 import { RemoteServerHandle } from "./shell/remote-server";
 import type { ServerHandle } from "./shell/server-supervisor";
 import type { SessionRouter } from "./shell/session-router";
@@ -67,6 +68,15 @@ export interface RegisterRemoteIpcOptions {
   sessionId?: string;
   /** Opens the ssh channel. Injected by tests. */
   openChannel?: typeof openSessionChannel;
+  /**
+   * Directory of per-host setup-script master copies
+   * (`<userData>/remote-setup`). Omitting it skips setup-script shipping
+   * entirely, which is what a build (or test) with no setup-script support
+   * should do rather than failing every session start.
+   */
+  setupScriptDir?: string;
+  /** Ships the setup script. Injected by tests. */
+  shipScript?: typeof shipSetupScript;
   /**
    * Starts a fresh local pdv-server. Ending a remote session (and
    * disconnecting while one runs) swaps the window back onto it; omitting
@@ -247,6 +257,26 @@ export function registerRemoteIpcHandlers(
     const sessionId = options.sessionId ?? defaultSessionId();
     const open = options.openChannel ?? openSessionChannel;
     const host = manager.getStatus().host;
+
+    // The setup script must be on the host BEFORE the daemon spawns: the
+    // daemon sources it exactly once, during its startup login-environment
+    // capture, so a script arriving after `--create` would silently not
+    // apply until the next session. A configured script that cannot be
+    // delivered fails the start loudly — a session whose interpreters are
+    // silently missing is the harder bug to diagnose.
+    if (options.setupScriptDir && host) {
+      const ship = options.shipScript ?? shipSetupScript;
+      const shipped = await ship({
+        control,
+        host,
+        sessionId,
+        setupScriptDir: options.setupScriptDir,
+        sshPath,
+      });
+      if (!shipped.ok) {
+        return { ok: false, message: shipped.message };
+      }
+    }
 
     const handle = new RemoteServerHandle({
       sessionId,

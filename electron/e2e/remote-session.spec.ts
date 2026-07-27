@@ -79,7 +79,15 @@ test.afterEach(async () => {
 
 test("connects to a host and moves the session onto it", async () => {
   launched = await launchPDV({ env: remoteEnv() });
-  const { app, window: page } = launched;
+  const { app, window: page, homeDir } = launched;
+
+  // A per-host setup script configured before connecting. The assertions at
+  // the bottom prove the whole chain: master copy → shipped to the session
+  // dir on the "host" → sourced by the daemon's login-env capture.
+  const setupContent = "export PDV_E2E_SETUP_MARKER='shipped and sourced'\n";
+  const userData = await app.evaluate(({ app: a }) => a.getPath("userData"));
+  await fs.mkdir(path.join(userData, "remote-setup"), { recursive: true });
+  await fs.writeFile(path.join(userData, "remote-setup", "testhost.sh"), setupContent, "utf8");
 
   await sendMenuAction(app, { action: "remote:connect" });
 
@@ -103,6 +111,22 @@ test("connects to a host and moves the session onto it", async () => {
   await expect(page.locator(".status-bar")).toContainText(/testhost/i, {
     timeout: 10_000,
   });
+
+  // The setup script really shipped: byte-identical in the session dir on
+  // the "host" (the temp HOME the fake ssh executes under)...
+  const sessionDir = path.join(
+    homeDir,
+    ".pdv-server",
+    "run",
+    "sessions",
+    `pdv-${os.userInfo().username}`,
+  );
+  expect(await fs.readFile(path.join(sessionDir, "setup.sh"), "utf8")).toBe(setupContent);
+  // ...and the daemon really sourced it during its login-env capture. The
+  // log line is written before the socket binds, so reaching "running on"
+  // above guarantees it is already on disk.
+  const daemonLog = await fs.readFile(path.join(sessionDir, "session.log"), "utf8");
+  expect(daemonLog).toMatch(/applied login environment .*setup\.sh sourced/);
 });
 
 test("keeps the local session working when the host cannot be reached", async () => {

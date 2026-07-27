@@ -35,6 +35,7 @@ export const SERVER_DESTINED_FILES: readonly string[] = [
   "server/shell-confirm.ts",
   "server/wire.ts",
   "server/spawn.ts",
+  "server/login-env.ts",
   "server/self-check.ts",
   "server/session-paths.ts",
   "server/session-lock.ts",
