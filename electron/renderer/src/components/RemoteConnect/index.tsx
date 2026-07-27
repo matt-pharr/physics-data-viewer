@@ -135,7 +135,16 @@ export const RemoteConnect: React.FC<RemoteConnectProps> = ({ onClose }) => {
     const trimmed = target.trim();
     if (!trimmed || busy) return;
     clearRemoteLog();
-    void window.pdv.remote.connect(trimmed);
+    void (async () => {
+      const result = await window.pdv.remote.connect(trimmed);
+      // Connecting IS the intent to work there: a successful connect chains
+      // straight into moving the session, and the dialog closes itself —
+      // the "Connected to <host>, now click Run" intermission told the user
+      // nothing. A failed connect leaves the form up with the reason; a
+      // failed session start keeps the dialog open showing the error, with
+      // "Run session on <host>" as the retry.
+      if (result.ok) await startSession();
+    })();
   };
 
   const handleReply = (event: React.FormEvent): void => {

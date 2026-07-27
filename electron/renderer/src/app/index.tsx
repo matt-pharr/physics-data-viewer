@@ -532,29 +532,34 @@ const App: React.FC = () => {
     // component state, so the query-cache reset cannot refresh it. Without
     // this reload a kernel start after a session swap uses the previous
     // machine's pythonPath and default packages.
-    useCallback(() => {
+    useCallback((cause?: 'moved' | 'recovered') => {
       void window.pdv.config.get().then((loaded) => {
         setConfig(loaded);
       });
-      // When the server this window now fronts has no kernel — a fresh swap
-      // onto a host, or the return trip to a fresh local server — land on
-      // the welcome screen. The alternative was observed to mislead: a
-      // dead-looking tree with a "Starting kernel…" placeholder, read as
-      // "PDV is doing something" when nothing was. Suppressed while a
-      // recent-project open is riding this same swap: that flow is about to
-      // open a project, and forcing the welcome screen under it would
-      // re-surface after the open dismissed it.
-      void window.pdv.kernels.list().then((kernels) => {
-        if (
-          kernels.length === 0 &&
-          !pendingRecentOpenRef.current &&
-          !openingRecentRef.current
-        ) {
-          setCurrentKernelId(null);
-          setKernelStatus('idle');
-          setForceWelcome(true);
-        }
-      });
+      // Land on the welcome screen when this window has nothing to show
+      // after the swap. Two cases, decided by the push's cause — NOT by
+      // the daemon's kernel list: a long-lived daemon can hold kernels
+      // from previous app runs that this window cannot adopt yet (that
+      // adoption is the tracked NEW-4b follow-up), and gating on the list
+      // left a stranded dead-looking "No active session" GUI.
+      //  - 'moved': the server behind this window changed, so any previous
+      //    kernel id is meaningless — always land on the welcome.
+      //  - 'recovered' (or unknown): same session, view rebuilt; only land
+      //    on the welcome if this window had no kernel anyway. A reattach
+      //    mid-work keeps the user exactly where they were.
+      // Suppressed while a recent-project open is riding this same swap:
+      // that flow is about to open a project, and forcing the welcome
+      // screen under it would re-surface after the open dismissed it.
+      const windowHasKernel = currentKernelIdRef.current !== null;
+      if (
+        (cause === 'moved' || !windowHasKernel) &&
+        !pendingRecentOpenRef.current &&
+        !openingRecentRef.current
+      ) {
+        setCurrentKernelId(null);
+        setKernelStatus('idle');
+        setForceWelcome(true);
+      }
     }, [setForceWelcome]),
   );
 

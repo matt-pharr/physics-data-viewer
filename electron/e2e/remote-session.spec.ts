@@ -118,15 +118,11 @@ test("connects to a host and moves the session onto it", async () => {
   await dialog.locator(".remote-host-input").fill("testhost");
   await dialog.getByRole("button", { name: "Connect" }).click();
 
-  // The connect itself must succeed before anything can be run on the host.
-  await expect(dialog.getByText(/Connected to/)).toBeVisible({ timeout: 30_000 });
-
-  await dialog.getByRole("button", { name: /Run session on/ }).click();
-
-  // A successful start closes the dialog itself and lands on the welcome
-  // screen — the flow the feature was asked for. The flipped Disconnect
-  // button doubles as the "session is now remote" confirmation.
-  await expect(dialog).not.toBeVisible({ timeout: 30_000 });
+  // Connect chains straight into moving the session — no intermediate
+  // "Connected, now click Run" step — and the dialog closes itself,
+  // landing on the welcome screen. The flipped Disconnect button doubles
+  // as the "session is now remote" confirmation.
+  await expect(dialog).not.toBeVisible({ timeout: 60_000 });
   await expect(
     page.getByRole("button", { name: "Disconnect from ‘testhost’" }),
   ).toBeVisible({ timeout: 30_000 });
@@ -196,9 +192,7 @@ test("welcome Disconnect returns the window to a local session", async () => {
   const dialog = page.locator(".remote-panel");
   await dialog.locator(".remote-host-input").fill("testhost");
   await dialog.getByRole("button", { name: "Connect" }).click();
-  await expect(dialog.getByText(/Connected to/)).toBeVisible({ timeout: 30_000 });
-  await dialog.getByRole("button", { name: /Run session on/ }).click();
-  await expect(dialog).not.toBeVisible({ timeout: 30_000 });
+  await expect(dialog).not.toBeVisible({ timeout: 60_000 });
 
   await page.getByRole("button", { name: "Disconnect from ‘testhost’" }).click();
 
@@ -266,11 +260,10 @@ test("surfaces a remote kernel-start failure instead of spinning", async () => {
   const dialog = page.locator(".remote-panel");
   await dialog.locator(".remote-host-input").fill("testhost");
   await dialog.getByRole("button", { name: "Connect" }).click();
-  await expect(dialog.getByText(/Connected to/)).toBeVisible({ timeout: 30_000 });
-  await dialog.getByRole("button", { name: /Run session on/ }).click();
-  // Success auto-closes the dialog; wait for the swap to be reflected on
-  // the welcome before driving the new-project flow against the host.
-  await expect(dialog).not.toBeVisible({ timeout: 30_000 });
+  // Connect chains into the session move and auto-closes; wait for the
+  // swap to be reflected on the welcome before driving the new-project
+  // flow against the host.
+  await expect(dialog).not.toBeVisible({ timeout: 60_000 });
   await expect(
     page.getByRole("button", { name: "Disconnect from ‘testhost’" }),
   ).toBeVisible({ timeout: 30_000 });

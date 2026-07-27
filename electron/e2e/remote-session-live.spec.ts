@@ -54,19 +54,11 @@ test.describe(() => {
     await dialog.locator(".remote-host-input").fill(HOST as string);
     await dialog.getByRole("button", { name: "Connect" }).click();
 
-    // Covers probe, upload, install and self-check on a cold host. A failure
-    // here is reported in the dialog, so surface that rather than a bare
-    // timeout.
-    await expect(dialog.getByText(/Connected to/)).toBeVisible({
-      timeout: CONNECT_TIMEOUT_MS,
-    });
-    await expect(dialog.locator(".remote-error")).toHaveCount(0);
-
-    await dialog.getByRole("button", { name: /Run session on/ }).click();
-
-    // A successful start closes the dialog itself; the welcome's flipped
-    // Disconnect button is the confirmation the session moved.
-    await expect(dialog).not.toBeVisible({ timeout: 60_000 });
+    // Connect chains through probe, upload, install, self-check AND the
+    // session move; the dialog closes itself on success. A failure at any
+    // stage keeps the dialog open showing why, so a lingering dialog IS
+    // the failure signal.
+    await expect(dialog).not.toBeVisible({ timeout: CONNECT_TIMEOUT_MS });
     // The status bar is driven by the session-state push, not by the dialog
     // that triggered it, so agreeing here means the swap really happened.
     await expect(page.locator(".status-bar")).toContainText(HOST as string, {
@@ -96,12 +88,9 @@ test.describe(() => {
     const dialog = page.locator(".remote-panel");
     await dialog.locator(".remote-host-input").fill(HOST as string);
     await dialog.getByRole("button", { name: "Connect" }).click();
-    await expect(dialog.getByText(/Connected to/)).toBeVisible({
-      timeout: CONNECT_TIMEOUT_MS,
-    });
-    await dialog.getByRole("button", { name: /Run session on/ }).click();
-    // Success auto-closes the dialog and lands on the welcome screen.
-    await expect(dialog).not.toBeVisible({ timeout: 60_000 });
+    // Connect chains into the session move; success auto-closes the
+    // dialog and lands on the welcome screen.
+    await expect(dialog).not.toBeVisible({ timeout: CONNECT_TIMEOUT_MS });
 
     // The default new-project path: uv mode, using the bundle's own uv and
     // pdv-python wheel on the host. Cold-cache uv downloads a CPython and
