@@ -186,6 +186,34 @@ test("connects to a host and moves the session onto it", async () => {
   ).toContainText("marker=shipped and sourced", { timeout: 30_000 });
 });
 
+test("welcome Disconnect returns the window to a local session", async () => {
+  // The full return trip the connect spec's label assertion cannot see:
+  // click the welcome screen's Disconnect, and the window lands back on a
+  // fresh local session while the daemon keeps running on the "host".
+  launched = await launchPDV({ env: remoteEnv() });
+  const { window: page } = launched;
+
+  await page.getByRole("button", { name: "Connect to Host…" }).click();
+  const dialog = page.locator(".remote-panel");
+  await dialog.locator(".remote-host-input").fill("testhost");
+  await dialog.getByRole("button", { name: "Connect" }).click();
+  await expect(dialog.getByText(/Connected to/)).toBeVisible({ timeout: 30_000 });
+  await dialog.getByRole("button", { name: /Run session on/ }).click();
+  await expect(dialog.getByText(/Your session is running on/)).toBeVisible({
+    timeout: 30_000,
+  });
+  await dialog.getByRole("button", { name: "Close" }).click();
+
+  await page.getByRole("button", { name: "Disconnect from 'testhost'" }).click();
+
+  // Back on a local session: the button flips back and the status bar no
+  // longer names the host.
+  await expect(page.getByRole("button", { name: "Connect to Host…" })).toBeVisible({
+    timeout: 30_000,
+  });
+  await expect(page.locator(".status-bar")).not.toContainText(/testhost/i);
+});
+
 test("keeps the local session working when the host cannot be reached", async () => {
   // The failure that matters most: a user who cannot connect must be left
   // with the session they already had, not with neither.

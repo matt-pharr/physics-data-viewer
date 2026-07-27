@@ -185,37 +185,53 @@ export function registerRemoteIpcHandlers(
     manager.cancel();
   });
 
+  // Concurrent disconnect invokes coalesce onto one in-flight promise. The
+  // swap back to local takes as long as spawning a fresh pdv-server child,
+  // and both the welcome button and the dialog's Disconnect stay clickable
+  // through that window — a double-click used to run swapBackToLocal twice
+  // (both invokes pass the router.kind check before either swaps), and the
+  // second swap returned the FIRST local server as `previous`, silently
+  // abandoning it as an orphan child process.
+  let disconnectInFlight: Promise<void> | null = null;
+
   handleIpc(IPC.remote.disconnect, async () => {
-    // Disconnecting while the session runs remotely returns this window to
-    // a fresh local session; the daemon and its kernel keep running on the
-    // host for a later reconnect. Without the swap the window would keep
-    // routing every invoke at a channel that is about to be torn down.
-    if (options.router?.kind === "remote" && !options.createLocalServer) {
-      // Same decline endSession gives: tearing the mux down UNDER the live
-      // session would strand the window with a dead server.
-      throw new Error(
-        "This build cannot return to a local session, so disconnecting " +
-          "while the session runs remotely is not available.",
-      );
-    }
-    try {
-      const previous = await swapBackToLocal();
-      if (previous instanceof RemoteServerHandle) {
-        await previous.disconnect();
+    if (disconnectInFlight) return disconnectInFlight;
+    disconnectInFlight = (async () => {
+      // Disconnecting while the session runs remotely returns this window
+      // to a fresh local session; the daemon and its kernel keep running on
+      // the host for a later reconnect. Without the swap the window would
+      // keep routing every invoke at a channel that is about to be torn
+      // down.
+      if (options.router?.kind === "remote" && !options.createLocalServer) {
+        // Same decline endSession gives: tearing the mux down UNDER the
+        // live session would strand the window with a dead server.
+        throw new Error(
+          "This build cannot return to a local session, so disconnecting " +
+            "while the session runs remotely is not available.",
+        );
       }
-    } catch (err) {
-      // The local server would not start; leave the remote session as the
-      // active one rather than stranding the window, and keep the ssh
-      // connection up since the session still rides it. The original error
-      // is rethrown (the tsconfig target predates Error's `cause` option),
-      // with the context logged beside it.
-      console.error(
-        "[remote] could not return to a local session; staying on the remote session:",
-        err,
-      );
-      throw err;
-    }
-    await manager.disconnect();
+      try {
+        const previous = await swapBackToLocal();
+        if (previous instanceof RemoteServerHandle) {
+          await previous.disconnect();
+        }
+      } catch (err) {
+        // The local server would not start; leave the remote session as the
+        // active one rather than stranding the window, and keep the ssh
+        // connection up since the session still rides it. The original
+        // error is rethrown (the tsconfig target predates Error's `cause`
+        // option), with the context logged beside it.
+        console.error(
+          "[remote] could not return to a local session; staying on the remote session:",
+          err,
+        );
+        throw err;
+      }
+      await manager.disconnect();
+    })().finally(() => {
+      disconnectInFlight = null;
+    });
+    return disconnectInFlight;
   });
 
   handleIpc(IPC.remote.getStatus, async (): Promise<RemoteStatus> => manager.getStatus());

@@ -199,10 +199,17 @@ export const RemoteConnect: React.FC<RemoteConnectProps> = ({ onClose }) => {
                   : 'This session still runs on your computer. Run it on ' +
                     `${host ?? 'this host'} to use its data and compute.`}
             </div>
-            {(sessionError ?? storeSessionError) && (
-              <div className="remote-error">{sessionError ?? storeSessionError}</div>
-            )}
           </div>
+        )}
+
+        {/* Session errors render in EVERY phase, not just `connected`:
+            the store slot is written by surfaces outside this dialog (the
+            welcome screen's Disconnect, a recent-open flow), and the
+            connect flow's own phase may be mid-form or `failed` when one
+            arrives — hiding it there buried the very error the dialog was
+            opened to show. */}
+        {(sessionError ?? storeSessionError) && (
+          <div className="remote-error">{sessionError ?? storeSessionError}</div>
         )}
 
         {busy && (
