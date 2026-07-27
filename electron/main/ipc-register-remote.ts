@@ -19,6 +19,7 @@ import { app, type BrowserWindow } from "electron";
 import * as os from "os";
 
 import {
+  INTERNAL_CHANNELS,
   IPC,
   type RemoteConnectResult,
   type RemoteHostAlias,
@@ -474,6 +475,37 @@ export function registerRemoteIpcHandlers(
 
     try {
       await handle.start();
+
+      // Apply this host's directory settings to ITS server config before
+      // the window swaps onto it. `~/.PDV/preferences.json` on the host is
+      // what the server actually reads for working dirs and save locations,
+      // and the laptop-side per-host settings are its master copy — pushed
+      // here the same way the setup script is shipped. Before the swap so a
+      // failure is loud and leaves the local session untouched: a kernel
+      // quietly writing to an NFS home the user pointed at scratch is the
+      // harder bug to notice.
+      const hostSettings = host ? options.hostStore?.get(host) : undefined;
+      const dirOverrides: Record<string, string> = {};
+      if (hostSettings?.workingDirBase) {
+        dirOverrides.workingDirBase = hostSettings.workingDirBase;
+      }
+      if (hostSettings?.defaultSaveLocation) {
+        dirOverrides.defaultSaveLocation = hostSettings.defaultSaveLocation;
+      }
+      if (Object.keys(dirOverrides).length > 0) {
+        try {
+          await handle.invoke(INTERNAL_CHANNELS.serverConfigSet, [dirOverrides]);
+        } catch (err) {
+          void handle.disconnect().catch(() => undefined);
+          return {
+            ok: false,
+            message:
+              `The directory settings for ${host ?? "this host"} could not ` +
+              `be applied: ${(err as Error).message}. The session was left ` +
+              "running there; fix the settings (or the host) and try again.",
+          };
+        }
+      }
     } catch (err) {
       // The local session is untouched: nothing was swapped, so a failed
       // start leaves the user working exactly as before rather than with

@@ -553,6 +553,97 @@ describe("session-node pin", () => {
     expect(hostStore.get("testhost").sessionNode).toBeUndefined();
   });
 
+  it("pushes this host's directory settings into the session's config before the swap", async () => {
+    await host.close();
+    const dispatched: Array<{ channel: string; args: unknown[] }> = [];
+    host = new SessionHost({
+      paths,
+      sessionId: SESSION,
+      version: "9.9.9-test",
+      dispatch: async (channel, _ctx, args) => {
+        dispatched.push({ channel, args });
+        return {};
+      },
+    });
+    await host.listen();
+
+    const hostStore = new RemoteHostStore(workDir);
+    hostStore.setSettings("testhost", {
+      workingDirBase: "/scratch/local/m",
+      defaultSaveLocation: "/p/proj/m",
+      launch: { mode: "slurm" },
+    });
+    register({ manager: managerOnNodeA(), hostStore });
+
+    const result = (await invokeIpc(IPC.remote.startSession)) as { ok: boolean };
+    expect(result.ok).toBe(true);
+    const configSets = dispatched.filter(
+      (d) => d.channel === "pdv.internal.serverConfigSet",
+    );
+    // Only the directory keys travel — the launch config is consumed by the
+    // shell's kernel-launch path, not by the server's config.
+    expect(configSets).toEqual([
+      {
+        channel: "pdv.internal.serverConfigSet",
+        args: [{ workingDirBase: "/scratch/local/m", defaultSaveLocation: "/p/proj/m" }],
+      },
+    ]);
+  });
+
+  it("does not touch the session's config when no directories are set", async () => {
+    await host.close();
+    const dispatched: string[] = [];
+    host = new SessionHost({
+      paths,
+      sessionId: SESSION,
+      version: "9.9.9-test",
+      dispatch: async (channel) => {
+        dispatched.push(channel);
+        return {};
+      },
+    });
+    await host.listen();
+
+    const hostStore = new RemoteHostStore(workDir);
+    hostStore.setSettings("testhost", { launch: { mode: "slurm" } });
+    register({ manager: managerOnNodeA(), hostStore });
+
+    const result = (await invokeIpc(IPC.remote.startSession)) as { ok: boolean };
+    expect(result.ok).toBe(true);
+    expect(dispatched).not.toContain("pdv.internal.serverConfigSet");
+  });
+
+  it("fails the start loudly when the directory settings cannot be applied", async () => {
+    await host.close();
+    host = new SessionHost({
+      paths,
+      sessionId: SESSION,
+      version: "9.9.9-test",
+      dispatch: async (channel) => {
+        if (channel === "pdv.internal.serverConfigSet") {
+          throw new Error("preferences.json is not writable");
+        }
+        return {};
+      },
+    });
+    await host.listen();
+
+    const hostStore = new RemoteHostStore(workDir);
+    hostStore.setSettings("testhost", { workingDirBase: "/scratch" });
+    register({ manager: managerOnNodeA(), hostStore });
+
+    const result = (await invokeIpc(IPC.remote.startSession)) as {
+      ok: boolean;
+      message: string;
+    };
+    // A kernel quietly writing to the NFS home the user pointed at scratch
+    // is the harder bug to notice — decline instead, leaving the window on
+    // its working local session.
+    expect(result.ok).toBe(false);
+    expect(result.message).toContain("preferences.json is not writable");
+    expect(router.kind).toBe("local");
+  });
+
   it("keeps the pin on a plain disconnect — the session is still there", async () => {
     const hostStore = new RemoteHostStore(workDir);
     register({
