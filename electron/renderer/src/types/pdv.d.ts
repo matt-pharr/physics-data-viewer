@@ -232,6 +232,8 @@ export interface WindowChromeInfo {
   showMenuBar: boolean;
   showWindowControls: boolean;
   isMaximized: boolean;
+  /** True when remote sessions are enabled (the PDV_REMOTE release gate). */
+  remoteEnabled: boolean;
 }
 
 /** Progress update payload pushed during save/load operations. */

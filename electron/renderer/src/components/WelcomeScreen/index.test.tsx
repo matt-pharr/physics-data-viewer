@@ -21,6 +21,8 @@ function renderWelcome(overrides: Partial<Parameters<typeof WelcomeScreen>[0]> =
     onRecoverSession: vi.fn(),
     onDiscardSession: vi.fn(),
     onClearRecents: vi.fn(),
+    onConnectHost: vi.fn(),
+    onDisconnectHost: vi.fn(),
   };
   render(
     <WelcomeScreen
@@ -84,5 +86,47 @@ describe('WelcomeScreen — Clear recents button (#191)', () => {
     const { onClearRecents } = renderWelcome();
     await userEvent.setup().click(screen.getByRole('button', { name: 'Clear recent projects list' }));
     expect(onClearRecents).not.toHaveBeenCalled();
+  });
+});
+
+describe('WelcomeScreen — remote connect/disconnect button', () => {
+  it('is absent entirely when remote mode is gated off', () => {
+    renderWelcome();
+    expect(screen.queryByRole('button', { name: /Connect to Host/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Disconnect/ })).toBeNull();
+  });
+
+  it('offers Connect to Host when no remote session exists', async () => {
+    const { onConnectHost } = renderWelcome({ remoteEnabled: true });
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Connect to Host…' }));
+    expect(onConnectHost).toHaveBeenCalledTimes(1);
+  });
+
+  it('flips to Disconnect (naming the host) while the session runs remotely', async () => {
+    const { onDisconnectHost, onConnectHost } = renderWelcome({
+      remoteEnabled: true,
+      remoteHost: 'feyn',
+      remoteReachable: true,
+    });
+    expect(screen.queryByRole('button', { name: 'Connect to Host…' })).toBeNull();
+    await userEvent
+      .setup()
+      .click(screen.getByRole('button', { name: "Disconnect from 'feyn'" }));
+    expect(onDisconnectHost).toHaveBeenCalledTimes(1);
+    expect(onConnectHost).not.toHaveBeenCalled();
+  });
+
+  it('offers Reconnect (via the dialog) while the remote session is unreachable', async () => {
+    const { onConnectHost, onDisconnectHost } = renderWelcome({
+      remoteEnabled: true,
+      remoteHost: 'feyn',
+      remoteReachable: false,
+    });
+    expect(screen.queryByRole('button', { name: /Disconnect/ })).toBeNull();
+    await userEvent
+      .setup()
+      .click(screen.getByRole('button', { name: "Reconnect to 'feyn'…" }));
+    expect(onConnectHost).toHaveBeenCalledTimes(1);
+    expect(onDisconnectHost).not.toHaveBeenCalled();
   });
 });

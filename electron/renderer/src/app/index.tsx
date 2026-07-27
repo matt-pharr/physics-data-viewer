@@ -2133,6 +2133,19 @@ const App: React.FC = () => {
            onRecoverSession={handleRecoverSession}
            onDiscardSession={handleDiscardSession}
            onClearRecents={handleClearRecents}
+           remoteEnabled={chromeInfo?.remoteEnabled ?? false}
+           onConnectHost={() => setActiveDialog({ kind: 'remoteConnect' })}
+           onDisconnectHost={() => {
+             // Returns this window to a fresh local session; the daemon
+             // keeps running on the host. On failure, open the dialog with
+             // the error — it is the surface that can explain and retry.
+             void window.pdv.remote.disconnect().catch((err: unknown) => {
+               useStore
+                 .getState()
+                 .setRemoteSessionError(err instanceof Error ? err.message : String(err));
+               setActiveDialog({ kind: 'remoteConnect' });
+             });
+           }}
          />
        )}
 

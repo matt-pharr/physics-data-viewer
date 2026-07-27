@@ -107,7 +107,10 @@ test("connects to a host and moves the session onto it", async () => {
   await fs.mkdir(path.join(userData, "remote-setup"), { recursive: true });
   await fs.writeFile(path.join(userData, "remote-setup", "testhost.sh"), setupContent, "utf8");
 
-  await sendMenuAction(app, { action: "remote:connect" });
+  // Enter through the welcome screen's own button — the primary user path
+  // since the four-button welcome landed (the File menu remains an
+  // alternative route and is exercised by the other specs).
+  await page.getByRole("button", { name: "Connect to Host…" }).click();
 
   const dialog = page.locator(".remote-panel");
   await expect(dialog).toBeVisible();
@@ -157,6 +160,11 @@ test("connects to a host and moves the session onto it", async () => {
   // assertions can — that the captured environment was APPLIED to
   // process.env and inherited by the kernel spawn.
   await dialog.getByRole("button", { name: "Close" }).click();
+  // The welcome screen shows again after the swap, and its connect button
+  // has flipped to the disconnect affordance naming the session's host.
+  await expect(
+    page.getByRole("button", { name: "Disconnect from 'testhost'" }),
+  ).toBeVisible();
   await createNewPythonProject(page);
   // Remote path provisions a uv env before the kernel boots; generous but
   // bounded (uv download cache is shared across specs).
@@ -267,7 +275,7 @@ test("does not offer remote mode unless it is enabled", async () => {
   // has landed, so the gate is now a release toggle rather than a
   // correctness requirement.
   launched = await launchPDV({ env: { PDV_REMOTE: "0" } });
-  const { app } = launched;
+  const { app, window: page } = launched;
 
   const hasEntry = await app.evaluate(({ Menu }) => {
     const menu = Menu.getApplicationMenu();
@@ -275,4 +283,7 @@ test("does not offer remote mode unless it is enabled", async () => {
   });
 
   expect(hasEntry).toBe(false);
+  // The welcome screen's Connect to Host button honors the same gate.
+  await expect(page.locator(".welcome-overlay")).toBeVisible();
+  await expect(page.getByRole("button", { name: /Connect to Host/ })).toHaveCount(0);
 });

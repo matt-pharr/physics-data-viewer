@@ -73,6 +73,20 @@ interface WelcomeScreenProps {
   onDiscardSession: (orphanDir: string) => void;
   /** Called when the user clicks "Clear" beneath the recent-projects list. */
   onClearRecents: () => void;
+  /**
+   * True when remote sessions are enabled (the PDV_REMOTE release gate).
+   * Hides the Connect to Host button entirely when false, mirroring the
+   * shell's gated File-menu entry.
+   */
+  remoteEnabled?: boolean;
+  /** Called when the user clicks "Connect to Host…" (or "Reconnect to
+   *  '<host>'…" while the remote session is unreachable). Opens the
+   *  connect dialog; it never connects directly. */
+  onConnectHost: () => void;
+  /** Called when the user clicks "Disconnect from '<host>'" while the
+   *  session runs remotely. Returns this window to a fresh local session;
+   *  the remote session keeps running on the host. */
+  onDisconnectHost: () => void;
 }
 
 /** Short language badge for the recent projects list. */
@@ -119,6 +133,9 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
   onRecoverSession,
   onDiscardSession,
   onClearRecents,
+  remoteEnabled,
+  onConnectHost,
+  onDisconnectHost,
 }) => {
   const handleDiscard = (dir: string): void => {
     if (window.confirm(
@@ -184,8 +201,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
             ) : (
               <>
                 Your session lives on <strong>{remoteHost}</strong> but is
-                unreachable right now — reconnect via File → Connect to
-                Remote Host.
+                unreachable right now — use Reconnect below.
               </>
             )}
           </div>
@@ -210,6 +226,35 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
           >
             Open Project…
           </button>
+          {remoteEnabled &&
+            // Three states, keyed on the same values as the banner above:
+            // no remote session → connect; running remotely → disconnect
+            // (session keeps running on the host); unreachable → reconnect
+            // via the dialog, which owns the auth flow.
+            (!remoteHost ? (
+              <button
+                className="btn btn-secondary welcome-action-btn"
+                onClick={onConnectHost}
+              >
+                Connect to Host…
+              </button>
+            ) : remoteReachable !== false ? (
+              <button
+                className="btn btn-secondary welcome-action-btn welcome-remote-btn"
+                title={`Disconnect from '${remoteHost}' — the session keeps running there`}
+                onClick={onDisconnectHost}
+              >
+                Disconnect from '{remoteHost}'
+              </button>
+            ) : (
+              <button
+                className="btn btn-secondary welcome-action-btn welcome-remote-btn"
+                title={`Reconnect to '${remoteHost}'`}
+                onClick={onConnectHost}
+              >
+                Reconnect to '{remoteHost}'…
+              </button>
+            ))}
         </div>
 
         {recoverableSessions.length > 0 && (

@@ -47,20 +47,30 @@
   letter-spacing: 0.01em;
 }
 
-/* Action buttons */
+/* Action buttons. A 2-column grid: four nowrap buttons in one flex row
+   overflow the 440px card, and a grid keeps the pairs aligned when the
+   remote-gated fourth button is absent (three buttons = 2 + 1). */
 .welcome-actions {
-  display: flex;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
   gap: 12px;
   width: 100%;
 }
 
 .welcome-action-btn {
-  flex: 1;
   padding: 10px 16px !important;
   font-size: 13px !important;
   text-align: center;
   /* "New Python / Project" wrapping to two lines looked broken. */
   white-space: nowrap;
+  min-width: 0;
+}
+
+/* The disconnect/reconnect variants embed a hostname of arbitrary length;
+   ellipsize instead of blowing the grid column (full text in `title`). */
+.welcome-remote-btn {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* Recent projects */
