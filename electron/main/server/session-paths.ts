@@ -90,6 +90,15 @@ export interface SessionPaths {
    * host has no script configured.
    */
   setupScriptPath: string;
+  /**
+   * Daemon liveness beacon, touched periodically while the daemon runs.
+   *
+   * Lives in the (NFS-shared) session directory on purpose — it is how an
+   * attach on the WRONG login node judges whether the daemon recorded in
+   * `session.json` is plausibly still alive on its node, where no direct
+   * liveness check (`kill(pid, 0)`, socket connect) can reach.
+   */
+  heartbeatPath: string;
   /** The Unix socket clients attach to; node-local, never on NFS. */
   sockPath: string;
   /** Which candidate the socket directory came from. */
@@ -196,6 +205,7 @@ export function resolveSessionPaths(
       lockPath: path.join(sessionDir, "spawn.lock"),
       logPath: path.join(sessionDir, "session.log"),
       setupScriptPath: path.join(sessionDir, "setup.sh"),
+      heartbeatPath: path.join(sessionDir, "heartbeat"),
       sockPath,
       runtimeSource: candidate.source,
       hostname: opts.hostname ?? os.hostname(),

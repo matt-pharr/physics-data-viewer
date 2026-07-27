@@ -75,6 +75,47 @@ export function writeSessionMeta(metaPath: string, meta: SessionMeta): void {
 }
 
 /**
+ * Touch the daemon's liveness beacon.
+ *
+ * Failure is swallowed: the beacon is advisory (its absence merely makes a
+ * cross-node attach more willing to take the session over), and a full disk
+ * or a permissions hiccup must never take a running session down.
+ *
+ * @param heartbeatPath - Beacon file (`SessionPaths.heartbeatPath`).
+ * @returns Nothing.
+ */
+export function touchHeartbeat(heartbeatPath: string): void {
+  try {
+    // A write rather than utimes: it creates the file on first touch, and
+    // the ISO content gives a human reading the session dir something more
+    // useful than an empty file.
+    fs.writeFileSync(heartbeatPath, `${new Date().toISOString()}\n`);
+  } catch {
+    // Advisory only — see above.
+  }
+}
+
+/**
+ * Age of the daemon's liveness beacon.
+ *
+ * Uses the file's mtime, which on NFS is stamped by the file server, so two
+ * login nodes comparing against their own clocks disagree by at most normal
+ * clock skew — noise against the multi-minute freshness thresholds callers
+ * use.
+ *
+ * @param heartbeatPath - Beacon file.
+ * @returns Milliseconds since the last touch, or null when there is no
+ *   beacon (daemon predates the beacon, or died before its first touch).
+ */
+export function heartbeatAgeMs(heartbeatPath: string): number | null {
+  try {
+    return Date.now() - fs.statSync(heartbeatPath).mtimeMs;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Read `session.json`.
  *
  * @param metaPath - Path to read.

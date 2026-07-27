@@ -180,6 +180,10 @@ export function registerRemoteIpcHandlers(
       // bootstrap and probing a host that has no bundle would only fail.
       bundleDir: serverCommandOverride ? undefined : options.bundleDir,
       sshPath,
+      // Aim a PDV-created master at the login node the session daemon was
+      // last seen on (recorded below at session start). See the option's
+      // JSDoc for why a round-robin alias needs this.
+      sessionNodeFor: (host) => options.hostStore?.get(host).sessionNode ?? null,
     });
 
   handleIpc(IPC.remote.listHosts, async (): Promise<RemoteHostAlias[]> => manager.listHosts());
@@ -357,6 +361,14 @@ export function registerRemoteIpcHandlers(
     const sessionId = options.sessionId ?? defaultSessionId();
     const host = manager.getStatus().host;
 
+    // Recorded on every successful start/reattach: the daemon lives on the
+    // node this connection reached (the session socket is node-local, so an
+    // attach can only ever succeed there). The pin steers the NEXT master.
+    const recordSessionNode = (): void => {
+      const node = manager.getStatus().node;
+      if (host && node) options.hostStore?.setSessionNode(host, node);
+    };
+
     // The setup script must be on the host BEFORE any path that can spawn a
     // daemon: it is sourced exactly once, during the daemon's startup
     // login-environment capture, so a script arriving after `--create`
@@ -392,6 +404,7 @@ export function registerRemoteIpcHandlers(
       if (current && current.connectionState !== "connected") {
         try {
           await current.retryNow();
+          recordSessionNode();
           return { ok: true, sessionId };
         } catch (err) {
           console.error("[remote] reattach via existing handle failed:", err);
@@ -406,6 +419,12 @@ export function registerRemoteIpcHandlers(
 
     const open = options.openChannel ?? openSessionChannel;
 
+    // Tail of the attach channel's stderr, kept for failure diagnosis: the
+    // wrong-node refusal arrives there as a `PDV_WRONG_NODE node=<host>`
+    // marker (attach-cli.ts), and turning it into an actionable message —
+    // and a recorded pin for the next connect — needs the bytes.
+    let attachStderrTail = "";
+
     const handle = new RemoteServerHandle({
       sessionId,
       openChannel: async ({ batchMode }) =>
@@ -416,6 +435,9 @@ export function registerRemoteIpcHandlers(
           create: true,
           sshPath,
           muxOptions: { batchMode },
+          onStderr: (chunk) => {
+            attachStderrTail = (attachStderrTail + chunk).slice(-4096);
+          },
         }),
       // Every callback is gated on this handle actually fronting the
       // window. Before the swap the local server still does; after a swap
@@ -456,10 +478,26 @@ export function registerRemoteIpcHandlers(
       // The local session is untouched: nothing was swapped, so a failed
       // start leaves the user working exactly as before rather than with
       // neither session.
+      const wrongNode = /PDV_WRONG_NODE node=(\S+)/.exec(attachStderrTail);
+      if (wrongNode && host) {
+        // Teach the pin now, so the very next connect aims at the right
+        // node even though THIS one could not.
+        options.hostStore?.setSessionNode(host, wrongNode[1]);
+        const reached = manager.getStatus().node;
+        return {
+          ok: false,
+          message:
+            `Your session is running on ${wrongNode[1]}, but this ` +
+            `connection reached ${reached ?? "a different node"}. ` +
+            `Disconnect and reconnect — PDV will aim for ${wrongNode[1]} ` +
+            `automatically.`,
+        };
+      }
       return { ok: false, message: (err as Error).message };
     }
 
     const previous = router.swap(handle);
+    recordSessionNode();
     pushSessionState({
       kind: "remote",
       host,
@@ -521,6 +559,12 @@ export function registerRemoteIpcHandlers(
         console.error("[remote] remote session shutdown failed:", err);
       });
     }
+    // The pin dies with the session. Cleared optimistically — if the
+    // shutdown ack above is lost and the daemon survives, the next connect
+    // simply lands wherever the alias sends it and the attach guard
+    // re-teaches the pin with its wrong-node refusal.
+    const endedHost = manager.getStatus().host;
+    if (endedHost) options.hostStore?.setSessionNode(endedHost, null);
     return { ok: true };
   });
 

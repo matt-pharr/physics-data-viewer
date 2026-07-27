@@ -46,6 +46,7 @@ async function invokeIpc(channel: string, ...args: unknown[]): Promise<unknown> 
 }
 import { SessionHost } from "./server/session-host";
 import { resolveSessionPaths, type SessionPaths } from "./server/session-paths";
+import { RemoteHostStore } from "./remote/host-config";
 import type { RemoteConnectionManager } from "./remote/remote-connection";
 import { SessionRouter } from "./shell/session-router";
 import type { ServerHandle } from "./shell/server-supervisor";
@@ -479,5 +480,90 @@ describe("setup-script shipping at session start", () => {
     const result = (await invokeIpc(IPC.remote.startSession)) as { ok: boolean };
     expect(result.ok).toBe(true);
     expect(ship).not.toHaveBeenCalled();
+  });
+});
+
+describe("session-node pin", () => {
+  /** The manager on a connection whose `hostname` answered `node-a`. */
+  function managerOnNodeA(): RemoteConnectionManager {
+    return connectedManager({
+      getStatus: () => ({
+        phase: "connected",
+        host: "testhost",
+        attemptId: null,
+        node: "node-a.cluster",
+      }),
+    } as Partial<RemoteConnectionManager>);
+  }
+
+  it("records the reached node when the session starts", async () => {
+    const hostStore = new RemoteHostStore(workDir);
+    register({ manager: managerOnNodeA(), hostStore });
+
+    const result = (await invokeIpc(IPC.remote.startSession)) as { ok: boolean };
+    expect(result.ok).toBe(true);
+    // The daemon can only have been reached on the node this connection
+    // landed on, so this is the node the NEXT connect must aim for.
+    expect(hostStore.get("testhost").sessionNode).toBe("node-a.cluster");
+  });
+
+  it("turns a wrong-node refusal into an actionable message and teaches the pin", async () => {
+    const hostStore = new RemoteHostStore(workDir);
+    register({
+      manager: managerOnNodeA(),
+      hostStore,
+      openChannel: ((opts: { onStderr?: (chunk: string) => void }) => {
+        // What the attach CLI prints before dying when the session daemon
+        // lives on a different login node (attach-cli.ts).
+        opts.onStderr?.(
+          "[attach] PDV_WRONG_NODE node=node-b.cluster — session s is " +
+            "running on node-b.cluster, but this connection landed on " +
+            "node-a.cluster. Reconnect to node-b.cluster.\n",
+        );
+        throw new Error("ssh channel closed");
+      }) as unknown as Parameters<typeof registerRemoteIpcHandlers>[0]["openChannel"],
+    });
+
+    const result = (await invokeIpc(IPC.remote.startSession)) as {
+      ok: boolean;
+      message: string;
+    };
+    expect(result.ok).toBe(false);
+    // The message names both nodes and says what to do next...
+    expect(result.message).toContain("node-b.cluster");
+    expect(result.message).toMatch(/reconnect/i);
+    // ...and the local session is untouched.
+    expect(router.kind).toBe("local");
+    // The pin is taught NOW, so the very next connect aims correctly.
+    expect(hostStore.get("testhost").sessionNode).toBe("node-b.cluster");
+  });
+
+  it("clears the pin when the session is shut down", async () => {
+    const hostStore = new RemoteHostStore(workDir);
+    hostStore.setSessionNode("testhost", "node-a.cluster");
+    register({
+      manager: managerOnNodeA(),
+      hostStore,
+      createLocalServer: async () => makeLocalHandle(),
+    });
+    await invokeIpc(IPC.remote.startSession);
+
+    const result = (await invokeIpc(IPC.remote.endSession)) as { ok: boolean };
+    expect(result.ok).toBe(true);
+    expect(hostStore.get("testhost").sessionNode).toBeUndefined();
+  });
+
+  it("keeps the pin on a plain disconnect — the session is still there", async () => {
+    const hostStore = new RemoteHostStore(workDir);
+    register({
+      manager: managerOnNodeA(),
+      hostStore,
+      createLocalServer: async () => makeLocalHandle(),
+    });
+    await invokeIpc(IPC.remote.startSession);
+    expect(hostStore.get("testhost").sessionNode).toBe("node-a.cluster");
+
+    await invokeIpc(IPC.remote.disconnect);
+    expect(hostStore.get("testhost").sessionNode).toBe("node-a.cluster");
   });
 });

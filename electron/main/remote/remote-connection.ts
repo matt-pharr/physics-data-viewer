@@ -54,6 +54,7 @@ import {
   establishMasterInteractive,
   isSecretPrompt,
   looksLikePrompt,
+  type PtyAuthResult,
   type PtyMasterSession,
   type PtyModule,
 } from "./ssh-pty";
@@ -87,6 +88,16 @@ export interface RemoteConnectionOptions {
    * honest behaviour when no bundle has been built.
    */
   bundleDir?: string;
+  /**
+   * The concrete login node a host's session daemon was last seen on, or
+   * null when none is recorded. When set, a master PDV creates for that
+   * host is pinned there with `-o HostName=` — a load-balanced alias
+   * round-robins while the session socket is node-local, so an unpinned
+   * reconnect can land beside a session it cannot reach. A master the user
+   * already runs is never re-pointed (PDV does not own it); the attach
+   * guard on the host is the backstop for that case.
+   */
+  sessionNodeFor?: (host: string) => string | null;
 }
 
 /**
@@ -349,11 +360,59 @@ export class RemoteConnectionManager {
     control: SshControl,
   ): Promise<RemoteConnectResult> {
     const controlPath = control.controlPath ?? controlPathFor(host, this.options.controlDir);
-    let seen = "";
 
+    // Aim at the recorded session node when there is one (see the option's
+    // JSDoc). The pin is best-effort: a node that stopped answering must
+    // not brick the alias, so a failed pinned attempt falls back to the
+    // alias below — where the wrong-node attach guard keeps a live session
+    // from being forked, and a dead one is simply recreated wherever the
+    // alias lands.
+    const pin = this.options.sessionNodeFor?.(host) ?? null;
+    let result = await this.runAuthAttempt(host, attemptId, controlPath, pin);
+    if (!result.ok && pin && result.failure !== "cancelled" && result.failure !== "pty-unavailable") {
+      this.emit({
+        phase: "connecting",
+        host,
+        attemptId,
+        output: `\r\nCould not reach ${pin} (where your session was running); trying ${host} directly…\r\n`,
+        message: `Connecting to ${host}…`,
+      });
+      result = await this.runAuthAttempt(host, attemptId, controlPath, null);
+    }
+
+    if (!result.ok) {
+      return this.fail(host, attemptId, result.failure ?? "unknown", result.message);
+    }
+    this.activeControl = { host, controlPath };
+    this.master = result.session;
+    const node = await this.resolveNode(this.activeControl);
+    const problem = await this.prepareHost(host, attemptId, this.activeControl);
+    if (problem) return this.fail(host, attemptId, "bootstrap", problem);
+    this.emit({ phase: "connected", host, attemptId, node, message: result.message });
+    return { ok: true, failure: null, message: result.message };
+  }
+
+  /**
+   * One interactive establishment attempt, optionally pinned to a node.
+   *
+   * @param host - ssh destination.
+   * @param attemptId - Identifier for this attempt.
+   * @param controlPath - Control socket the new master must listen on.
+   * @param pin - Concrete node to pass as `-o HostName=`, or null.
+   * @returns The pty outcome plus the live session (already closed when the
+   *   attempt failed, so callers only manage the successful one).
+   */
+  private async runAuthAttempt(
+    host: string,
+    attemptId: string,
+    controlPath: string,
+    pin: string | null,
+  ): Promise<PtyAuthResult & { session: PtyMasterSession }> {
+    let seen = "";
     const session = establishMasterInteractive({
       host,
       controlPath,
+      hostNameOverride: pin ?? undefined,
       sshPath: this.options.sshPath,
       ptyModule: this.options.ptyModule,
       overallTimeoutMs: this.options.overallTimeoutMs,
@@ -372,21 +431,10 @@ export class RemoteConnectionManager {
       },
     });
     this.attempt = session;
-
     const result = await session.result;
     this.attempt = null;
-
-    if (!result.ok) {
-      session.close();
-      return this.fail(host, attemptId, result.failure ?? "unknown", result.message);
-    }
-    this.activeControl = { host, controlPath };
-    this.master = session;
-    const node = await this.resolveNode(this.activeControl);
-    const problem = await this.prepareHost(host, attemptId, this.activeControl);
-    if (problem) return this.fail(host, attemptId, "bootstrap", problem);
-    this.emit({ phase: "connected", host, attemptId, node, message: result.message });
-    return { ok: true, failure: null, message: result.message };
+    if (!result.ok) session.close();
+    return { ...result, session };
   }
 
   /**
