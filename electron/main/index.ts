@@ -132,6 +132,10 @@ export async function registerIpcHandlers(
     // Built by `npm run build:server-bundle`. Absent in a checkout that has
     // not built them, which simply skips the bootstrap.
     bundleDir: path.join(__dirname, "..", "remote-bundles"),
+    // Per-host setup-script master copies (one `<host>.sh` per alias).
+    // Hand-edited for now; a Settings Remote Hosts tab gains an editor in a
+    // later PR of this series.
+    setupScriptDir: path.join(userDataDir, "remote-setup"),
     // Only a router can move the session; anything else (a bare handle in a
     // test) gets connection control without session swapping rather than a
     // menu item that fails when used.

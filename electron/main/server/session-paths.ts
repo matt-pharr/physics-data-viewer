@@ -84,6 +84,12 @@ export interface SessionPaths {
   lockPath: string;
   /** Daemon log (stdout/stderr are redirected here, never to the channel). */
   logPath: string;
+  /**
+   * Per-session setup script sourced into the daemon's login-env capture
+   * (`login-env.ts`). Written by the shell at session start; absent when the
+   * host has no script configured.
+   */
+  setupScriptPath: string;
   /** The Unix socket clients attach to; node-local, never on NFS. */
   sockPath: string;
   /** Which candidate the socket directory came from. */
@@ -189,6 +195,7 @@ export function resolveSessionPaths(
       metaPath: path.join(sessionDir, "session.json"),
       lockPath: path.join(sessionDir, "spawn.lock"),
       logPath: path.join(sessionDir, "session.log"),
+      setupScriptPath: path.join(sessionDir, "setup.sh"),
       sockPath,
       runtimeSource: candidate.source,
       hostname: opts.hostname ?? os.hostname(),

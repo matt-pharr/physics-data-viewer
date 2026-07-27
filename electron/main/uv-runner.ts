@@ -25,9 +25,9 @@
  * ARCHITECTURE.md §10.5.6 (the uv binary), §10.5.18 (the uv-runner module)
  */
 
-import { spawn } from "child_process";
 import * as path from "path";
 import * as fs from "fs";
+import { serverSpawn } from "./server/spawn";
 import type { PushSender } from "./server/invoke-registry";
 import { getResourcesRoot } from "./server/server-paths";
 
@@ -168,7 +168,7 @@ export function runUv(args: string[], opts: UvRunOptions = {}): Promise<UvResult
       NO_COLOR: "1",
       UV_NO_PROGRESS: "1",
     };
-    const proc = spawn(binary, args, {
+    const proc = serverSpawn(binary, args, {
       cwd: opts.cwd,
       env: opts.env ? { ...baseEnv, ...opts.env } : baseEnv,
       stdio: ["ignore", "pipe", "pipe"],

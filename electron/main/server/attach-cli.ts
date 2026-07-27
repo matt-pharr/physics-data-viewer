@@ -29,8 +29,16 @@ import { acquireSpawnLock } from "./session-lock";
 import { readSessionMeta } from "./session-meta";
 import { resolveSessionPaths, type SessionPaths } from "./session-paths";
 
-/** How long to wait for a freshly spawned daemon to bind its socket. */
-export const SPAWN_WAIT_MS = 10_000;
+/**
+ * How long to wait for a freshly spawned daemon to bind its socket. Sized
+ * to contain the daemon's startup login-environment capture — up to 15 s
+ * when a setup script full of `module load` lines exists
+ * (`login-env.ts`'s SETUP_CAPTURE_TIMEOUT_MS) — plus bundle require and
+ * bind overhead on a contended login node. A successful start never waits
+ * this long (the poll returns as soon as the socket answers); the budget
+ * only delays the failure verdict.
+ */
+export const SPAWN_WAIT_MS = 25_000;
 
 /** Poll interval while waiting for the socket to appear. */
 const SPAWN_POLL_MS = 50;

@@ -34,12 +34,20 @@ import * as fs from "fs/promises";
 import * as os from "os";
 import * as path from "path";
 
+import { expectKernelReady } from "./helpers/kernel-status";
 import { launchPDV, type LaunchedApp } from "./helpers/launch";
 import { sendMenuAction } from "./helpers/menu-action";
+import { createNewPythonProject } from "./helpers/new-project";
 
 const REPO_ROOT = path.resolve(__dirname, "..");
 const FAKE_SSH = path.join(REPO_ROOT, "main", "remote", "__fixtures__", "fake-ssh.cjs");
 const SERVER_ENTRY = path.join(REPO_ROOT, "dist", "main", "server", "server-main.js");
+/** The real app version, read at runtime — the daemon's comm layer enforces it. */
+const APP_VERSION = (
+  JSON.parse(fsSync.readFileSync(path.join(REPO_ROOT, "package.json"), "utf8")) as {
+    version: string;
+  }
+).version;
 
 /** Runtime dirs created per launch; removed in afterEach. */
 const runtimeDirs: string[] = [];
@@ -60,8 +68,13 @@ function remoteEnv(): Record<string, string> {
     // the ssh binary directly rather than needing an interpreter prefix.
     PDV_SSH_PATH: FAKE_SSH,
     // The daemon and the attach proxy are the real pdv-server, run through
-    // the Electron binary as plain Node exactly as production does.
-    PDV_REMOTE_SERVER_COMMAND: `ELECTRON_RUN_AS_NODE=1 "${process.execPath}" "${SERVER_ENTRY}"`,
+    // the Electron binary as plain Node exactly as production does. The env
+    // contract mirrors the bootstrap-generated command (bootstrap.ts):
+    // PDV_APP_VERSION must ride along, or the daemon starts as version
+    // "unknown" and the comm router rejects every kernel message.
+    PDV_REMOTE_SERVER_COMMAND:
+      `PDV_APP_VERSION="${APP_VERSION}" ` +
+      `ELECTRON_RUN_AS_NODE=1 "${process.execPath}" "${SERVER_ENTRY}"`,
     FAKE_SSH_MASTER: "alive",
     FAKE_SSH_EXEC: "local",
   };
@@ -78,8 +91,21 @@ test.afterEach(async () => {
 });
 
 test("connects to a host and moves the session onto it", async () => {
+  test.setTimeout(240_000);
   launched = await launchPDV({ env: remoteEnv() });
-  const { app, window: page } = launched;
+  const { app, window: page, homeDir } = launched;
+
+  // A per-host setup script configured before connecting. The assertions at
+  // the bottom prove the whole chain: master copy → shipped to the session
+  // dir on the "host" → sourced by the daemon's login-env capture → applied
+  // to a kernel a user's code can see. Deliberately NOT a PDV_-prefixed
+  // name: that prefix is the daemon's reserved namespace and applyLoginEnv
+  // discards it (the first version of this spec fell into exactly that
+  // trap, asserting a marker that could never have been applied).
+  const setupContent = "export E2E_SETUP_MARKER='shipped and sourced'\n";
+  const userData = await app.evaluate(({ app: a }) => a.getPath("userData"));
+  await fs.mkdir(path.join(userData, "remote-setup"), { recursive: true });
+  await fs.writeFile(path.join(userData, "remote-setup", "testhost.sh"), setupContent, "utf8");
 
   await sendMenuAction(app, { action: "remote:connect" });
 
@@ -103,6 +129,53 @@ test("connects to a host and moves the session onto it", async () => {
   await expect(page.locator(".status-bar")).toContainText(/testhost/i, {
     timeout: 10_000,
   });
+
+  // The setup script really shipped: byte-identical in the session dir on
+  // the "host" (the temp HOME the fake ssh executes under)...
+  const sessionDir = path.join(
+    homeDir,
+    ".pdv-server",
+    "run",
+    "sessions",
+    `pdv-${os.userInfo().username}`,
+  );
+  expect(await fs.readFile(path.join(sessionDir, "setup.sh"), "utf8")).toBe(setupContent);
+  // ...and the daemon really sourced it: this log suffix is derived from a
+  // sentinel the capture shell exports after the `.` line — evidence from
+  // inside the capture, not a stat of the file. Written before the socket
+  // binds, so reaching "running on" above guarantees it is on disk.
+  const daemonLog = await fs.readFile(path.join(sessionDir, "session.log"), "utf8");
+  expect(daemonLog).toMatch(/applied login environment .*setup script sourced/);
+  // session.json records the same verdict for later diagnostics.
+  const meta = JSON.parse(
+    await fs.readFile(path.join(sessionDir, "session.json"), "utf8"),
+  ) as { setupScriptApplied?: boolean };
+  expect(meta.setupScriptApplied).toBe(true);
+
+  // Finally, the part a user actually cares about: a kernel started in this
+  // session sees the variable. This closes the gap none of the file/log
+  // assertions can — that the captured environment was APPLIED to
+  // process.env and inherited by the kernel spawn.
+  await dialog.getByRole("button", { name: "Close" }).click();
+  await createNewPythonProject(page);
+  // Remote path provisions a uv env before the kernel boots; generous but
+  // bounded (uv download cache is shared across specs).
+  await expectKernelReady(page, 150_000);
+  const editor = page.getByRole("textbox", { name: "Editor content" });
+  await editor.focus();
+  const modifier = process.platform === "darwin" ? "Meta" : "Control";
+  await page.keyboard.press(`${modifier}+a`);
+  await page.keyboard.press("Backspace");
+  await page.keyboard.type(
+    "import os; print('marker=' + os.environ.get('E2E_SETUP_MARKER', 'MISSING'))",
+  );
+  await page.getByRole("button", { name: "Execute" }).click();
+  // Not `.first()`: the session-move console marker ("── session moved to
+  // testhost ──") occupies the first stdout slot. Filter to the marker line
+  // so a "marker=MISSING" result still fails with the actual value shown.
+  await expect(
+    page.locator(".log-stdout").filter({ hasText: "marker=" }).first(),
+  ).toContainText("marker=shipped and sourced", { timeout: 30_000 });
 });
 
 test("keeps the local session working when the host cannot be reached", async () => {
@@ -151,7 +224,7 @@ test("surfaces a remote kernel-start failure instead of spinning", async () => {
     env: {
       ...remoteEnv(),
       PDV_REMOTE_SERVER_COMMAND:
-        `PDV_PDV_DIR="${remotePdvDir}" ` +
+        `PDV_APP_VERSION="${APP_VERSION}" PDV_PDV_DIR="${remotePdvDir}" ` +
         `ELECTRON_RUN_AS_NODE=1 "${process.execPath}" "${SERVER_ENTRY}"`,
     },
   });

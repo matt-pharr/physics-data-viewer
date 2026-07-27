@@ -59,6 +59,7 @@ import { setAppVersion } from "../pdv-protocol";
 import { RPC_CHANNELS } from "../transport/protocol";
 import { RpcServer } from "../transport/rpc-server";
 import { runSelfCheck } from "./self-check";
+import { applyLoginEnv, captureLoginEnv } from "./login-env";
 import { attachToSession, proxyStdio } from "./attach-cli";
 import { SessionHost } from "./session-host";
 import { resolveSessionPaths } from "./session-paths";
@@ -346,12 +347,53 @@ async function runSessionHost(args: string[]): Promise<void> {
     return;
   }
   const root = flagValue(args, "--root") ?? defaultRoot();
-  const version = process.env.PDV_APP_VERSION ?? "unknown";
+  // Required, exactly as in serve mode — and MORE dangerous to default here:
+  // the attach handshake gates on the RPC protocol version (by design, so an
+  // app upgrade never orphans a live daemon), which means a daemon running
+  // as version "unknown" starts fine, attaches fine, and then the comm
+  // router silently rejects every kernel message as version-incompatible.
+  // A daemon that can never accept a kernel must refuse to start instead.
+  const version = process.env.PDV_APP_VERSION;
+  if (!version) {
+    console.error("[session-host] PDV_APP_VERSION is required (kernel comm version check)");
+    process.exit(2);
+    return;
+  }
 
   const paths = resolveSessionPaths({ sessionId, root });
   const pdvDir = process.env.PDV_PDV_DIR ?? path.join(os.homedir(), ".PDV");
   fs.mkdirSync(pdvDir, { recursive: true });
   setAppVersion(version);
+
+  // A daemon spawned over an ssh exec channel never ran a login shell, so
+  // Lmod/juliaup/conda PATH entries are invisible to it and to every kernel
+  // and probe it spawns. Capture the login environment (sourcing the
+  // session's setup script when one was shipped) BEFORE any manager exists —
+  // process.env is what every spawn call site builds from. A failed capture
+  // is survived (the daemon then behaves exactly as before this existed),
+  // but when a setup script was shipped the failure is loud and recorded in
+  // session.json: the user explicitly asked for an environment they are not
+  // getting, and "interpreters silently missing" is the harder bug.
+  const setupScriptShipped = fs.existsSync(paths.setupScriptPath);
+  const captured = await captureLoginEnv({
+    setupScriptPath: paths.setupScriptPath,
+  });
+  const setupScriptApplied = captured?.setupScriptSourced ?? false;
+  if (captured) {
+    const changed = applyLoginEnv(captured.env);
+    console.log(
+      `[session-host] applied login environment (${changed} variables ` +
+        `added or changed${captured.setupScriptSourced ? "; setup script sourced" : ""})`,
+    );
+  }
+  if (setupScriptShipped && !setupScriptApplied) {
+    console.error(
+      `[session-host] SETUP SCRIPT NOT APPLIED: ${paths.setupScriptPath} was ` +
+        "shipped but the login-environment capture did not source it " +
+        "(capture failed or timed out). Kernels in this session run WITHOUT " +
+        "the configured environment.",
+    );
+  }
 
   const commRouter = new CommRouter();
   const queryRouter = new QueryRouter();
@@ -441,6 +483,7 @@ async function runSessionHost(args: string[]): Promise<void> {
     sockPath: paths.sockPath,
     runtimeSource: paths.runtimeSource,
     startedAt: new Date().toISOString(),
+    setupScriptApplied,
   });
 
   console.log(

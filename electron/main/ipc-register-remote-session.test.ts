@@ -383,3 +383,78 @@ describe("unreachable-session guards and recovery", () => {
     expect(states.at(-1)).toMatchObject({ kind: "local", state: "connected" });
   });
 });
+
+describe("setup-script shipping at session start", () => {
+  it("ships the script before any channel can spawn a daemon", async () => {
+    // Order is the property under test: the daemon sources setup.sh exactly
+    // once, at startup — so the ship must precede the first channel open
+    // (which runs `attach --create`), not merely the router swap. A version
+    // that shipped between handle.start() and swap() passed a swap-only
+    // assertion while the daemon had already been created scriptless.
+    const order: string[] = [];
+    const ship = vi.fn(
+      async (_opts: { host: string; sessionId: string; setupScriptDir: string }) => {
+        order.push("ship");
+        return { ok: true as const, shipped: true };
+      },
+    );
+    register({
+      setupScriptDir: path.join(workDir, "remote-setup"),
+      shipScript: ship as unknown as Parameters<typeof registerRemoteIpcHandlers>[0]["shipScript"],
+      openChannel: (() => {
+        order.push("channel-open");
+        const socket = net.connect(paths.sockPath);
+        socket.on("error", () => undefined);
+        sockets.push(socket);
+        return {
+          readable: socket,
+          writable: socket,
+          child: undefined as never,
+          dispose: () => socket.destroy(),
+        };
+      }) as unknown as Parameters<typeof registerRemoteIpcHandlers>[0]["openChannel"],
+    });
+
+    const result = (await invokeIpc(IPC.remote.startSession)) as { ok: boolean };
+    expect(result.ok).toBe(true);
+    expect(ship).toHaveBeenCalledTimes(1);
+    expect(ship.mock.calls[0][0]).toMatchObject({
+      host: "testhost",
+      sessionId: SESSION,
+      setupScriptDir: path.join(workDir, "remote-setup"),
+    });
+    expect(order[0]).toBe("ship");
+    expect(order).toContain("channel-open");
+    expect(router.kind).toBe("remote");
+  });
+
+  it("a failed ship declines the start and leaves the local session untouched", async () => {
+    const ship = vi.fn(async () => ({
+      ok: false as const,
+      message: "The setup script for testhost could not be delivered.",
+    }));
+    register({
+      setupScriptDir: path.join(workDir, "remote-setup"),
+      shipScript: ship as unknown as Parameters<typeof registerRemoteIpcHandlers>[0]["shipScript"],
+    });
+
+    const result = (await invokeIpc(IPC.remote.startSession)) as {
+      ok: boolean;
+      message?: string;
+    };
+    expect(result.ok).toBe(false);
+    expect(result.message).toContain("setup script");
+    expect(router.kind).toBe("local");
+    expect(localHandle.shutdownCalls).toBe(0);
+  });
+
+  it("skips shipping entirely when no setupScriptDir is configured", async () => {
+    const ship = vi.fn(async () => ({ ok: true as const, shipped: true }));
+    register({
+      shipScript: ship as unknown as Parameters<typeof registerRemoteIpcHandlers>[0]["shipScript"],
+    });
+    const result = (await invokeIpc(IPC.remote.startSession)) as { ok: boolean };
+    expect(result.ok).toBe(true);
+    expect(ship).not.toHaveBeenCalled();
+  });
+});

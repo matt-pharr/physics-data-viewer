@@ -2285,6 +2285,38 @@ working directory on this machine. The session id is stable per user, so
 reconnecting after a crash or an app restart finds the same session, kernel
 and Tree instead of stranding the previous daemon.
 
+**Login environment and the per-host setup script.** A daemon spawned over
+an ssh exec channel never ran a login shell, so PATH entries that every
+interactive shell on the cluster has — Lmod modules, juliaup, conda hooks —
+are invisible to it and to every kernel and probe it spawns. At startup the
+daemon therefore captures the login environment once (`server/login-env.ts`):
+`bash -lc '. setup.sh >/dev/null 2>&1; env -0 > <file>'`, parsed from the
+file (login shells *print*, and profile chatter interleaved with the capture
+— or with any per-spawn wrapper's stdout — would corrupt interpreter probes
+that regex their output) and applied to the daemon's own `process.env`,
+which every spawn call site builds from. One login shell per daemon, not per
+spawn; `PDV_*` and `ELECTRON_RUN_AS_NODE` are protected from profile
+override — that prefix is the daemon's reserved namespace, so a setup
+script's own exports must not use it. A failed capture degrades to the
+inherited environment, but never silently when a script was shipped: the
+capture reports *evidence* of sourcing (a sentinel exported by the capture
+shell, not a stat of the file), the verdict is recorded as
+`setupScriptApplied` in `session.json`, and a shipped-but-not-applied
+script logs loudly. The optional setup script is per host: its master copy
+lives on the laptop (`<userData>/remote-setup/<host>.sh`, hand-editable
+offline, CRLF normalized at ship time) and `remote/setup-script.ts` ships
+it at every `startSession`, before any path that could spawn a daemon,
+since it is sourced only during that startup capture — script edits apply
+from the next session start, and a daemon resurrected by the handle's
+internal reconnect loop sources the last-shipped copy. A configured script
+that cannot be delivered fails the session start loudly; silently missing
+interpreters are the harder bug. When no script is configured the remote
+copy is removed, so at each session start the host reflects the local
+master copy, present or absent. All server-side tool spawns are funnelled through
+one seam (`server/spawn.ts`, enforced by an import guard) — the future hook
+for Slurm-launched kernels, which is also why environment does not ride
+there as a wrapper.
+
 `shell/remote-server.ts` is the remote `ServerHandle`. The transport is
 unchanged — an ssh channel is a stream pair and `RpcClient` already takes one
 — but the *lifetime* differs, which is why it is a separate implementation:
@@ -2954,7 +2986,7 @@ PDV does not ship a static API reference, which would drift. Instead:
 The following features are acknowledged as future work and must not influence the current architecture in ways that complicate the above design:
 
 - **Modules ecosystem hardening** — core module lifecycle is implemented (install from disk/GitHub, import, uninstall, update, bundled examples, project-local storage); deeper registry/trust features are deferred
-- **Remote session completeness** — remote sessions work end to end (§11.7 area above: connect, bootstrap, session daemon, environment provisioning via the bundled uv, path picking); still deferred are the per-host setup script and Slurm-aware kernel launch (interactive analysis on a login node is the sanctioned beta scope), remote Julia sessions (need juliaup on the host), remote→local file export, remote launchers, and the VS Code-style command palette that will replace the placeholder path picker
+- **Remote session completeness** — remote sessions work end to end (§11.7 area above: connect, bootstrap, session daemon, environment provisioning via the bundled uv, path picking); still deferred are Slurm-aware kernel launch (interactive analysis on a login node is the sanctioned beta scope; the per-host setup script and login-environment capture have landed), remote Julia sessions (need juliaup on the host), remote→local file export, remote launchers, and the VS Code-style command palette that will replace the placeholder path picker
 - **Local→remote upload import and remote MCP** — explicitly excluded from remote v1
 - **Multiple simultaneous kernels** — architecture supports it (kernels have IDs) but UI exposes only one at a time
 - **R kernel support** — deferred; would follow the `pdv-julia` pattern (a kernel-side package implementing the language-agnostic protocol of §3)

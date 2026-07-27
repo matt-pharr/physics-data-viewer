@@ -27,6 +27,7 @@ import {
   type SessionStatePayload,
 } from "./ipc";
 import { openSessionChannel } from "./remote/remote-channel";
+import { shipSetupScript } from "./remote/setup-script";
 import { RemoteServerHandle } from "./shell/remote-server";
 import type { ServerHandle } from "./shell/server-supervisor";
 import type { SessionRouter } from "./shell/session-router";
@@ -67,6 +68,15 @@ export interface RegisterRemoteIpcOptions {
   sessionId?: string;
   /** Opens the ssh channel. Injected by tests. */
   openChannel?: typeof openSessionChannel;
+  /**
+   * Directory of per-host setup-script master copies
+   * (`<userData>/remote-setup`). Omitting it skips setup-script shipping
+   * entirely, which is what a build (or test) with no setup-script support
+   * should do rather than failing every session start.
+   */
+  setupScriptDir?: string;
+  /** Ships the setup script. Injected by tests. */
+  shipScript?: typeof shipSetupScript;
   /**
    * Starts a fresh local pdv-server. Ending a remote session (and
    * disconnecting while one runs) swaps the window back onto it; omitting
@@ -223,6 +233,35 @@ export function registerRemoteIpcHandlers(
         message: "Connect to a host before starting a session there.",
       };
     }
+    const sessionId = options.sessionId ?? defaultSessionId();
+    const host = manager.getStatus().host;
+
+    // The setup script must be on the host BEFORE any path that can spawn a
+    // daemon: it is sourced exactly once, during the daemon's startup
+    // login-environment capture, so a script arriving after `--create`
+    // silently does not apply until the next session. That includes the
+    // retryNow recovery below — its attach runs with `create: true` and
+    // will resurrect a daemon that died while disconnected, which must
+    // source the CURRENT script, not whatever a previous startSession left
+    // behind. A configured script that cannot be delivered fails the start
+    // loudly — a session whose interpreters are silently missing is the
+    // harder bug to diagnose. (The one unshipped path left is the handle's
+    // internal reconnect loop; a daemon resurrected there sources the last
+    // startSession's copy, which is also the newest one ever shipped.)
+    if (options.setupScriptDir && host) {
+      const ship = options.shipScript ?? shipSetupScript;
+      const shipped = await ship({
+        control,
+        host,
+        sessionId,
+        setupScriptDir: options.setupScriptDir,
+        sshPath,
+      });
+      if (!shipped.ok) {
+        return { ok: false, message: shipped.message };
+      }
+    }
+
     if (router.kind === "remote") {
       // The recovery path: the session is already here but its channel was
       // lost past the automatic backoff (`auth-required`). The user has just
@@ -232,7 +271,7 @@ export function registerRemoteIpcHandlers(
       if (current && current.connectionState !== "connected") {
         try {
           await current.retryNow();
-          return { ok: true, sessionId: options.sessionId ?? defaultSessionId() };
+          return { ok: true, sessionId };
         } catch (err) {
           console.error("[remote] reattach via existing handle failed:", err);
           // Fall through and build a fresh handle: a handle that was
@@ -244,9 +283,7 @@ export function registerRemoteIpcHandlers(
       }
     }
 
-    const sessionId = options.sessionId ?? defaultSessionId();
     const open = options.openChannel ?? openSessionChannel;
-    const host = manager.getStatus().host;
 
     const handle = new RemoteServerHandle({
       sessionId,

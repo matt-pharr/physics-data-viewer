@@ -27,7 +27,7 @@ import * as fs from "fs";
 import * as net from "net";
 import * as os from "os";
 import * as path from "path";
-import { spawn, ChildProcess } from "child_process";
+import { serverSpawn, type ChildProcess } from "./server/spawn";
 import { EventEmitter } from "events";
 import type { KernelCompleteResult, KernelInspectResult } from "./ipc";
 import { buildExecutionError, type KernelExecutionLocation } from "./kernel-error-parser";
@@ -505,7 +505,7 @@ export class KernelManager extends EventEmitter {
     }
     argv = argv.map((a) => a.replace("{connection_file}", connectionFile));
 
-    const kernelProcess = spawn(argv[0], argv.slice(1), {
+    const kernelProcess = serverSpawn(argv[0], argv.slice(1), {
       env: { ...process.env, ...(spec?.env ?? {}) },
       stdio: ["ignore", "pipe", "pipe"],
     });
