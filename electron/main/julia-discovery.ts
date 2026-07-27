@@ -21,18 +21,15 @@
  * - Register IPC handlers (ipc-register-environment.ts).
  */
 
-import { execFile, spawn } from "child_process";
-import { promisify } from "util";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import type { PushSender } from "./server/invoke-registry";
 import { getResourcesRoot } from "./server/server-paths";
+import { serverExecFile, serverSpawn } from "./server/spawn";
 
 import { coreVersion, getAppVersion } from "./pdv-protocol";
 import type { EnvironmentInstallResult } from "./environment-detector";
-
-const execFileAsync = promisify(execFile);
 
 // ---------------------------------------------------------------------------
 // Types
@@ -342,7 +339,7 @@ export async function probeJuliaRuntime(
 ): Promise<JuliaProbeResult | null> {
   let stdout: string;
   try {
-    ({ stdout } = await execFileAsync(
+    ({ stdout } = await serverExecFile(
       juliaPath,
       ["--startup-file=no", "-e", PROBE_SNIPPET],
       { timeout: PROBE_TIMEOUT_MS, env: sanitizedJuliaEnv() }
@@ -669,7 +666,7 @@ function _installPDVKernelExclusive(
     const chunks: string[] = [];
     // sanitizedJuliaEnv: a shell-exported JULIA_PROJECT would redirect
     // Pkg.develop/Pkg.add into the user's own project (review M8).
-    const proc = spawn(juliaPath, ["--startup-file=no", "-e", code], {
+    const proc = serverSpawn(juliaPath, ["--startup-file=no", "-e", code], {
       env: sanitizedJuliaEnv({
         NO_COLOR: "1",
         JULIA_PKG_PROGRESS_BARS: "0",

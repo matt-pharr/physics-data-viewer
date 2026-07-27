@@ -22,9 +22,9 @@
  *   inside the kernel, §10.6.8 — dispatched by ipc-register-environment.ts).
  */
 
-import { spawn } from "child_process";
 import * as fs from "fs/promises";
 import * as path from "path";
+import { serverSpawn } from "./server/spawn";
 import type { PushSender } from "./server/invoke-registry";
 
 import type { ProjectPackage } from "./ipc";
@@ -150,7 +150,7 @@ export function instantiateJuliaEnvironment(
       NO_COLOR: "1",
       JULIA_PKG_PROGRESS_BARS: "0",
     };
-    const proc = spawn(juliaPath, args, {
+    const proc = serverSpawn(juliaPath, args, {
       cwd: workingDir,
       env,
       stdio: ["ignore", "pipe", "pipe"],
