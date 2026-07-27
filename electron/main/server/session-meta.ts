@@ -47,6 +47,14 @@ export interface SessionMeta {
   runtimeSource: string;
   /** ISO timestamp of daemon start. */
   startedAt: string;
+  /**
+   * True when a shipped setup script was really sourced by the startup
+   * login-environment capture (evidence from the capture, not file
+   * existence). Absent on daemons predating the field. False with a script
+   * on disk means the capture failed — the session runs without the
+   * configured environment.
+   */
+  setupScriptApplied?: boolean;
 }
 
 /**

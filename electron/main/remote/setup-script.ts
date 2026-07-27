@@ -15,6 +15,11 @@
  * deleting the local file is how a host is un-configured — a stale script
  * silently shaping every kernel's environment would be worse than none.
  *
+ * Script contract: it is sourced by `bash -l` with all output discarded,
+ * and environment mutations are its entire effect. Variables named `PDV_*`
+ * (and `ELECTRON_RUN_AS_NODE`) are the daemon's own namespace — exports
+ * under that prefix are silently discarded by the login-env application.
+ *
  * This module does NOT decide when shipping happens (`ipc-register-remote`
  * ships at session start), provide editing UI (a Settings tab does, later),
  * or interpret the script — it is content, not configuration.
@@ -92,7 +97,12 @@ export async function shipSetupScript(
 
   let content: string | null;
   try {
-    const raw = fs.readFileSync(localPath, "utf8");
+    // CRLF is normalized at read time: the master copy is PDV-owned
+    // configuration a user may edit with anything, and a shipped `\r`
+    // embeds itself in every exported value (`FOO=bar\r`) or breaks
+    // `module load python\r` invisibly — the capture discards the output
+    // where the error would have shown.
+    const raw = fs.readFileSync(localPath, "utf8").replace(/\r\n/g, "\n");
     content = raw.trim().length > 0 ? raw : null;
   } catch {
     content = null; // No master copy: treat as unconfigured.

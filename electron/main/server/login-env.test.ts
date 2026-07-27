@@ -48,18 +48,25 @@ describe("captureLoginEnv", () => {
   });
 
   itUnix("captures the login shell's environment", async () => {
-    const env = await captureLoginEnv();
-    expect(env).not.toBeNull();
+    const captured = await captureLoginEnv();
+    expect(captured).not.toBeNull();
     // PATH is the one variable every shell must end up with.
-    expect(env?.PATH).toBeTruthy();
+    expect(captured?.env.PATH).toBeTruthy();
+    expect(captured?.setupScriptSourced).toBe(false);
   });
 
-  itUnix("sources the setup script when it exists", async () => {
+  itUnix("sources the setup script and reports evidence of it", async () => {
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pdv-login-env-"));
     const script = path.join(tempDir, "setup.sh");
-    fs.writeFileSync(script, "export PDV_LOGIN_ENV_TEST_MARKER='from setup'\n");
-    const env = await captureLoginEnv({ setupScriptPath: script });
-    expect(env?.PDV_LOGIN_ENV_TEST_MARKER).toBe("from setup");
+    fs.writeFileSync(script, "export LOGIN_ENV_TEST_MARKER='from setup'\n");
+    const captured = await captureLoginEnv({ setupScriptPath: script });
+    expect(captured?.env.LOGIN_ENV_TEST_MARKER).toBe("from setup");
+    expect(captured?.setupScriptSourced).toBe(true);
+    // The evidence sentinel and the capture's own plumbing never leak into
+    // the returned map.
+    expect(captured?.env.PDV_SETUP_SOURCED).toBeUndefined();
+    expect(captured?.env.PDV_SETUP_SCRIPT).toBeUndefined();
+    expect(captured?.env.PDV_ENV_OUT).toBeUndefined();
   });
 
   itUnix("survives a setup script that fails and discards its output", async () => {
@@ -68,20 +75,22 @@ describe("captureLoginEnv", () => {
     fs.writeFileSync(
       script,
       "echo '9.99 chatter that must not corrupt anything'\n" +
-        "export PDV_LOGIN_ENV_TEST_MARKER=survived\n" +
+        "export LOGIN_ENV_TEST_MARKER=survived\n" +
         "this-command-does-not-exist\n",
     );
-    const env = await captureLoginEnv({ setupScriptPath: script });
+    const captured = await captureLoginEnv({ setupScriptPath: script });
     // The failing line does not abort the capture, and the marker before it
     // was still exported.
-    expect(env?.PDV_LOGIN_ENV_TEST_MARKER).toBe("survived");
+    expect(captured?.env.LOGIN_ENV_TEST_MARKER).toBe("survived");
+    expect(captured?.setupScriptSourced).toBe(true);
   });
 
-  itUnix("ignores a missing setup script", async () => {
-    const env = await captureLoginEnv({
+  itUnix("ignores a missing setup script and does not claim it sourced one", async () => {
+    const captured = await captureLoginEnv({
       setupScriptPath: "/nonexistent/pdv-setup-test.sh",
     });
-    expect(env).not.toBeNull();
+    expect(captured).not.toBeNull();
+    expect(captured?.setupScriptSourced).toBe(false);
   });
 
   itUnix("returns null when the shell hangs past the budget", async () => {

@@ -233,37 +233,21 @@ export function registerRemoteIpcHandlers(
         message: "Connect to a host before starting a session there.",
       };
     }
-    if (router.kind === "remote") {
-      // The recovery path: the session is already here but its channel was
-      // lost past the automatic backoff (`auth-required`). The user has just
-      // re-authenticated in this dialog, so an interactive reattach is
-      // exactly what "run session here" should mean now.
-      const current = activeRemoteHandle();
-      if (current && current.connectionState !== "connected") {
-        try {
-          await current.retryNow();
-          return { ok: true, sessionId: options.sessionId ?? defaultSessionId() };
-        } catch (err) {
-          console.error("[remote] reattach via existing handle failed:", err);
-          // Fall through and build a fresh handle: a handle that was
-          // superseded (or closed) can never reattach — "reconnect" must
-          // still work, and the attach protocol makes a fresh handle safe.
-        }
-      } else if (current) {
-        return { ok: false, message: "This window already runs a remote session." };
-      }
-    }
-
     const sessionId = options.sessionId ?? defaultSessionId();
-    const open = options.openChannel ?? openSessionChannel;
     const host = manager.getStatus().host;
 
-    // The setup script must be on the host BEFORE the daemon spawns: the
-    // daemon sources it exactly once, during its startup login-environment
-    // capture, so a script arriving after `--create` would silently not
-    // apply until the next session. A configured script that cannot be
-    // delivered fails the start loudly — a session whose interpreters are
-    // silently missing is the harder bug to diagnose.
+    // The setup script must be on the host BEFORE any path that can spawn a
+    // daemon: it is sourced exactly once, during the daemon's startup
+    // login-environment capture, so a script arriving after `--create`
+    // silently does not apply until the next session. That includes the
+    // retryNow recovery below — its attach runs with `create: true` and
+    // will resurrect a daemon that died while disconnected, which must
+    // source the CURRENT script, not whatever a previous startSession left
+    // behind. A configured script that cannot be delivered fails the start
+    // loudly — a session whose interpreters are silently missing is the
+    // harder bug to diagnose. (The one unshipped path left is the handle's
+    // internal reconnect loop; a daemon resurrected there sources the last
+    // startSession's copy, which is also the newest one ever shipped.)
     if (options.setupScriptDir && host) {
       const ship = options.shipScript ?? shipSetupScript;
       const shipped = await ship({
@@ -277,6 +261,29 @@ export function registerRemoteIpcHandlers(
         return { ok: false, message: shipped.message };
       }
     }
+
+    if (router.kind === "remote") {
+      // The recovery path: the session is already here but its channel was
+      // lost past the automatic backoff (`auth-required`). The user has just
+      // re-authenticated in this dialog, so an interactive reattach is
+      // exactly what "run session here" should mean now.
+      const current = activeRemoteHandle();
+      if (current && current.connectionState !== "connected") {
+        try {
+          await current.retryNow();
+          return { ok: true, sessionId };
+        } catch (err) {
+          console.error("[remote] reattach via existing handle failed:", err);
+          // Fall through and build a fresh handle: a handle that was
+          // superseded (or closed) can never reattach — "reconnect" must
+          // still work, and the attach protocol makes a fresh handle safe.
+        }
+      } else if (current) {
+        return { ok: false, message: "This window already runs a remote session." };
+      }
+    }
+
+    const open = options.openChannel ?? openSessionChannel;
 
     const handle = new RemoteServerHandle({
       sessionId,

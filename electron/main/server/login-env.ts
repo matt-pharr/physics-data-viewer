@@ -27,7 +27,11 @@
  * output is discarded — diagnosis belongs to the explicit test channel, not
  * to interleaving with a capture. Environment mutations are the script's
  * entire contract; Lmod is implemented purely in environment variables, so
- * a capture loses nothing a wrapper would have kept.
+ * a capture loses nothing a wrapper would have kept. One reservation in
+ * that contract: variables named `PDV_*` (and `ELECTRON_RUN_AS_NODE`) are
+ * the daemon's own namespace and are silently discarded by
+ * {@link applyLoginEnv} — a setup script must not use the prefix for its
+ * own exports.
  *
  * This module does NOT run on the shell side, decide when to re-capture
  * (the daemon captures once at boot; edits to the setup script apply on the
@@ -44,12 +48,27 @@ import { serverExecFile } from "./spawn";
 const PROTECTED_ENV_PREFIXES = ["PDV_", "ELECTRON_RUN_AS_NODE"];
 
 /**
- * Default budget for the login shell. Deliberately half of the attacher's
- * `SPAWN_WAIT_MS` (10 s): the capture runs before the daemon binds its
- * socket, so a budget as large as the attacher's would let a slow profile
- * fail the whole attach instead of just degrading to the inherited env.
+ * Default budget for the login shell with no setup script. The capture runs
+ * before the daemon binds its socket, so the budget must stay well inside
+ * the attacher's socket wait (`SPAWN_WAIT_MS`) — a slow profile should
+ * degrade to the inherited env, not fail the whole attach.
  */
 export const CAPTURE_TIMEOUT_MS = 5_000;
+
+/**
+ * Budget when a setup script exists: `module load` lines legitimately take
+ * multiple seconds on a contended login node, and a user who configured a
+ * script has said the environment matters more than a fast boot. The
+ * attacher's socket wait is sized to contain this plus bind overhead.
+ */
+export const SETUP_CAPTURE_TIMEOUT_MS = 15_000;
+
+/**
+ * Sentinel the capture shell exports after sourcing the setup script, so
+ * "the script really ran" is evidence read from the capture itself — never
+ * inferred from the file existing. Stripped from the returned map.
+ */
+const SETUP_SOURCED_SENTINEL = "PDV_SETUP_SOURCED";
 
 /** Options for {@link captureLoginEnv}. */
 export interface CaptureLoginEnvOptions {
@@ -60,45 +79,76 @@ export interface CaptureLoginEnvOptions {
   setupScriptPath?: string;
   /** Shell binary. Defaults to `bash` from PATH. Injected by tests. */
   shellPath?: string;
-  /** Capture budget in milliseconds. Defaults to {@link CAPTURE_TIMEOUT_MS}. */
+  /**
+   * Capture budget in milliseconds. Defaults to {@link CAPTURE_TIMEOUT_MS},
+   * or {@link SETUP_CAPTURE_TIMEOUT_MS} when the setup script exists.
+   */
   timeoutMs?: number;
+}
+
+/** Result of a successful {@link captureLoginEnv}. */
+export interface CapturedLoginEnv {
+  /** The captured environment map. */
+  env: Record<string, string>;
+  /**
+   * True when the setup script was really sourced — evidence from a
+   * sentinel the capture shell exports after the `.` line, not a guess
+   * from the file existing on disk.
+   */
+  setupScriptSourced: boolean;
 }
 
 /**
  * Run one login shell and capture the environment it ends with.
  *
  * @param options - Setup script and timeout options.
- * @returns The captured environment map, or `null` when the capture failed
- *   (no bash, profile hung past the budget, unwritable temp dir, win32).
- *   Failure is survivable by design: the daemon then runs with its
- *   inherited environment, exactly as it did before this module existed.
+ * @returns The captured environment plus sourcing evidence, or `null` when
+ *   the capture failed (no bash, profile hung past the budget, unwritable
+ *   temp dir, win32). Failure is survivable by design: the daemon then runs
+ *   with its inherited environment, exactly as it did before this module
+ *   existed — but the caller must surface it when a setup script was
+ *   configured, because then the user explicitly asked for an environment
+ *   they are not getting.
  */
 export async function captureLoginEnv(
   options: CaptureLoginEnvOptions = {},
-): Promise<Record<string, string> | null> {
+): Promise<CapturedLoginEnv | null> {
   if (process.platform === "win32") return null;
 
   const outPath = path.join(
     os.tmpdir(),
     `pdv-login-env-${process.pid}-${Date.now()}.tmp`,
   );
+  const setupScriptExists =
+    !!options.setupScriptPath && fs.existsSync(options.setupScriptPath);
   // The script and output paths travel as environment variables, never
   // spliced into the shell string: quoting inside a nested shell is exactly
   // the class of computed-vs-OS bug the remote work keeps hitting.
   const script =
     'if [ -n "$PDV_SETUP_SCRIPT" ] && [ -f "$PDV_SETUP_SCRIPT" ]; then' +
-    ' . "$PDV_SETUP_SCRIPT" >/dev/null 2>&1; fi; env -0 > "$PDV_ENV_OUT"';
+    ` . "$PDV_SETUP_SCRIPT" >/dev/null 2>&1; export ${SETUP_SOURCED_SENTINEL}=1;` +
+    ' fi; env -0 > "$PDV_ENV_OUT"';
 
   try {
     await serverExecFile(options.shellPath ?? "bash", ["-lc", script], {
-      timeout: options.timeoutMs ?? CAPTURE_TIMEOUT_MS,
+      timeout:
+        options.timeoutMs ??
+        (setupScriptExists ? SETUP_CAPTURE_TIMEOUT_MS : CAPTURE_TIMEOUT_MS),
       env: {
         ...process.env,
         PDV_SETUP_SCRIPT: options.setupScriptPath ?? "",
         PDV_ENV_OUT: outPath,
       },
     });
-    return parseNulEnv(fs.readFileSync(outPath, "utf8"));
+    const env = parseNulEnv(fs.readFileSync(outPath, "utf8"));
+    const setupScriptSourced = env[SETUP_SOURCED_SENTINEL] === "1";
+    delete env[SETUP_SOURCED_SENTINEL];
+    // The capture's own plumbing variables must not read as "the login
+    // environment" (they would be discarded by applyLoginEnv anyway, but
+    // returning them would mislead any other consumer of the map).
+    delete env.PDV_SETUP_SCRIPT;
+    delete env.PDV_ENV_OUT;
+    return { env, setupScriptSourced };
   } catch (err) {
     console.error(
       `[login-env] capture failed; continuing with the inherited environment: ` +

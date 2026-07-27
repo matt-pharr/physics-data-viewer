@@ -90,18 +90,30 @@ describe("serverSpawn", () => {
 
   it("kills the child when the abort signal fires", async () => {
     const controller = new AbortController();
-    const proc = serverSpawn("sh", ["-c", "sleep 5"], {
+    // sleep 30 (not 5): a failed kill must TIME OUT loudly, never pass by
+    // the child exiting naturally inside the test budget.
+    const proc = serverSpawn("sh", ["-c", "sleep 30"], {
       stdio: ["ignore", "pipe", "pipe"],
       signal: controller.signal,
-    });
-    const closed = new Promise<number | null>((resolve) => {
-      proc.on("close", resolve);
     });
     proc.on("error", () => {
       /* AbortError is expected; the assertion is that the child dies. */
     });
+    // Abort only after the process really exists — aborting mid-spawn raced
+    // on CI Linux, where the kill landed before the pid did and the exit
+    // event never fired inside the budget. `exit`, not `close`: close also
+    // waits for stdio to drain through any grandchildren holding the pipes.
+    await new Promise<void>((resolve) => proc.once("spawn", resolve));
+    const exited = new Promise<{ code: number | null; signal: string | null }>(
+      (resolve) => {
+        proc.once("exit", (code, signal) => resolve({ code, signal }));
+      },
+    );
     controller.abort();
-    const code = await closed;
+    const { code, signal } = await exited;
+    // A signal kill reports (null, SIGTERM); either way it must not be a
+    // clean exit 0.
+    expect(signal ?? "no-signal").toMatch(/^SIG/);
     expect(code).not.toBe(0);
   });
 });

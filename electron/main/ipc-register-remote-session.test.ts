@@ -385,17 +385,34 @@ describe("unreachable-session guards and recovery", () => {
 });
 
 describe("setup-script shipping at session start", () => {
-  it("ships the script before the swap, with the connection's identity", async () => {
-    const routerKindAtShip: string[] = [];
+  it("ships the script before any channel can spawn a daemon", async () => {
+    // Order is the property under test: the daemon sources setup.sh exactly
+    // once, at startup — so the ship must precede the first channel open
+    // (which runs `attach --create`), not merely the router swap. A version
+    // that shipped between handle.start() and swap() passed a swap-only
+    // assertion while the daemon had already been created scriptless.
+    const order: string[] = [];
     const ship = vi.fn(
       async (_opts: { host: string; sessionId: string; setupScriptDir: string }) => {
-        routerKindAtShip.push(router.kind);
+        order.push("ship");
         return { ok: true as const, shipped: true };
       },
     );
     register({
       setupScriptDir: path.join(workDir, "remote-setup"),
       shipScript: ship as unknown as Parameters<typeof registerRemoteIpcHandlers>[0]["shipScript"],
+      openChannel: (() => {
+        order.push("channel-open");
+        const socket = net.connect(paths.sockPath);
+        socket.on("error", () => undefined);
+        sockets.push(socket);
+        return {
+          readable: socket,
+          writable: socket,
+          child: undefined as never,
+          dispose: () => socket.destroy(),
+        };
+      }) as unknown as Parameters<typeof registerRemoteIpcHandlers>[0]["openChannel"],
     });
 
     const result = (await invokeIpc(IPC.remote.startSession)) as { ok: boolean };
@@ -406,9 +423,8 @@ describe("setup-script shipping at session start", () => {
       sessionId: SESSION,
       setupScriptDir: path.join(workDir, "remote-setup"),
     });
-    // Shipped BEFORE the daemon attach/swap: a script arriving after
-    // --create would silently not apply until the next session.
-    expect(routerKindAtShip).toEqual(["local"]);
+    expect(order[0]).toBe("ship");
+    expect(order).toContain("channel-open");
     expect(router.kind).toBe("remote");
   });
 

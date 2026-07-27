@@ -122,6 +122,44 @@ describe("shipSetupScript", () => {
     expect(fs.existsSync(path.join(remoteDir, "setup.sh"))).toBe(false);
   });
 
+  itUnix("normalizes CRLF line endings before shipping", async () => {
+    // A `\r` that ships embeds itself in every exported value and breaks
+    // `module load python\r` invisibly — the capture discards the output
+    // where the error would have shown.
+    const scriptDir = makeTempDir();
+    const fakeHome = makeTempDir();
+    fs.writeFileSync(
+      path.join(scriptDir, "feyn.sh"),
+      "module load python\r\nexport A=b\r\n",
+    );
+    const exec = vi.fn(async (_control, command: string) => {
+      const run = spawnSync("/bin/sh", ["-c", command], {
+        env: { ...process.env, HOME: fakeHome },
+        encoding: "utf8",
+      });
+      expect(run.status).toBe(0);
+      return okResult;
+    });
+    await shipSetupScript({
+      control: CONTROL,
+      host: "feyn",
+      sessionId: "pdv-matt",
+      setupScriptDir: scriptDir,
+      exec,
+    });
+    const landed = path.join(
+      fakeHome,
+      ".pdv-server",
+      "run",
+      "sessions",
+      "pdv-matt",
+      "setup.sh",
+    );
+    expect(await fs.promises.readFile(landed, "utf8")).toBe(
+      "module load python\nexport A=b\n",
+    );
+  });
+
   it("treats a whitespace-only master copy as unconfigured", async () => {
     const scriptDir = makeTempDir();
     fs.writeFileSync(path.join(scriptDir, "feyn.sh"), "  \n\t\n");

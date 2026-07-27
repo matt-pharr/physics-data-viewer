@@ -2296,16 +2296,23 @@ file (login shells *print*, and profile chatter interleaved with the capture
 that regex their output) and applied to the daemon's own `process.env`,
 which every spawn call site builds from. One login shell per daemon, not per
 spawn; `PDV_*` and `ELECTRON_RUN_AS_NODE` are protected from profile
-override; a failed capture degrades to the inherited environment. The
-optional setup script is per host: its master copy lives on the laptop
-(`<userData>/remote-setup/<host>.sh`, hand-editable offline) and
-`remote/setup-script.ts` ships it to `run/sessions/<id>/setup.sh` at
-`startSession`, *before* the daemon may be created, since it is sourced only
-during that startup capture — script edits apply from the next session
-start. A configured script that cannot be delivered fails the session start
-loudly; silently missing interpreters are the harder bug. When no script is
-configured the remote copy is removed, so deleting the local file
-un-configures the host. All server-side tool spawns are funnelled through
+override — that prefix is the daemon's reserved namespace, so a setup
+script's own exports must not use it. A failed capture degrades to the
+inherited environment, but never silently when a script was shipped: the
+capture reports *evidence* of sourcing (a sentinel exported by the capture
+shell, not a stat of the file), the verdict is recorded as
+`setupScriptApplied` in `session.json`, and a shipped-but-not-applied
+script logs loudly. The optional setup script is per host: its master copy
+lives on the laptop (`<userData>/remote-setup/<host>.sh`, hand-editable
+offline, CRLF normalized at ship time) and `remote/setup-script.ts` ships
+it at every `startSession`, before any path that could spawn a daemon,
+since it is sourced only during that startup capture — script edits apply
+from the next session start, and a daemon resurrected by the handle's
+internal reconnect loop sources the last-shipped copy. A configured script
+that cannot be delivered fails the session start loudly; silently missing
+interpreters are the harder bug. When no script is configured the remote
+copy is removed, so at each session start the host reflects the local
+master copy, present or absent. All server-side tool spawns are funnelled through
 one seam (`server/spawn.ts`, enforced by an import guard) — the future hook
 for Slurm-launched kernels, which is also why environment does not ride
 there as a wrapper.
