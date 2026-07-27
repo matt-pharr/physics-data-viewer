@@ -79,7 +79,16 @@ export const RemoteConnect: React.FC<RemoteConnectProps> = ({ onClose }) => {
       const result = await window.pdv.remote.startSession();
       // A failure here leaves the local session working and the connection
       // open, so the dialog stays put and says why rather than closing.
-      if (!result.ok) setSessionError(result.message ?? 'Could not start the session.');
+      if (!result.ok) {
+        setSessionError(result.message ?? 'Could not start the session.');
+        return;
+      }
+      // Success ends this dialog's job: clicking "Run session on <host>"
+      // IS the exit, and the welcome screen behind it (with its remote
+      // banner and Disconnect button) is the landing the user asked for —
+      // a manual Close in between was a pointless extra step. Reopening
+      // the dialog later still shows the running-session management state.
+      onClose();
     } catch (err) {
       setSessionError(err instanceof Error ? err.message : String(err));
     } finally {

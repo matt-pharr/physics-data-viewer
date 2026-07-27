@@ -123,10 +123,13 @@ test("connects to a host and moves the session onto it", async () => {
 
   await dialog.getByRole("button", { name: /Run session on/ }).click();
 
-  // The session is now served by a daemon reached over the (fake) channel.
-  await expect(dialog.getByText(/Your session is running on/)).toBeVisible({
-    timeout: 30_000,
-  });
+  // A successful start closes the dialog itself and lands on the welcome
+  // screen — the flow the feature was asked for. The flipped Disconnect
+  // button doubles as the "session is now remote" confirmation.
+  await expect(dialog).not.toBeVisible({ timeout: 30_000 });
+  await expect(
+    page.getByRole("button", { name: "Disconnect from ‘testhost’" }),
+  ).toBeVisible({ timeout: 30_000 });
   // And the status bar agrees — the renderer learned it from the session
   // state push rather than from the dialog that triggered it.
   await expect(page.locator(".status-bar")).toContainText(/testhost/i, {
@@ -158,13 +161,9 @@ test("connects to a host and moves the session onto it", async () => {
   // Finally, the part a user actually cares about: a kernel started in this
   // session sees the variable. This closes the gap none of the file/log
   // assertions can — that the captured environment was APPLIED to
-  // process.env and inherited by the kernel spawn.
-  await dialog.getByRole("button", { name: "Close" }).click();
-  // The welcome screen shows again after the swap, and its connect button
-  // has flipped to the disconnect affordance naming the session's host.
-  await expect(
-    page.getByRole("button", { name: "Disconnect from ‘testhost’" }),
-  ).toBeVisible();
+  // process.env and inherited by the kernel spawn. (The dialog already
+  // auto-closed on success; the welcome with the flipped button was
+  // asserted above.)
   await createNewPythonProject(page);
   // Remote path provisions a uv env before the kernel boots; generous but
   // bounded (uv download cache is shared across specs).
@@ -199,10 +198,7 @@ test("welcome Disconnect returns the window to a local session", async () => {
   await dialog.getByRole("button", { name: "Connect" }).click();
   await expect(dialog.getByText(/Connected to/)).toBeVisible({ timeout: 30_000 });
   await dialog.getByRole("button", { name: /Run session on/ }).click();
-  await expect(dialog.getByText(/Your session is running on/)).toBeVisible({
-    timeout: 30_000,
-  });
-  await dialog.getByRole("button", { name: "Close" }).click();
+  await expect(dialog).not.toBeVisible({ timeout: 30_000 });
 
   await page.getByRole("button", { name: "Disconnect from ‘testhost’" }).click();
 
@@ -272,10 +268,12 @@ test("surfaces a remote kernel-start failure instead of spinning", async () => {
   await dialog.getByRole("button", { name: "Connect" }).click();
   await expect(dialog.getByText(/Connected to/)).toBeVisible({ timeout: 30_000 });
   await dialog.getByRole("button", { name: /Run session on/ }).click();
-  await expect(dialog.getByText(/Your session is running on/)).toBeVisible({
-    timeout: 30_000,
-  });
-  await dialog.getByRole("button", { name: "Close" }).click();
+  // Success auto-closes the dialog; wait for the swap to be reflected on
+  // the welcome before driving the new-project flow against the host.
+  await expect(dialog).not.toBeVisible({ timeout: 30_000 });
+  await expect(
+    page.getByRole("button", { name: "Disconnect from ‘testhost’" }),
+  ).toBeVisible({ timeout: 30_000 });
 
   // The default new-project path (uv mode) against the poisoned config.
   await sendMenuAction(app, { action: "project:new" });

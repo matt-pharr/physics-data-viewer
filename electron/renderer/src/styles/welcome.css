@@ -76,6 +76,15 @@
   text-overflow: ellipsis;
 }
 
+/* When the full-width remote button is present, "Open Project…" would sit
+   alone beside an empty cell SANDWICHED between two full rows — which
+   reads as a layout bug rather than a grid remainder. Span it too, so the
+   stack reads: two primaries / Open Project / Disconnect. The plain 2×2
+   (with the half-width "Connect to Host…") is unaffected. */
+.welcome-action-btn:nth-child(odd):has(+ .welcome-remote-btn) {
+  grid-column: 1 / -1;
+}
+
 /* Recent projects */
 .welcome-recent {
   width: 100%;

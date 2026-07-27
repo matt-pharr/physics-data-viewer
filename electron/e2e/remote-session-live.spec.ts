@@ -64,20 +64,17 @@ test.describe(() => {
 
     await dialog.getByRole("button", { name: /Run session on/ }).click();
 
-    await expect(dialog.getByText(/Your session is running on/)).toBeVisible({
-      timeout: 60_000,
-    });
+    // A successful start closes the dialog itself; the welcome's flipped
+    // Disconnect button is the confirmation the session moved.
+    await expect(dialog).not.toBeVisible({ timeout: 60_000 });
     // The status bar is driven by the session-state push, not by the dialog
     // that triggered it, so agreeing here means the swap really happened.
     await expect(page.locator(".status-bar")).toContainText(HOST as string, {
       timeout: 15_000,
     });
-    // And no error crept in behind the success text.
-    await expect(dialog.locator(".remote-error")).toHaveCount(0);
 
     // Exactly one reconnect marker for one connect. Two would claim two
     // separate intervals of lost output.
-    await dialog.getByRole("button", { name: "Close" }).click();
     const markers = page.getByText(/output produced while disconnected/);
     expect(await markers.count()).toBeLessThanOrEqual(1);
   });
@@ -103,10 +100,8 @@ test.describe(() => {
       timeout: CONNECT_TIMEOUT_MS,
     });
     await dialog.getByRole("button", { name: /Run session on/ }).click();
-    await expect(dialog.getByText(/Your session is running on/)).toBeVisible({
-      timeout: 60_000,
-    });
-    await dialog.getByRole("button", { name: "Close" }).click();
+    // Success auto-closes the dialog and lands on the welcome screen.
+    await expect(dialog).not.toBeVisible({ timeout: 60_000 });
 
     // The default new-project path: uv mode, using the bundle's own uv and
     // pdv-python wheel on the host. Cold-cache uv downloads a CPython and
