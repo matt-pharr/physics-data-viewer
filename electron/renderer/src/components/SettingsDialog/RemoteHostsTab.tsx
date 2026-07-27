@@ -503,13 +503,16 @@ export const RemoteHostsTab: React.FC = () => {
                 id="sr-save-loc"
                 type="text"
                 value={draft.settings.defaultSaveLocation ?? ''}
-                placeholder="e.g. /p/myproject/<user>"
+                placeholder="e.g. /p/myproject/<user>/pdv-projects"
                 spellCheck={false}
                 onChange={(e) => editSettings({ defaultSaveLocation: e.target.value })}
               />
               <div className="settings-general-desc">
-                Pre-filled location when saving projects on this host. Saved
-                projects should NOT live in purged scratch space.
+                Pre-filled location when saving projects on this host — each
+                project becomes its own folder under it, so a dedicated
+                directory (e.g. <code>…/pdv-projects</code>) keeps them
+                grouped. Saved projects should NOT live in purged scratch
+                space.
               </div>
             </div>
 
