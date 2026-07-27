@@ -192,11 +192,18 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
         </div>
 
         {remoteHost && (
-          <div className="welcome-remote-banner">
+          <div
+            className={
+              remoteReachable !== false
+                ? "welcome-remote-banner"
+                : "welcome-remote-banner welcome-remote-banner-warning"
+            }
+          >
             {remoteReachable !== false ? (
               <>
                 Connected to <strong>{remoteHost}</strong> — new and opened
-                projects will run there.
+                projects will run there. Disconnecting keeps the session
+                running for later.
               </>
             ) : (
               <>
@@ -241,18 +248,18 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
             ) : remoteReachable !== false ? (
               <button
                 className="btn btn-secondary welcome-action-btn welcome-remote-btn"
-                title={`Disconnect from '${remoteHost}' — the session keeps running there`}
+                title={`Disconnect from ‘${remoteHost}’ — the session keeps running there`}
                 onClick={onDisconnectHost}
               >
-                Disconnect from '{remoteHost}'
+                Disconnect from ‘{remoteHost}’
               </button>
             ) : (
               <button
                 className="btn btn-secondary welcome-action-btn welcome-remote-btn"
-                title={`Reconnect to '${remoteHost}'`}
+                title={`Reconnect to ‘${remoteHost}’`}
                 onClick={onConnectHost}
               >
-                Reconnect to '{remoteHost}'…
+                Reconnect to ‘{remoteHost}’…
               </button>
             ))}
         </div>

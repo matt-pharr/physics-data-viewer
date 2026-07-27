@@ -66,9 +66,12 @@
   min-width: 0;
 }
 
-/* The disconnect/reconnect variants embed a hostname of arbitrary length;
-   ellipsize instead of blowing the grid column (full text in `title`). */
+/* The disconnect/reconnect variants embed a hostname of arbitrary length —
+   a half-width grid cell gives the label ~140px, which truncates every
+   realistic hostname ("Disconnect from 'tes…"). Span the full card width
+   instead; the ellipsis stays as a last resort for pathological names. */
 .welcome-remote-btn {
+  grid-column: 1 / -1;
   overflow: hidden;
   text-overflow: ellipsis;
 }
@@ -215,4 +218,11 @@
   border: 1px solid var(--accent);
   border-radius: 4px;
   text-align: center;
+}
+
+/* An unreachable session must not wear the same info-blue as a healthy
+   one — a degraded state should read as degraded at a glance. */
+.welcome-remote-banner-warning {
+  background: color-mix(in srgb, var(--warning) 14%, transparent);
+  border-color: var(--warning);
 }

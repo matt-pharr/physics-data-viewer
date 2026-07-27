@@ -163,7 +163,7 @@ test("connects to a host and moves the session onto it", async () => {
   // The welcome screen shows again after the swap, and its connect button
   // has flipped to the disconnect affordance naming the session's host.
   await expect(
-    page.getByRole("button", { name: "Disconnect from 'testhost'" }),
+    page.getByRole("button", { name: "Disconnect from ‘testhost’" }),
   ).toBeVisible();
   await createNewPythonProject(page);
   // Remote path provisions a uv env before the kernel boots; generous but
@@ -204,7 +204,7 @@ test("welcome Disconnect returns the window to a local session", async () => {
   });
   await dialog.getByRole("button", { name: "Close" }).click();
 
-  await page.getByRole("button", { name: "Disconnect from 'testhost'" }).click();
+  await page.getByRole("button", { name: "Disconnect from ‘testhost’" }).click();
 
   // Back on a local session: the button flips back and the status bar no
   // longer names the host.

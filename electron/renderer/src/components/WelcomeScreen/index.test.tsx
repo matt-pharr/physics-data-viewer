@@ -111,7 +111,7 @@ describe('WelcomeScreen — remote connect/disconnect button', () => {
     expect(screen.queryByRole('button', { name: 'Connect to Host…' })).toBeNull();
     await userEvent
       .setup()
-      .click(screen.getByRole('button', { name: "Disconnect from 'feyn'" }));
+      .click(screen.getByRole('button', { name: "Disconnect from ‘feyn’" }));
     expect(onDisconnectHost).toHaveBeenCalledTimes(1);
     expect(onConnectHost).not.toHaveBeenCalled();
   });
@@ -125,7 +125,7 @@ describe('WelcomeScreen — remote connect/disconnect button', () => {
     expect(screen.queryByRole('button', { name: /Disconnect/ })).toBeNull();
     await userEvent
       .setup()
-      .click(screen.getByRole('button', { name: "Reconnect to 'feyn'…" }));
+      .click(screen.getByRole('button', { name: "Reconnect to ‘feyn’…" }));
     expect(onConnectHost).toHaveBeenCalledTimes(1);
     expect(onDisconnectHost).not.toHaveBeenCalled();
   });

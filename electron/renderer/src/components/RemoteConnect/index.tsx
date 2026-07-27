@@ -300,7 +300,13 @@ export const RemoteConnect: React.FC<RemoteConnectProps> = ({ onClose }) => {
               Disconnect
             </button>
           )}
-          <button className="btn btn-secondary" onClick={onClose}>
+          {/* With the session running this dialog's job is done and Close
+              is the expected next step — primary, so it is not visually
+              identical to the destructive Shut Down beside it. */}
+          <button
+            className={sessionRunning ? "btn btn-primary" : "btn btn-secondary"}
+            onClick={onClose}
+          >
             Close
           </button>
           {connected && !sessionRunning && (
