@@ -2236,13 +2236,24 @@ clusters and AF_UNIX there is unreliable, so the socket resolves node-local
 root), rejecting any candidate that would blow the ~104-byte `sun_path`
 budget. `session.json` records the **concrete hostname**: `flux.pppl.gov`
 round-robins and the socket is node-local, so a reattach that follows the
-alias can land on a different login node. **Known limitation:** today
-nothing shell-side *reads* that hostname — a reconnect that lands on
-login2 finds no socket, judges the (NFS-shared) lock stale because the
-bootId belongs to another machine, and spawns a second daemon while the
-first strands its kernel on login1. Single-node hosts are unaffected; on
-round-robin aliases, pin a concrete `Host` entry until the reattach path
-learns to target the recorded node (tracked follow-up).
+alias can land on a different login node. Two complementary mechanisms make
+the recorded hostname effective. *Proactively*, the shell records the node a
+session starts on (per host, in `<userData>/remote-hosts.json`; cleared on
+shutdown) and pins the next PDV-created master there with `-o HostName=` —
+a command-line `-o` outranks the alias's config while its `ProxyCommand`,
+agent and user settings still apply; a pinned attempt that fails falls back
+to the bare alias with a visible explanation, so a drained node cannot
+brick the host. *As backstop*, `attach` refuses to create a daemon when
+`session.json` names a different machine and the recorded daemon's
+**heartbeat** is fresh (a beacon file in the NFS-shared session dir,
+touched every minute by the daemon — the one liveness signal another login
+node can read, since pids and sockets are node-local). The refusal carries
+a parseable `PDV_WRONG_NODE node=<hostname>` marker that the shell turns
+into an actionable message *and* a recorded pin for the next connect. A
+stale or absent beacon downgrades the refusal to a logged takeover, so a
+dead daemon never holds its session hostage. A master the user runs
+themselves is never re-pointed (PDV does not own it); the attach guard
+covers that case.
 
 **Detachment** (`server/daemonize.ts`) is `detached: true` (setsid),
 `unref()` plus the launcher exiting (orphaning), and
@@ -2303,19 +2314,46 @@ capture reports *evidence* of sourcing (a sentinel exported by the capture
 shell, not a stat of the file), the verdict is recorded as
 `setupScriptApplied` in `session.json`, and a shipped-but-not-applied
 script logs loudly. The optional setup script is per host: its master copy
-lives on the laptop (`<userData>/remote-setup/<host>.sh`, hand-editable
-offline, CRLF normalized at ship time) and `remote/setup-script.ts` ships
-it at every `startSession`, before any path that could spawn a daemon,
-since it is sourced only during that startup capture — script edits apply
-from the next session start, and a daemon resurrected by the handle's
-internal reconnect loop sources the last-shipped copy. A configured script
-that cannot be delivered fails the session start loudly; silently missing
-interpreters are the harder bug. When no script is configured the remote
-copy is removed, so at each session start the host reflects the local
-master copy, present or absent. All server-side tool spawns are funnelled through
-one seam (`server/spawn.ts`, enforced by an import guard) — the future hook
-for Slurm-launched kernels, which is also why environment does not ride
-there as a wrapper.
+lives on the laptop (`<userData>/remote-setup/<host>.sh`, edited in
+Settings → Remote Hosts, CRLF normalized at ship time) and
+`remote/setup-script.ts` ships it at every `startSession`, before any path
+that could spawn a daemon, since it is sourced only during that startup
+capture — script edits apply from the next session start, and a daemon
+resurrected by the handle's internal reconnect loop sources the
+last-shipped copy. A configured script that cannot be delivered fails the
+session start loudly; silently missing interpreters are the harder bug.
+When no script is configured the remote copy is removed, so at each
+session start the host reflects the local master copy, present or absent.
+The `setupScriptApplied` verdict does not stop at `session.json`: the
+attach result reports it (optional field; old daemons stay silent), and
+when a script was shipped but is not in effect — the capture failed, or
+the daemon booted before the script existed — the shell composes a warning
+that rides every session-state push for that handle and renders in the
+welcome banner and the connect dialog. The Remote Hosts tab's **Test
+button** (`remote.testSetupScript` → `remote/setup-script-test.ts`) is the
+debugging surface the capture deliberately is not: it sources the
+*editor's current text* in a real `bash -l` on the connected host,
+captures the script's own output verbatim (marker-framed, so login-shell
+chatter cannot corrupt it), and reports a before/after interpreter probe
+diff. All server-side tool spawns are funnelled through one seam
+(`server/spawn.ts`, enforced by an import guard) — the future hook for
+Slurm-launched kernels, which is also why environment does not ride there
+as a wrapper.
+
+**Per-host settings** (`remote/host-config.ts`, Settings → Remote Hosts)
+live on the laptop in `<userData>/remote-hosts.json`, keyed by host alias:
+directory settings (`workingDirBase`, `defaultSaveLocation`), the kernel
+launch configuration the Slurm work will consume (mode, account,
+partition, allocation command — stored now, honestly labeled until the
+launch path exists), and the PDV-recorded session node used by the
+reconnect pinning above. User-edited settings and recorded state are kept
+on separate write paths so a tab save cannot clobber the pin and vice
+versa. The directory settings are master copies of *server-side* config
+keys: at `startSession` the configured values are pushed into the host's
+`~/.PDV/preferences.json` over the freshly started handle, before the
+swap — a failure declines the move loudly and leaves the window on its
+working local session, because a kernel quietly writing to the NFS home
+the user pointed at scratch is the harder bug to notice.
 
 `shell/remote-server.ts` is the remote `ServerHandle`. The transport is
 unchanged — an ssh channel is a stream pair and `RpcClient` already takes one
@@ -2986,7 +3024,7 @@ PDV does not ship a static API reference, which would drift. Instead:
 The following features are acknowledged as future work and must not influence the current architecture in ways that complicate the above design:
 
 - **Modules ecosystem hardening** — core module lifecycle is implemented (install from disk/GitHub, import, uninstall, update, bundled examples, project-local storage); deeper registry/trust features are deferred
-- **Remote session completeness** — remote sessions work end to end (§11.7 area above: connect, bootstrap, session daemon, environment provisioning via the bundled uv, path picking); still deferred are Slurm-aware kernel launch (interactive analysis on a login node is the sanctioned beta scope; the per-host setup script and login-environment capture have landed), remote Julia sessions (need juliaup on the host), remote→local file export, remote launchers, and the VS Code-style command palette that will replace the placeholder path picker
+- **Remote session completeness** — remote sessions work end to end (§11.7 area above: connect, bootstrap, session daemon, environment provisioning via the bundled uv, path picking); still deferred are Slurm-aware kernel launch (interactive analysis on a login node is the sanctioned beta scope; the per-host setup script, login-environment capture, Remote Hosts settings tab and per-host launch-config schema have landed), remote Julia sessions (need juliaup on the host), remote→local file export, remote launchers, and the VS Code-style command palette that will replace the placeholder path picker
 - **Local→remote upload import and remote MCP** — explicitly excluded from remote v1
 - **Multiple simultaneous kernels** — architecture supports it (kernels have IDs) but UI exposes only one at a time
 - **R kernel support** — deferred; would follow the `pdv-julia` pattern (a kernel-side package implementing the language-agnostic protocol of §3)
