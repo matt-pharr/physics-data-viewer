@@ -143,6 +143,8 @@ export class RemoteServerHandle implements ServerHandle {
   private lastSeq = -1;
   private sessionEpoch: string | null = null;
   private state: RemoteSessionState = "disconnected";
+  /** From the latest attach result; null before any attach or from old daemons. */
+  private scriptApplied: boolean | null = null;
   private stopped = false;
   private reconnecting = false;
   /** True while this handle is closing its own client (not a real loss). */
@@ -165,6 +167,18 @@ export class RemoteServerHandle implements ServerHandle {
    */
   get connectionState(): RemoteSessionState {
     return this.state;
+  }
+
+  /**
+   * Whether the daemon's startup capture sourced a setup script, from the
+   * latest attach result.
+   *
+   * @returns True/false as the daemon reported it; null before any attach
+   *   or when the daemon predates the field. The caller decides whether
+   *   `false` matters — only a host with a script configured should warn.
+   */
+  get setupScriptApplied(): boolean | null {
+    return this.scriptApplied;
   }
 
   /**
@@ -388,6 +402,7 @@ export class RemoteServerHandle implements ServerHandle {
     ])) as RpcAttachResult;
 
     this.sessionEpoch = result.sessionEpoch;
+    this.scriptApplied = result.setupScriptApplied ?? null;
     if (result.status === "stale") {
       // A stale attach means the old cursor is meaningless — usually a NEW
       // epoch whose seq restarts near zero. `Math.max` here kept the old

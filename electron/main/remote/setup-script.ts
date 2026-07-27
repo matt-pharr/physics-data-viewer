@@ -28,6 +28,7 @@
 import * as fs from "fs";
 import * as path from "path";
 
+import { atomicWriteFileSync } from "../atomic-write";
 import { posixShellQuote } from "../editor-spawn";
 import { execViaSsh, type SshControl } from "./ssh-mux";
 
@@ -74,6 +75,73 @@ export function localSetupScriptPath(setupScriptDir: string, host: string): stri
 }
 
 /**
+ * Read a host's local master copy.
+ *
+ * @param setupScriptDir - Directory of master copies.
+ * @param host - Host alias.
+ * @returns Script content with CRLF normalized, or the empty string when
+ *   none is configured — the same "unconfigured" convention shipping uses.
+ */
+export function readLocalSetupScript(setupScriptDir: string, host: string): string {
+  try {
+    return fs
+      .readFileSync(localSetupScriptPath(setupScriptDir, host), "utf8")
+      .replace(/\r\n?/g, "\n");
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Write (or remove) a host's local master copy.
+ *
+ * Blank content removes the file — deleting the script is how a host is
+ * un-configured, and an empty file lying around would make every session
+ * start ship and source nothing while reporting a script "configured".
+ *
+ * @param setupScriptDir - Directory of master copies.
+ * @param host - Host alias.
+ * @param content - New script content; blank removes.
+ * @returns Nothing.
+ * @throws {Error} When the file cannot be written.
+ */
+export function writeLocalSetupScript(
+  setupScriptDir: string,
+  host: string,
+  content: string,
+): void {
+  const filePath = localSetupScriptPath(setupScriptDir, host);
+  if (content.trim().length === 0) {
+    fs.rmSync(filePath, { force: true });
+    return;
+  }
+  fs.mkdirSync(setupScriptDir, { recursive: true });
+  atomicWriteFileSync(filePath, content.replace(/\r\n?/g, "\n"));
+}
+
+/**
+ * Hosts that have a setup script configured.
+ *
+ * Filenames are the *sanitized* aliases, so a host whose alias contains
+ * characters outside `[A-Za-z0-9._-]` lists under its sanitized name. Real
+ * ssh aliases are overwhelmingly plain hostnames, for which the two are
+ * identical.
+ *
+ * @param setupScriptDir - Directory of master copies.
+ * @returns Aliases (sanitized form), or empty when the directory is absent.
+ */
+export function listSetupScriptHosts(setupScriptDir: string): string[] {
+  try {
+    return fs
+      .readdirSync(setupScriptDir)
+      .filter((name) => name.endsWith(".sh"))
+      .map((name) => name.slice(0, -3));
+  } catch {
+    return [];
+  }
+}
+
+/**
  * Write (or remove) the session's setup script on the connected host.
  *
  * The write is atomic on the remote side (`.tmp` then `mv`) so a daemon
@@ -102,7 +170,7 @@ export async function shipSetupScript(
     // embeds itself in every exported value (`FOO=bar\r`) or breaks
     // `module load python\r` invisibly — the capture discards the output
     // where the error would have shown.
-    const raw = fs.readFileSync(localPath, "utf8").replace(/\r\n/g, "\n");
+    const raw = fs.readFileSync(localPath, "utf8").replace(/\r\n?/g, "\n");
     content = raw.trim().length > 0 ? raw : null;
   } catch {
     content = null; // No master copy: treat as unconfigured.

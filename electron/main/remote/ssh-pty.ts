@@ -154,6 +154,14 @@ export interface EstablishMasterOptions {
   connectTimeoutSeconds?: number;
   /** Milliseconds for the whole attempt, including human response time. */
   overallTimeoutMs?: number;
+  /**
+   * Concrete node to connect to, overriding whatever `HostName` the alias
+   * resolves to. This is how a reconnect reaches the login node a session
+   * daemon actually lives on when the alias round-robins across several —
+   * a command-line `-o` outranks the config, while every OTHER option of
+   * the alias (ProxyCommand, IdentityAgent, User) still applies.
+   */
+  hostNameOverride?: string;
   /** Called with each chunk of ssh output, for live display. */
   onOutput?: (chunk: string) => void;
   /** Injected `node-pty` replacement. Tests pass a fake; production omits it. */
@@ -276,6 +284,10 @@ function buildMasterArgs(options: EstablishMasterOptions): string[] {
     controlPathOption(options.controlPath),
     "-o",
     "ControlPersist=no",
+    // The node pin, when the caller has one (see hostNameOverride's JSDoc).
+    ...(options.hostNameOverride
+      ? ["-o", `HostName=${options.hostNameOverride}`]
+      : []),
     "-o",
     `ConnectTimeout=${options.connectTimeoutSeconds ?? DEFAULT_CONNECT_TIMEOUT_SECONDS}`,
     // A host whose config sets RemoteCommand would otherwise conflict with

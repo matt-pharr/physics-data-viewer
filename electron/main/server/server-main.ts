@@ -63,7 +63,7 @@ import { applyLoginEnv, captureLoginEnv } from "./login-env";
 import { attachToSession, proxyStdio } from "./attach-cli";
 import { SessionHost } from "./session-host";
 import { resolveSessionPaths } from "./session-paths";
-import { writeSessionMeta } from "./session-meta";
+import { touchHeartbeat, writeSessionMeta } from "./session-meta";
 import { readBootId } from "./session-lock";
 import { SessionIdlePolicy } from "./session-idle";
 import { RPC_PROTOCOL_VERSION } from "../transport/protocol";
@@ -407,6 +407,10 @@ async function runSessionHost(args: string[]): Promise<void> {
     paths,
     sessionId,
     version,
+    // Reported to every attaching client, so the shell can warn when a
+    // configured setup script is not in effect (capture failed, or the
+    // script arrived after this daemon booted).
+    setupScriptApplied,
     onNoClients: () => idle.onClientsGone(),
     onClientAttached: () => idle.onClientAttached(),
     onSessionReset: () => wire.sessionReset(),
@@ -490,6 +494,16 @@ async function runSessionHost(args: string[]): Promise<void> {
     `[session-host] session ${sessionId} listening on ${paths.sockPath} ` +
       `(host ${paths.hostname}, runtime ${paths.runtimeSource})`
   );
+
+  // Liveness beacon for cross-node attaches: the session dir is on a shared
+  // home, but this daemon's socket (and pid) are only meaningful on THIS
+  // node, so a beacon file is the one liveness signal another login node
+  // can read. Touched every minute; the wrong-node guard in `attach-cli.ts`
+  // treats a beacon older than five minutes as a dead daemon. `unref` so a
+  // shutdown never waits on it, and a failed touch is swallowed inside —
+  // the beacon is advisory and must never take the session down.
+  touchHeartbeat(paths.heartbeatPath);
+  setInterval(() => touchHeartbeat(paths.heartbeatPath), 60_000).unref();
 
   const stop = (signal: string): void => {
     console.log(`[session-host] ${signal}; shutting down`);

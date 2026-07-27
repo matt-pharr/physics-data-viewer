@@ -46,6 +46,7 @@ async function invokeIpc(channel: string, ...args: unknown[]): Promise<unknown> 
 }
 import { SessionHost } from "./server/session-host";
 import { resolveSessionPaths, type SessionPaths } from "./server/session-paths";
+import { RemoteHostStore } from "./remote/host-config";
 import type { RemoteConnectionManager } from "./remote/remote-connection";
 import { SessionRouter } from "./shell/session-router";
 import type { ServerHandle } from "./shell/server-supervisor";
@@ -479,5 +480,305 @@ describe("setup-script shipping at session start", () => {
     const result = (await invokeIpc(IPC.remote.startSession)) as { ok: boolean };
     expect(result.ok).toBe(true);
     expect(ship).not.toHaveBeenCalled();
+  });
+});
+
+describe("setup-script warning", () => {
+  /** Rebuild the live host as a daemon that did (not) source a script. */
+  async function rebuildHostWithScriptState(applied: boolean): Promise<void> {
+    await host.close();
+    host = new SessionHost({
+      paths,
+      sessionId: SESSION,
+      version: "9.9.9-test",
+      setupScriptApplied: applied,
+    });
+    await host.listen();
+  }
+
+  /** The remote session-state pushes the renderer received. */
+  function remotePushes(): Array<Record<string, unknown>> {
+    return sendSpy.mock.calls
+      .filter(([channel]) => channel === IPC.push.sessionState)
+      .map(([, payload]) => payload as Record<string, unknown>)
+      .filter((p) => p.kind === "remote");
+  }
+
+  function shipReporting(shipped: boolean) {
+    return (async () => ({ ok: true as const, shipped })) as unknown as Parameters<
+      typeof registerRemoteIpcHandlers
+    >[0]["shipScript"];
+  }
+
+  it("warns when a shipped script is not active in the session", async () => {
+    // The daemon booted without the script (it arrived after boot, or the
+    // capture failed) — exactly the state that otherwise surfaces later as
+    // mysteriously missing modules.
+    await rebuildHostWithScriptState(false);
+    register({ setupScriptDir: workDir, shipScript: shipReporting(true) });
+
+    const result = (await invokeIpc(IPC.remote.startSession)) as { ok: boolean };
+    expect(result.ok).toBe(true);
+    const moved = remotePushes().find((p) => p.cause === "moved");
+    expect(moved?.setupScriptWarning).toMatch(/setup script/);
+    expect(moved?.setupScriptWarning).toMatch(/testhost/);
+  });
+
+  it("stays silent when the daemon really sourced the script", async () => {
+    await rebuildHostWithScriptState(true);
+    register({ setupScriptDir: workDir, shipScript: shipReporting(true) });
+
+    await invokeIpc(IPC.remote.startSession);
+    // Only THIS start's pushes: a previous test's handle can emit late
+    // state pushes while its dead channel winds down, and those carry that
+    // test's warning.
+    const moved = remotePushes().filter((p) => p.cause === "moved");
+    expect(moved.length).toBeGreaterThan(0);
+    for (const push of moved) {
+      expect(push.setupScriptWarning).toBeUndefined();
+    }
+  });
+
+  it("stays silent when the daemon predates the applied field", async () => {
+    // The beforeEach host sets no `setupScriptApplied` at all — the shape
+    // of a pre-B3 daemon. Shipped + no evidence must stay silent; only an
+    // explicit `false` is an accusation.
+    register({ setupScriptDir: workDir, shipScript: shipReporting(true) });
+    await invokeIpc(IPC.remote.startSession);
+    const moved = remotePushes().filter((p) => p.cause === "moved");
+    expect(moved.length).toBeGreaterThan(0);
+    for (const push of moved) {
+      expect(push.setupScriptWarning).toBeUndefined();
+    }
+  });
+
+  it("stays silent when no script is configured — no evidence, no accusation", async () => {
+    // `setupScriptApplied: false` from the daemon is expected when the host
+    // has no script; warning here would nag every scriptless session.
+    await rebuildHostWithScriptState(false);
+    register({ setupScriptDir: workDir, shipScript: shipReporting(false) });
+
+    await invokeIpc(IPC.remote.startSession);
+    const moved = remotePushes().filter((p) => p.cause === "moved");
+    expect(moved.length).toBeGreaterThan(0);
+    for (const push of moved) {
+      expect(push.setupScriptWarning).toBeUndefined();
+    }
+  });
+});
+
+describe("session-node pin", () => {
+  /** The manager on a connection whose `hostname` answered `node-a`. */
+  function managerOnNodeA(): RemoteConnectionManager {
+    return connectedManager({
+      getStatus: () => ({
+        phase: "connected",
+        host: "testhost",
+        attemptId: null,
+        node: "node-a.cluster",
+      }),
+    } as Partial<RemoteConnectionManager>);
+  }
+
+  it("records the reached node when the session starts", async () => {
+    const hostStore = new RemoteHostStore(workDir);
+    register({ manager: managerOnNodeA(), hostStore });
+
+    const result = (await invokeIpc(IPC.remote.startSession)) as { ok: boolean };
+    expect(result.ok).toBe(true);
+    // The daemon can only have been reached on the node this connection
+    // landed on, so this is the node the NEXT connect must aim for.
+    expect(hostStore.get("testhost").sessionNode).toBe("node-a.cluster");
+  });
+
+  it("turns a wrong-node refusal into an actionable message and teaches the pin", async () => {
+    const hostStore = new RemoteHostStore(workDir);
+    register({
+      manager: managerOnNodeA(),
+      hostStore,
+      openChannel: ((opts: { onStderr?: (chunk: string) => void }) => {
+        // What the attach CLI prints before dying when the session daemon
+        // lives on a different login node (attach-cli.ts).
+        opts.onStderr?.(
+          "[attach] PDV_WRONG_NODE node=node-b.cluster — session s is " +
+            "running on node-b.cluster, but this connection landed on " +
+            "node-a.cluster. Reconnect to node-b.cluster.\n",
+        );
+        throw new Error("ssh channel closed");
+      }) as unknown as Parameters<typeof registerRemoteIpcHandlers>[0]["openChannel"],
+    });
+
+    const result = (await invokeIpc(IPC.remote.startSession)) as {
+      ok: boolean;
+      message: string;
+    };
+    expect(result.ok).toBe(false);
+    // The message names both nodes and says what to do next...
+    expect(result.message).toContain("node-b.cluster");
+    expect(result.message).toMatch(/reconnect/i);
+    // ...and the local session is untouched.
+    expect(router.kind).toBe("local");
+    // The pin is taught NOW, so the very next connect aims correctly.
+    expect(hostStore.get("testhost").sessionNode).toBe("node-b.cluster");
+  });
+
+  it("clears the pin when the session is shut down", async () => {
+    const hostStore = new RemoteHostStore(workDir);
+    hostStore.setSessionNode("testhost", "node-a.cluster");
+    register({
+      manager: managerOnNodeA(),
+      hostStore,
+      createLocalServer: async () => makeLocalHandle(),
+    });
+    await invokeIpc(IPC.remote.startSession);
+
+    const result = (await invokeIpc(IPC.remote.endSession)) as { ok: boolean };
+    expect(result.ok).toBe(true);
+    expect(hostStore.get("testhost").sessionNode).toBeUndefined();
+  });
+
+  it("pushes this host's directory settings into the session's config before the swap", async () => {
+    await host.close();
+    const dispatched: Array<{ channel: string; args: unknown[] }> = [];
+    host = new SessionHost({
+      paths,
+      sessionId: SESSION,
+      version: "9.9.9-test",
+      dispatch: async (channel, _ctx, args) => {
+        dispatched.push({ channel, args });
+        return {};
+      },
+    });
+    await host.listen();
+
+    const hostStore = new RemoteHostStore(workDir);
+    hostStore.setSettings("testhost", {
+      workingDirBase: "/scratch/local/m",
+      defaultSaveLocation: "/p/proj/m",
+      launch: { mode: "slurm" },
+    });
+    register({ manager: managerOnNodeA(), hostStore });
+
+    const result = (await invokeIpc(IPC.remote.startSession)) as { ok: boolean };
+    expect(result.ok).toBe(true);
+    const configSets = dispatched.filter(
+      (d) => d.channel === "pdv.internal.serverConfigSet",
+    );
+    // Only the directory keys travel — the launch config is consumed by the
+    // shell's kernel-launch path, not by the server's config.
+    expect(configSets).toEqual([
+      {
+        channel: "pdv.internal.serverConfigSet",
+        args: [{ workingDirBase: "/scratch/local/m", defaultSaveLocation: "/p/proj/m" }],
+      },
+    ]);
+  });
+
+  it("does not touch the session's config when no directories are set", async () => {
+    await host.close();
+    const dispatched: string[] = [];
+    host = new SessionHost({
+      paths,
+      sessionId: SESSION,
+      version: "9.9.9-test",
+      dispatch: async (channel) => {
+        dispatched.push(channel);
+        return {};
+      },
+    });
+    await host.listen();
+
+    const hostStore = new RemoteHostStore(workDir);
+    hostStore.setSettings("testhost", { launch: { mode: "slurm" } });
+    register({ manager: managerOnNodeA(), hostStore });
+
+    const result = (await invokeIpc(IPC.remote.startSession)) as { ok: boolean };
+    expect(result.ok).toBe(true);
+    expect(dispatched).not.toContain("pdv.internal.serverConfigSet");
+  });
+
+  it("clears a directory it once pushed, and never touches keys it never did", async () => {
+    await host.close();
+    const dispatched: Array<{ channel: string; args: unknown[] }> = [];
+    host = new SessionHost({
+      paths,
+      sessionId: SESSION,
+      version: "9.9.9-test",
+      dispatch: async (channel, _ctx, args) => {
+        dispatched.push({ channel, args });
+        return {};
+      },
+    });
+    await host.listen();
+
+    const hostStore = new RemoteHostStore(workDir);
+    hostStore.setSettings("testhost", { workingDirBase: "/scratch/local/m" });
+    register({ manager: managerOnNodeA(), hostStore });
+    await invokeIpc(IPC.remote.startSession);
+    expect(hostStore.get("testhost").pushedDirKeys).toEqual(["workingDirBase"]);
+
+    // The user blanks the field. The next session start must CLEAR the key
+    // on the host — a stale scratch path lingering in the host's config IS
+    // the silent-data-placement bug. defaultSaveLocation was never pushed,
+    // so it must never be touched (the user may manage it on the host).
+    hostStore.setSettings("testhost", {});
+    removeAllIpcHandlers();
+    router = new SessionRouter(makeLocalHandle());
+    register({ manager: managerOnNodeA(), hostStore });
+    await invokeIpc(IPC.remote.startSession);
+
+    const sets = dispatched
+      .filter((d) => d.channel === "pdv.internal.serverConfigSet")
+      .map((d) => d.args);
+    expect(sets).toEqual([
+      [{ workingDirBase: "/scratch/local/m" }],
+      [{ workingDirBase: "" }],
+    ]);
+    expect(hostStore.get("testhost").pushedDirKeys).toBeUndefined();
+  });
+
+  it("fails the start loudly when the directory settings cannot be applied", async () => {
+    await host.close();
+    host = new SessionHost({
+      paths,
+      sessionId: SESSION,
+      version: "9.9.9-test",
+      dispatch: async (channel) => {
+        if (channel === "pdv.internal.serverConfigSet") {
+          throw new Error("preferences.json is not writable");
+        }
+        return {};
+      },
+    });
+    await host.listen();
+
+    const hostStore = new RemoteHostStore(workDir);
+    hostStore.setSettings("testhost", { workingDirBase: "/scratch" });
+    register({ manager: managerOnNodeA(), hostStore });
+
+    const result = (await invokeIpc(IPC.remote.startSession)) as {
+      ok: boolean;
+      message: string;
+    };
+    // A kernel quietly writing to the NFS home the user pointed at scratch
+    // is the harder bug to notice — decline instead, leaving the window on
+    // its working local session.
+    expect(result.ok).toBe(false);
+    expect(result.message).toContain("preferences.json is not writable");
+    expect(router.kind).toBe("local");
+  });
+
+  it("keeps the pin on a plain disconnect — the session is still there", async () => {
+    const hostStore = new RemoteHostStore(workDir);
+    register({
+      manager: managerOnNodeA(),
+      hostStore,
+      createLocalServer: async () => makeLocalHandle(),
+    });
+    await invokeIpc(IPC.remote.startSession);
+    expect(hostStore.get("testhost").sessionNode).toBe("node-a.cluster");
+
+    await invokeIpc(IPC.remote.disconnect);
+    expect(hostStore.get("testhost").sessionNode).toBe("node-a.cluster");
   });
 });

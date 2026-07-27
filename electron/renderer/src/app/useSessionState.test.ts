@@ -73,6 +73,23 @@ describe('useSessionState', () => {
     expect(useStore.getState().remoteHost).toBeNull();
   });
 
+  it('shows the setup-script warning while pushed, clears it when a push stops carrying it', () => {
+    renderHook(() => useSessionState('k1'));
+    emit({
+      kind: 'remote',
+      host: 'flux',
+      state: 'connected',
+      setupScriptWarning: 'Your setup script for flux is not active in this session.',
+    } as Parameters<typeof emit>[0]);
+    expect(useStore.getState().remoteSetupWarning).toContain('setup script');
+
+    // A later push without the field — the session moved, or a restarted
+    // daemon really sourced the script — must clear the warning without a
+    // dedicated clear path.
+    emit({ kind: 'local', host: null, state: 'connected' });
+    expect(useStore.getState().remoteSetupWarning).toBeNull();
+  });
+
   describe('resync', () => {
     it('rebuilds query-backed state', () => {
       renderHook(() => useSessionState('k1'));

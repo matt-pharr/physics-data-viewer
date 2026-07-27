@@ -95,17 +95,27 @@ test("connects to a host and moves the session onto it", async () => {
   launched = await launchPDV({ env: remoteEnv() });
   const { app, window: page, homeDir } = launched;
 
-  // A per-host setup script configured before connecting. The assertions at
-  // the bottom prove the whole chain: master copy → shipped to the session
-  // dir on the "host" → sourced by the daemon's login-env capture → applied
-  // to a kernel a user's code can see. Deliberately NOT a PDV_-prefixed
-  // name: that prefix is the daemon's reserved namespace and applyLoginEnv
-  // discards it (the first version of this spec fell into exactly that
-  // trap, asserting a marker that could never have been applied).
+  // A per-host setup script configured before connecting — THROUGH THE UI,
+  // Settings → Remote Hosts, the same path a user takes. The assertions at
+  // the bottom prove the whole chain: editor → saved master copy → shipped
+  // to the session dir on the "host" → sourced by the daemon's login-env
+  // capture → applied to a kernel a user's code can see. Deliberately NOT a
+  // PDV_-prefixed name: that prefix is the daemon's reserved namespace and
+  // applyLoginEnv discards it (the first version of this spec fell into
+  // exactly that trap, asserting a marker that could never have been
+  // applied).
   const setupContent = "export E2E_SETUP_MARKER='shipped and sourced'\n";
-  const userData = await app.evaluate(({ app: a }) => a.getPath("userData"));
-  await fs.mkdir(path.join(userData, "remote-setup"), { recursive: true });
-  await fs.writeFile(path.join(userData, "remote-setup", "testhost.sh"), setupContent, "utf8");
+  await sendMenuAction(app, { action: "settings:open" });
+  await page.getByRole("button", { name: "Remote", exact: true }).click();
+  // The temp HOME has no ssh config, so the host list starts empty and the
+  // free-typed destination path is what gets exercised.
+  const addHost = page.getByPlaceholder("user@host");
+  await addHost.fill("testhost");
+  await addHost.press("Enter");
+  await page.locator(".settings-remote-script").fill(setupContent);
+  await page.getByRole("button", { name: "Save testhost" }).click();
+  await expect(page.getByText(/^Saved\./)).toBeVisible({ timeout: 10_000 });
+  await page.getByRole("button", { name: "Close settings" }).click();
 
   // Enter through the welcome screen's own button — the primary user path
   // since the four-button welcome landed (the File menu remains an
@@ -305,4 +315,8 @@ test("does not offer remote mode unless it is enabled", async () => {
   // The welcome screen's Connect to Host button honors the same gate.
   await expect(page.locator(".welcome-overlay")).toBeVisible();
   await expect(page.getByRole("button", { name: /Connect to Host/ })).toHaveCount(0);
+  // And so does the Settings → Remote Hosts tab.
+  await sendMenuAction(app, { action: "settings:open" });
+  await expect(page.getByRole("button", { name: "Close settings" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Remote", exact: true })).toHaveCount(0);
 });

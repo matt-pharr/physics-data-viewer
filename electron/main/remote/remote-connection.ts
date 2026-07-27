@@ -54,9 +54,44 @@ import {
   establishMasterInteractive,
   isSecretPrompt,
   looksLikePrompt,
+  type PtyAuthResult,
   type PtyMasterSession,
   type PtyModule,
 } from "./ssh-pty";
+
+/**
+ * ssh's connection-level complaints — the node itself is unreachable, as
+ * opposed to reachable-but-refusing-credentials.
+ *
+ * Matched against the pty transcript to decide whether a failed PINNED
+ * attempt is worth retrying against the bare alias. This is stderr pattern
+ * matching, normally forbidden here ("the -O check ladder gets it right") —
+ * but no exit-code signal distinguishes a drained node from a mistyped
+ * password (both end in a nonzero ssh exit), and the stakes are asymmetric:
+ * a missed match means no retry (the user reconnects by hand), while
+ * matching a credential failure would fire a surprise second password/Duo
+ * prompt. So the match gates only the retry, and not matching is the safe
+ * default. `timeout` never falls back either — it means a prompt sat
+ * unanswered for the full budget, and a retry would silently double it.
+ */
+const CONNECTION_LEVEL_FAILURE = new RegExp(
+  [
+    "Could not resolve hostname",
+    "Connection refused",
+    "Connection timed out",
+    "No route to host",
+    "Network is unreachable",
+    "Connection closed by remote host",
+  ].join("|"),
+  "i",
+);
+
+/** Whether a failed pinned attempt should be retried against the alias. */
+function pinFallbackWorthwhile(result: PtyAuthResult): boolean {
+  if (result.failure === "cancelled" || result.failure === "pty-unavailable") return false;
+  if (result.failure === "timeout") return false;
+  return CONNECTION_LEVEL_FAILURE.test(result.transcript);
+}
 
 /** Options for {@link RemoteConnectionManager}. */
 export interface RemoteConnectionOptions {
@@ -87,6 +122,16 @@ export interface RemoteConnectionOptions {
    * honest behaviour when no bundle has been built.
    */
   bundleDir?: string;
+  /**
+   * The concrete login node a host's session daemon was last seen on, or
+   * null when none is recorded. When set, a master PDV creates for that
+   * host is pinned there with `-o HostName=` — a load-balanced alias
+   * round-robins while the session socket is node-local, so an unpinned
+   * reconnect can land beside a session it cannot reach. A master the user
+   * already runs is never re-pointed (PDV does not own it); the attach
+   * guard on the host is the backstop for that case.
+   */
+  sessionNodeFor?: (host: string) => string | null;
 }
 
 /**
@@ -349,11 +394,59 @@ export class RemoteConnectionManager {
     control: SshControl,
   ): Promise<RemoteConnectResult> {
     const controlPath = control.controlPath ?? controlPathFor(host, this.options.controlDir);
-    let seen = "";
 
+    // Aim at the recorded session node when there is one (see the option's
+    // JSDoc). The pin is best-effort: a node that stopped answering must
+    // not brick the alias, so a pinned attempt that failed AT THE
+    // CONNECTION LEVEL falls back to the alias below — where the
+    // wrong-node attach guard keeps a live session from being forked, and
+    // a dead one is simply recreated wherever the alias lands.
+    const pin = this.options.sessionNodeFor?.(host) ?? null;
+    let result = await this.runAuthAttempt(host, attemptId, controlPath, pin);
+    if (!result.ok && pin && pinFallbackWorthwhile(result)) {
+      this.emit({
+        phase: "connecting",
+        host,
+        attemptId,
+        output: `\r\nCould not reach ${pin} (where your session was running); trying ${host} directly…\r\n`,
+        message: `Connecting to ${host}…`,
+      });
+      result = await this.runAuthAttempt(host, attemptId, controlPath, null);
+    }
+
+    if (!result.ok) {
+      return this.fail(host, attemptId, result.failure ?? "unknown", result.message);
+    }
+    this.activeControl = { host, controlPath };
+    this.master = result.session;
+    const node = await this.resolveNode(this.activeControl);
+    const problem = await this.prepareHost(host, attemptId, this.activeControl);
+    if (problem) return this.fail(host, attemptId, "bootstrap", problem);
+    this.emit({ phase: "connected", host, attemptId, node, message: result.message });
+    return { ok: true, failure: null, message: result.message };
+  }
+
+  /**
+   * One interactive establishment attempt, optionally pinned to a node.
+   *
+   * @param host - ssh destination.
+   * @param attemptId - Identifier for this attempt.
+   * @param controlPath - Control socket the new master must listen on.
+   * @param pin - Concrete node to pass as `-o HostName=`, or null.
+   * @returns The pty outcome plus the live session (already closed when the
+   *   attempt failed, so callers only manage the successful one).
+   */
+  private async runAuthAttempt(
+    host: string,
+    attemptId: string,
+    controlPath: string,
+    pin: string | null,
+  ): Promise<PtyAuthResult & { session: PtyMasterSession }> {
+    let seen = "";
     const session = establishMasterInteractive({
       host,
       controlPath,
+      hostNameOverride: pin ?? undefined,
       sshPath: this.options.sshPath,
       ptyModule: this.options.ptyModule,
       overallTimeoutMs: this.options.overallTimeoutMs,
@@ -372,21 +465,10 @@ export class RemoteConnectionManager {
       },
     });
     this.attempt = session;
-
     const result = await session.result;
     this.attempt = null;
-
-    if (!result.ok) {
-      session.close();
-      return this.fail(host, attemptId, result.failure ?? "unknown", result.message);
-    }
-    this.activeControl = { host, controlPath };
-    this.master = session;
-    const node = await this.resolveNode(this.activeControl);
-    const problem = await this.prepareHost(host, attemptId, this.activeControl);
-    if (problem) return this.fail(host, attemptId, "bootstrap", problem);
-    this.emit({ phase: "connected", host, attemptId, node, message: result.message });
-    return { ok: true, failure: null, message: result.message };
+    if (!result.ok) session.close();
+    return { ...result, session };
   }
 
   /**
@@ -404,7 +486,12 @@ export class RemoteConnectionManager {
    * @returns The remote hostname, or null when it cannot be determined.
    */
   private async resolveNode(control: SshControl): Promise<string | null> {
-    const result = await execViaSsh(control, "hostname", {
+    // `-f` first: the recorded node becomes an `-o HostName=` target on the
+    // NEXT connect, and a short name (`flux-login1`) that only resolves
+    // inside the cluster makes every pinned attempt DNS-fail from the
+    // laptop. Clusters whose `hostname` has no `-f` fall back to the short
+    // form — the pin ladder tolerates it, just less efficiently.
+    const result = await execViaSsh(control, "hostname -f 2>/dev/null || hostname", {
       ...this.muxOptions(),
       timeoutMs: 15_000,
     });

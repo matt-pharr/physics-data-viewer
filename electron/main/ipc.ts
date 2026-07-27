@@ -459,6 +459,25 @@ export const IPC = {
     startSession: "remote:startSession",
     /** Leave the remote session running and return to a local session. */
     endSession: "remote:endSession",
+    /** Per-host settings + setup script, for the Remote Hosts settings tab. */
+    getHostConfig: "remote:getHostConfig",
+    /** Persist per-host settings + setup script. */
+    setHostConfig: "remote:setHostConfig",
+    /** Hosts with anything configured, to seed the tab's host list. */
+    listConfiguredHosts: "remote:listConfiguredHosts",
+    /**
+     * Delete a host's settings, setup script and recorded state on this
+     * machine. Nothing on the host itself is touched.
+     */
+    forgetHost: "remote:forgetHost",
+    /**
+     * Source a candidate setup script in a real login shell on the
+     * connected host and report what it did. The daemon's own capture
+     * discards the script's output on purpose (`server/login-env.ts`), so
+     * this channel is the one place a broken `module load` line is ever
+     * seen by the user.
+     */
+    testSetupScript: "remote:testSetupScript",
   },
   /** Native file/directory picker channels. */
   files: {
@@ -774,6 +793,15 @@ export interface SessionStatePayload {
    * after an intentional move read as data loss.
    */
   cause?: "moved" | "recovered";
+  /**
+   * Set when a setup script is configured for the host but the session's
+   * daemon started without sourcing it (its capture failed, or the daemon
+   * predates the script) — the session is running without the user's
+   * environment and they must be told, since the failure otherwise
+   * surfaces as mysteriously missing modules. Absent means no warning:
+   * the renderer clears any displayed warning on a push without one.
+   */
+  setupScriptWarning?: string;
 }
 
 /** Result of {@link PDVApi.remote.startSession} / `endSession`. */
@@ -792,6 +820,97 @@ export interface RemoteConnectResult {
   /** Set when `ok` is false; one of the failure kinds from the ssh layer. */
   failure: string | null;
   message: string;
+}
+
+/**
+ * How a kernel should be started on a host.
+ *
+ * Stored per host by the shell (`main/remote/host-config.ts`) and edited in
+ * the Remote Hosts settings tab. `slurm` mode is stored ahead of the launch
+ * path that will consume it, so cluster settings entered now survive until
+ * Slurm-allocated kernels ship.
+ */
+export interface RemoteHostLaunchConfig {
+  /** Where the kernel runs: on the login node, or inside a Slurm allocation. */
+  mode: "login-node" | "slurm";
+  /**
+   * Full allocation command override. When set it wins over the
+   * account/partition convenience fields.
+   */
+  allocationCommand?: string;
+  /** Slurm account (`-A`). */
+  account?: string;
+  /** Slurm partition (`-p`). */
+  partition?: string;
+}
+
+/** User-editable per-host settings (the Remote Hosts tab's fields). */
+export interface RemoteHostSettings {
+  /**
+   * Where per-project working directories go on this host — pushed into the
+   * host's server config at session start. Clusters usually want scratch
+   * here, not an NFS home.
+   */
+  workingDirBase?: string;
+  /** Default save location on this host; pushed like `workingDirBase`. */
+  defaultSaveLocation?: string;
+  /** Kernel launch configuration. */
+  launch?: RemoteHostLaunchConfig;
+}
+
+/** Result of {@link PDVApi.remote.getHostConfig}: everything about one host. */
+export interface RemoteHostConfigPayload {
+  /** The stored settings; empty object when nothing is configured. */
+  settings: RemoteHostSettings;
+  /** Setup-script content, or the empty string when none is configured. */
+  setupScript: string;
+  /**
+   * Concrete login node the session daemon was last started on, or null.
+   * Display-only in the tab; reconnects aim at it automatically.
+   */
+  sessionNode: string | null;
+}
+
+/** Payload of {@link PDVApi.remote.setHostConfig}: a full replace of both. */
+export interface RemoteHostConfigUpdate {
+  /** The complete new settings; omitted fields are cleared. */
+  settings: RemoteHostSettings;
+  /** New setup-script content; blank removes the script. */
+  setupScript: string;
+}
+
+/** One interpreter probe from {@link PDVApi.remote.testSetupScript}. */
+export interface RemoteSetupTestInterpreter {
+  /** Command probed (`python3`, `julia`). */
+  name: string;
+  /** Resolved path on the host, or null when not on PATH. */
+  path: string | null;
+  /** `--version` output, or null when unavailable. */
+  version: string | null;
+}
+
+/**
+ * Result of {@link PDVApi.remote.testSetupScript}.
+ *
+ * `before`/`after` are probed in the same login shell without and with the
+ * script sourced, so their diff is exactly what the script changed.
+ */
+export interface RemoteSetupTestResult {
+  /** True when the script was delivered and sourced without error. */
+  ok: boolean;
+  /** The sourcing shell's exit status, or null when it never ran. */
+  exitCode: number | null;
+  /**
+   * Everything the script printed while being sourced — the output the
+   * daemon's capture deliberately discards, shown here for debugging.
+   */
+  output: string;
+  /** Interpreters visible to a plain login shell. */
+  before: RemoteSetupTestInterpreter[];
+  /** Interpreters visible after the script was sourced. */
+  after: RemoteSetupTestInterpreter[];
+  /** Transport-level failure text, when the test could not run at all. */
+  message?: string;
 }
 
 /** One entry in a {@link ListDirResult}. */
@@ -3197,6 +3316,20 @@ export interface PDVApi {
     getStatus(): Promise<RemoteStatus>;
     /** Subscribe to connection state and streamed ssh output. */
     onStatus(callback: (status: RemoteStatus) => void): () => void;
+    /** Everything configured for one host, for the Remote Hosts tab. */
+    getHostConfig(host: string): Promise<RemoteHostConfigPayload>;
+    /** Persist a host's settings and setup script (a full replace). */
+    setHostConfig(host: string, update: RemoteHostConfigUpdate): Promise<void>;
+    /** Hosts with anything configured, to seed the tab's host list. */
+    listConfiguredHosts(): Promise<string[]>;
+    /** Forget a host: delete its settings, script and recorded state here. */
+    forgetHost(host: string): Promise<void>;
+    /**
+     * Source a candidate script in a login shell on the connected host and
+     * report its output and the interpreters it made visible. Requires a
+     * live connection to that host.
+     */
+    testSetupScript(host: string, script: string): Promise<RemoteSetupTestResult>;
   };
 
   /** App auto-update operations. */

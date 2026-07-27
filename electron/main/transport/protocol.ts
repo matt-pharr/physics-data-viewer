@@ -264,6 +264,14 @@ export type RpcAttachResult =
       pending: Record<string, RpcPendingVerdict>;
       /** Highest seq the session has assigned. */
       lastSeq: number;
+      /**
+       * Whether the daemon's startup login-environment capture really
+       * sourced a setup script (see `SessionMeta.setupScriptApplied`).
+       * Absent on daemons predating the field. The shell compares this
+       * against what it just shipped: a configured script and `false` here
+       * means the session is running without the user's environment.
+       */
+      setupScriptApplied?: boolean;
     }
   | {
       /**
@@ -280,6 +288,8 @@ export type RpcAttachResult =
       pending: Record<string, RpcPendingVerdict>;
       /** Highest seq the session has assigned. */
       lastSeq: number;
+      /** As on the `ok` variant — a stale attach still reports it. */
+      setupScriptApplied?: boolean;
     };
 
 /**

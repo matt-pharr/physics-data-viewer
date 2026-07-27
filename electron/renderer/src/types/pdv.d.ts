@@ -32,7 +32,13 @@ export type { ScriptParameter } from '../../../main/ipc';
 export type {
   RemoteConnectResult,
   RemoteHostAlias,
+  RemoteHostConfigPayload,
+  RemoteHostConfigUpdate,
+  RemoteHostLaunchConfig,
+  RemoteHostSettings,
   RemotePhase,
+  RemoteSetupTestInterpreter,
+  RemoteSetupTestResult,
   RemoteStatus,
 } from '../../../main/ipc';
 
@@ -1338,6 +1344,24 @@ export interface PDVApi {
     onStatus(
       callback: (status: import('../../../main/ipc').RemoteStatus) => void,
     ): () => void;
+    /** Everything configured for one host, for the Remote Hosts tab. */
+    getHostConfig(
+      host: string,
+    ): Promise<import('../../../main/ipc').RemoteHostConfigPayload>;
+    /** Persist a host's settings and setup script (a full replace). */
+    setHostConfig(
+      host: string,
+      update: import('../../../main/ipc').RemoteHostConfigUpdate,
+    ): Promise<void>;
+    /** Hosts with anything configured, to seed the tab's host list. */
+    listConfiguredHosts(): Promise<string[]>;
+    /** Forget a host: delete its settings, script and recorded state here. */
+    forgetHost(host: string): Promise<void>;
+    /** Source a candidate script on the connected host and report on it. */
+    testSetupScript(
+      host: string,
+      script: string,
+    ): Promise<import('../../../main/ipc').RemoteSetupTestResult>;
   };
   updater: {
     checkForUpdates(): Promise<void>;

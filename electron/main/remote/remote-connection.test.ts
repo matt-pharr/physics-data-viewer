@@ -223,6 +223,96 @@ describe("connect", () => {
   }, 30_000);
 });
 
+describe("session-node pinning", () => {
+  /** The `-N -M` (master-establishing) invocations from the fixture's log. */
+  function masterInvocations(logPath: string): string[][] {
+    if (!fs.existsSync(logPath)) return [];
+    return fs
+      .readFileSync(logPath, "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as string[])
+      .filter((args) => args.includes("-N") && args.includes("-M"));
+  }
+
+  it("pins a PDV-created master to the recorded session node", async () => {
+    setEnv("FAKE_SSH_MASTER", "stateful");
+    setEnv("FAKE_SSH_AUTH", "hold");
+    const logPath = path.join(dir, "ssh-args.log");
+    setEnv("FAKE_SSH_LOG", logPath);
+    const manager = makeManager({
+      sessionNodeFor: (host: string) => (host === "flux" ? "flux-login1.pppl.gov" : null),
+    });
+
+    const result = await manager.connect("flux");
+    expect(result.ok).toBe(true);
+    const masters = masterInvocations(logPath);
+    expect(masters).toHaveLength(1);
+    expect(masters[0]).toContain("HostName=flux-login1.pppl.gov");
+    await manager.disconnect();
+  }, 30_000);
+
+  it("does not pin when nothing is recorded", async () => {
+    setEnv("FAKE_SSH_MASTER", "stateful");
+    setEnv("FAKE_SSH_AUTH", "hold");
+    const logPath = path.join(dir, "ssh-args.log");
+    setEnv("FAKE_SSH_LOG", logPath);
+    const manager = makeManager({ sessionNodeFor: () => null });
+
+    const result = await manager.connect("flux");
+    expect(result.ok).toBe(true);
+    const masters = masterInvocations(logPath);
+    expect(masters).toHaveLength(1);
+    expect(masters[0].join(" ")).not.toContain("HostName=");
+    await manager.disconnect();
+  }, 30_000);
+
+  it("falls back to the bare alias when the pinned node is unreachable", async () => {
+    // The pin must be best-effort: a login node that was rebooted or
+    // drained must not brick the whole alias. Both attempts fail here (the
+    // fixture cannot succeed selectively), which still proves the retry —
+    // one pinned master attempt, then one unpinned.
+    setEnv("FAKE_SSH_MASTER", "stateful");
+    setEnv("FAKE_SSH_AUTH", "unreachable");
+    const logPath = path.join(dir, "ssh-args.log");
+    setEnv("FAKE_SSH_LOG", logPath);
+    const manager = makeManager({
+      sessionNodeFor: () => "flux-login1.pppl.gov",
+    });
+
+    const result = await manager.connect("flux");
+    expect(result.ok).toBe(false);
+    const masters = masterInvocations(logPath);
+    expect(masters).toHaveLength(2);
+    expect(masters[0]).toContain("HostName=flux-login1.pppl.gov");
+    expect(masters[1].join(" ")).not.toContain("HostName=");
+    // The user is told why a second attempt is happening.
+    const narration = statuses.map((s) => s.output ?? "").join("");
+    expect(narration).toContain("flux-login1.pppl.gov");
+    expect(narration).toContain("trying flux directly");
+  }, 30_000);
+
+  it("does NOT fall back after a credential failure — no surprise second prompt", async () => {
+    // A mistyped password or a denied Duo push means the NODE was fine;
+    // retrying against the alias would fire a second interactive auth
+    // attempt (a second Duo push) the user never asked for, under a
+    // "could not reach the node" narration that would be false.
+    setEnv("FAKE_SSH_MASTER", "stateful");
+    setEnv("FAKE_SSH_AUTH", "fail");
+    const logPath = path.join(dir, "ssh-args.log");
+    setEnv("FAKE_SSH_LOG", logPath);
+    const manager = makeManager({
+      sessionNodeFor: () => "flux-login1.pppl.gov",
+    });
+
+    const result = await manager.connect("flux");
+    expect(result).toMatchObject({ ok: false, failure: "auth-failed" });
+    const masters = masterInvocations(logPath);
+    expect(masters).toHaveLength(1);
+    expect(masters[0]).toContain("HostName=flux-login1.pppl.gov");
+  }, 30_000);
+});
+
 describe("bootstrap", () => {
   it("refuses a host PDV cannot run on, before trying to install anything", async () => {
     setEnv("FAKE_SSH_MASTER", "alive");

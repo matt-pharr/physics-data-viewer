@@ -1503,6 +1503,7 @@ const App: React.FC = () => {
   // where the project lives.
   const connectionStateNow = useStore((s) => s.connectionState);
   const remoteHostNow = useStore((s) => s.remoteHost);
+  const remoteSetupWarningNow = useStore((s) => s.remoteSetupWarning);
   useEffect(() => {
     tryConsumePendingOpen();
   }, [connectionStateNow, remoteHostNow, tryConsumePendingOpen]);
@@ -2083,7 +2084,9 @@ const App: React.FC = () => {
          <SaveAsDialog
            defaultLocation={currentProjectDir
              ? currentProjectDir.replace(/\/[^/]+\/?$/, '')
-             : config?.defaultSaveLocation ?? null}
+             // `||`, not `??`: an empty string means "cleared" (the per-host
+             // push writes "" to un-set a key) and must fall through to null.
+             : config?.defaultSaveLocation || null}
            defaultName={currentProjectName ?? undefined}
            onSave={async (projectName, saveDir) => {
              closeDialog();
@@ -2098,6 +2101,8 @@ const App: React.FC = () => {
          activeLanguage={activeLanguage}
          environmentMode={environmentMode}
          kernelRunning={currentKernelId !== null && kernelStatus === 'ready'}
+         remoteEnabled={chromeInfo?.remoteEnabled ?? false}
+         remoteHost={connectionStateNow === 'local' ? null : remoteHostNow}
          config={config}
          shortcuts={shortcuts}
          onClose={() => setShowSettings(false)}
@@ -2139,6 +2144,7 @@ const App: React.FC = () => {
            recoverableSessions={recoverableSessions}
            remoteHost={connectionStateNow === 'local' ? null : remoteHostNow}
            remoteReachable={connectionStateNow === 'remote-connected'}
+           remoteSetupWarning={remoteSetupWarningNow}
            onNewProject={handleWelcomeNewProject}
            onOpenProject={handleOpenWithPicker}
            onOpenRecent={handleOpenRecent}

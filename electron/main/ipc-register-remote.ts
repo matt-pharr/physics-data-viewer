@@ -19,15 +19,27 @@ import { app, type BrowserWindow } from "electron";
 import * as os from "os";
 
 import {
+  INTERNAL_CHANNELS,
   IPC,
   type RemoteConnectResult,
   type RemoteHostAlias,
+  type RemoteHostConfigPayload,
+  type RemoteHostConfigUpdate,
   type RemoteSessionResult,
+  type RemoteSetupTestResult,
   type RemoteStatus,
   type SessionStatePayload,
 } from "./ipc";
+import type { PushedDirKey, RemoteHostStore } from "./remote/host-config";
+import { WRONG_NODE_MARKER } from "./server/attach-cli";
 import { openSessionChannel } from "./remote/remote-channel";
-import { shipSetupScript } from "./remote/setup-script";
+import {
+  listSetupScriptHosts,
+  readLocalSetupScript,
+  shipSetupScript,
+  writeLocalSetupScript,
+} from "./remote/setup-script";
+import { runSetupScriptTest } from "./remote/setup-script-test";
 import { RemoteServerHandle } from "./shell/remote-server";
 import type { ServerHandle } from "./shell/server-supervisor";
 import type { SessionRouter } from "./shell/session-router";
@@ -77,6 +89,14 @@ export interface RegisterRemoteIpcOptions {
   setupScriptDir?: string;
   /** Ships the setup script. Injected by tests. */
   shipScript?: typeof shipSetupScript;
+  /**
+   * Per-host settings store. Omitting it leaves the Remote Hosts channels
+   * answering with empty config and declining writes, which is what a build
+   * (or test) without host settings should do rather than failing.
+   */
+  hostStore?: RemoteHostStore;
+  /** Runs the setup-script dry run. Injected by tests. */
+  runScriptTest?: typeof runSetupScriptTest;
   /**
    * Starts a fresh local pdv-server. Ending a remote session (and
    * disconnecting while one runs) swaps the window back onto it; omitting
@@ -162,6 +182,10 @@ export function registerRemoteIpcHandlers(
       // bootstrap and probing a host that has no bundle would only fail.
       bundleDir: serverCommandOverride ? undefined : options.bundleDir,
       sshPath,
+      // Aim a PDV-created master at the login node the session daemon was
+      // last seen on (recorded below at session start). See the option's
+      // JSDoc for why a round-robin alias needs this.
+      sessionNodeFor: (host) => options.hostStore?.get(host).sessionNode ?? null,
     });
 
   handleIpc(IPC.remote.listHosts, async (): Promise<RemoteHostAlias[]> => manager.listHosts());
@@ -236,6 +260,105 @@ export function registerRemoteIpcHandlers(
 
   handleIpc(IPC.remote.getStatus, async (): Promise<RemoteStatus> => manager.getStatus());
 
+  handleIpc(
+    IPC.remote.getHostConfig,
+    async (_event, host: string): Promise<RemoteHostConfigPayload> => {
+      if (typeof host !== "string" || !host.trim()) {
+        return { settings: {}, setupScript: "", sessionNode: null };
+      }
+      const trimmed = host.trim();
+      const record = options.hostStore?.get(trimmed) ?? {};
+      // Recorded state stays out of the editable settings payload.
+      const { sessionNode, pushedDirKeys: _pushed, ...settings } = record;
+      return {
+        settings,
+        setupScript: options.setupScriptDir
+          ? readLocalSetupScript(options.setupScriptDir, trimmed)
+          : "",
+        sessionNode: sessionNode ?? null,
+      };
+    },
+  );
+
+  handleIpc(
+    IPC.remote.setHostConfig,
+    async (_event, host: string, update: RemoteHostConfigUpdate): Promise<void> => {
+      if (typeof host !== "string" || !host.trim()) {
+        throw new Error("No host was given.");
+      }
+      if (!update || typeof update !== "object") {
+        throw new Error("No settings were given.");
+      }
+      const trimmed = host.trim();
+      // The script is written first: it is the failure-prone half (a real
+      // file write), and settings recorded for a host whose script silently
+      // failed to save would claim more than was persisted.
+      if (options.setupScriptDir) {
+        writeLocalSetupScript(
+          options.setupScriptDir,
+          trimmed,
+          typeof update.setupScript === "string" ? update.setupScript : "",
+        );
+      }
+      options.hostStore?.setSettings(trimmed, update.settings ?? {});
+    },
+  );
+
+  handleIpc(IPC.remote.listConfiguredHosts, async (): Promise<string[]> => {
+    // Union of the two configuration surfaces: the settings store and the
+    // setup-script directory (a host configured by hand-writing a script —
+    // the only way before this tab existed — must still appear).
+    const configured = new Set<string>(options.hostStore?.listConfiguredHosts() ?? []);
+    if (options.setupScriptDir) {
+      for (const host of listSetupScriptHosts(options.setupScriptDir)) {
+        configured.add(host);
+      }
+    }
+    return [...configured].sort();
+  });
+
+  handleIpc(IPC.remote.forgetHost, async (_event, host: string): Promise<void> => {
+    if (typeof host !== "string" || !host.trim()) {
+      throw new Error("No host was given.");
+    }
+    const trimmed = host.trim();
+    options.hostStore?.forget(trimmed);
+    if (options.setupScriptDir) {
+      writeLocalSetupScript(options.setupScriptDir, trimmed, "");
+    }
+  });
+
+  handleIpc(
+    IPC.remote.testSetupScript,
+    async (_event, host: string, script: string): Promise<RemoteSetupTestResult> => {
+      const declined = (message: string): RemoteSetupTestResult => ({
+        ok: false,
+        exitCode: null,
+        output: "",
+        before: [],
+        after: [],
+        message,
+      });
+      if (typeof host !== "string" || !host.trim()) {
+        return declined("No host was given.");
+      }
+      const status = manager.getStatus();
+      const control = manager.control;
+      if (!control || status.host !== host.trim()) {
+        return declined(
+          `Connect to ${host.trim()} first — the test runs the script in a ` +
+            "real login shell on the host.",
+        );
+      }
+      const run = options.runScriptTest ?? runSetupScriptTest;
+      return run({
+        control,
+        content: typeof script === "string" ? script : "",
+        sshPath,
+      });
+    },
+  );
+
   handleIpc(IPC.remote.startSession, async (): Promise<RemoteSessionResult> => {
     const router = options.router;
     if (!router) {
@@ -252,6 +375,14 @@ export function registerRemoteIpcHandlers(
     const sessionId = options.sessionId ?? defaultSessionId();
     const host = manager.getStatus().host;
 
+    // Recorded on every successful start/reattach: the daemon lives on the
+    // node this connection reached (the session socket is node-local, so an
+    // attach can only ever succeed there). The pin steers the NEXT master.
+    const recordSessionNode = (): void => {
+      const node = manager.getStatus().node;
+      if (host && node) options.hostStore?.setSessionNode(host, node);
+    };
+
     // The setup script must be on the host BEFORE any path that can spawn a
     // daemon: it is sourced exactly once, during the daemon's startup
     // login-environment capture, so a script arriving after `--create`
@@ -264,6 +395,7 @@ export function registerRemoteIpcHandlers(
     // harder bug to diagnose. (The one unshipped path left is the handle's
     // internal reconnect loop; a daemon resurrected there sources the last
     // startSession's copy, which is also the newest one ever shipped.)
+    let shippedScript = false;
     if (options.setupScriptDir && host) {
       const ship = options.shipScript ?? shipSetupScript;
       const shipped = await ship({
@@ -276,6 +408,7 @@ export function registerRemoteIpcHandlers(
       if (!shipped.ok) {
         return { ok: false, message: shipped.message };
       }
+      shippedScript = shipped.shipped;
     }
 
     if (router.kind === "remote") {
@@ -287,6 +420,7 @@ export function registerRemoteIpcHandlers(
       if (current && current.connectionState !== "connected") {
         try {
           await current.retryNow();
+          recordSessionNode();
           return { ok: true, sessionId };
         } catch (err) {
           console.error("[remote] reattach via existing handle failed:", err);
@@ -301,6 +435,32 @@ export function registerRemoteIpcHandlers(
 
     const open = options.openChannel ?? openSessionChannel;
 
+    // Computed at PUSH time from the handle's LATEST attach result, not
+    // once at start: the handle's internal reconnect loop can resurrect the
+    // daemon (which sources the last-shipped script) or land on one whose
+    // capture failed, flipping the truth in either direction — a warning
+    // frozen at start would then lie until the next explicit startSession.
+    // A ref because the handle's callbacks are created before the handle
+    // variable exists.
+    const handleRef: { current: RemoteServerHandle | null } = { current: null };
+    const withWarning = (payload: SessionStatePayload): SessionStatePayload =>
+      shippedScript && handleRef.current?.setupScriptApplied === false
+        ? {
+            ...payload,
+            setupScriptWarning:
+              `Your setup script for ${host ?? "this host"} is not active ` +
+              "in this session — the session daemon started without it. " +
+              "Shut the remote session down and start it again to apply " +
+              "the script.",
+          }
+        : payload;
+
+    // Tail of the attach channel's stderr, kept for failure diagnosis: the
+    // wrong-node refusal arrives there as a `PDV_WRONG_NODE node=<host>`
+    // marker (attach-cli.ts), and turning it into an actionable message —
+    // and a recorded pin for the next connect — needs the bytes.
+    let attachStderrTail = "";
+
     const handle = new RemoteServerHandle({
       sessionId,
       openChannel: async ({ batchMode }) =>
@@ -311,6 +471,9 @@ export function registerRemoteIpcHandlers(
           create: true,
           sshPath,
           muxOptions: { batchMode },
+          onStderr: (chunk) => {
+            attachStderrTail = (attachStderrTail + chunk).slice(-4096);
+          },
         }),
       // Every callback is gated on this handle actually fronting the
       // window. Before the swap the local server still does; after a swap
@@ -321,7 +484,7 @@ export function registerRemoteIpcHandlers(
       onState: (state) => {
         if (state === "connecting") return; // Not yet a session state.
         if (router.active !== handle) return;
-        pushSessionState({ kind: "remote", host, state });
+        pushSessionState(withWarning({ kind: "remote", host, state }));
       },
       onStale: (reason) => {
         // A first attach is always stale ("no-cursor") — there is nothing to
@@ -331,37 +494,106 @@ export function registerRemoteIpcHandlers(
         if (reason === "no-cursor") return;
         if (router.active !== handle) return;
         console.error(`[remote] session resync required: ${reason}`);
-        pushSessionState({
-          kind: "remote",
-          host,
-          state: "connected",
-          resync: true,
-          cause: "recovered",
-        });
+        pushSessionState(
+          withWarning({
+            kind: "remote",
+            host,
+            state: "connected",
+            resync: true,
+            cause: "recovered",
+          }),
+        );
       },
       onReattached: () => {
         if (router.active !== handle) return;
-        pushSessionState({ kind: "remote", host, state: "connected" });
+        pushSessionState(withWarning({ kind: "remote", host, state: "connected" }));
       },
     });
 
+    handleRef.current = handle;
+
     try {
       await handle.start();
+      // The daemon can only have been reached on the node this connection
+      // landed on — record it NOW, before anything below can fail, so even
+      // a declined move teaches the next connect where the session lives.
+      recordSessionNode();
+
+      // Apply this host's directory settings to ITS server config before
+      // the window swaps onto it. `~/.PDV/preferences.json` on the host is
+      // what the server actually reads for working dirs and save locations,
+      // and the laptop-side per-host settings are its master copy — pushed
+      // here the same way the setup script is shipped. Before the swap so a
+      // failure is loud and leaves the local session untouched: a kernel
+      // quietly writing to an NFS home the user pointed at scratch is the
+      // harder bug to notice.
+      //
+      // Clearing propagates too: a key this code once pushed and the user
+      // has since blanked is pushed as "" (every consumer treats an empty
+      // string as unset), because the stale scratch path lingering in the
+      // host's config IS the silent-data-placement bug. A key never pushed
+      // is never touched — the user may have set it on the host themselves.
+      const hostRecord = host ? options.hostStore?.get(host) : undefined;
+      const dirOverrides: Record<string, string> = {};
+      const nowPushed: PushedDirKey[] = [];
+      for (const key of ["workingDirBase", "defaultSaveLocation"] as const) {
+        const value = hostRecord?.[key];
+        if (value) {
+          dirOverrides[key] = value;
+          nowPushed.push(key);
+        } else if (hostRecord?.pushedDirKeys?.includes(key)) {
+          dirOverrides[key] = "";
+        }
+      }
+      if (Object.keys(dirOverrides).length > 0) {
+        try {
+          await handle.invoke(INTERNAL_CHANNELS.serverConfigSet, [dirOverrides]);
+          if (host) options.hostStore?.setPushedDirKeys(host, nowPushed);
+        } catch (err) {
+          void handle.disconnect().catch(() => undefined);
+          return {
+            ok: false,
+            message:
+              `The directory settings for ${host ?? "this host"} could not ` +
+              `be applied: ${(err as Error).message}. The session was left ` +
+              "running there; fix the settings (or the host) and try again.",
+          };
+        }
+      }
     } catch (err) {
       // The local session is untouched: nothing was swapped, so a failed
       // start leaves the user working exactly as before rather than with
       // neither session.
+      const wrongNode = new RegExp(`${WRONG_NODE_MARKER} node=(\\S+)`).exec(
+        attachStderrTail,
+      );
+      if (wrongNode && host) {
+        // Teach the pin now, so the very next connect aims at the right
+        // node even though THIS one could not.
+        options.hostStore?.setSessionNode(host, wrongNode[1]);
+        const reached = manager.getStatus().node;
+        return {
+          ok: false,
+          message:
+            `Your session is running on ${wrongNode[1]}, but this ` +
+            `connection reached ${reached ?? "a different node"}. ` +
+            `Disconnect and reconnect — PDV will aim for ${wrongNode[1]} ` +
+            `automatically.`,
+        };
+      }
       return { ok: false, message: (err as Error).message };
     }
 
     const previous = router.swap(handle);
-    pushSessionState({
-      kind: "remote",
-      host,
-      state: "connected",
-      resync: true,
-      cause: "moved",
-    });
+    pushSessionState(
+      withWarning({
+        kind: "remote",
+        host,
+        state: "connected",
+        resync: true,
+        cause: "moved",
+      }),
+    );
     if (previous instanceof RemoteServerHandle) {
       // The fresh-handle recovery path replaced a dead remote handle. Only
       // close it locally — a shutdown here would be delivered by the NEW
@@ -416,6 +648,12 @@ export function registerRemoteIpcHandlers(
         console.error("[remote] remote session shutdown failed:", err);
       });
     }
+    // The pin dies with the session. Cleared optimistically — if the
+    // shutdown ack above is lost and the daemon survives, the next connect
+    // simply lands wherever the alias sends it and the attach guard
+    // re-teaches the pin with its wrong-node refusal.
+    const endedHost = manager.getStatus().host;
+    if (endedHost) options.hostStore?.setSessionNode(endedHost, null);
     return { ok: true };
   });
 
