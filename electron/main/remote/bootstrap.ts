@@ -402,6 +402,14 @@ export async function installBundle(
   // Unpack to staging, then rename into place: same parent directory, so the
   // move is rename(2) and a concurrent probe can never observe a partial
   // install. An existing target is replaced only once the new one is whole.
+  // Removing the REPLACED install is best-effort, never part of the
+  // install's success: on an NFS home, a still-running old daemon keeps
+  // its files open, so rm leaves .nfs* silly-rename ghosts and exits
+  // nonzero — which used to fail the whole chain AFTER the new install
+  // was already renamed into place ("Unpacking failed" on a successful
+  // install; seen live on feyn). The displaced dir gets a unique name so
+  // a ghost-laden leftover from an earlier attempt can never absorb the
+  // mv, and ghosts vanish on their own once the old daemon exits.
   const install = await execViaSsh(
     control,
     [
@@ -409,10 +417,10 @@ export async function installBundle(
       `mkdir -p "${staging}"`,
       `tar -xzf "${archive}" -C "${staging}"`,
       `rm -f "${archive}"`,
-      `rm -rf "${target}.old"`,
-      `if [ -d "${target}" ]; then mv "${target}" "${target}.old"; fi`,
+      `(rm -rf "${target}.old" "${target}".old.* 2>/dev/null || true)`,
+      `if [ -d "${target}" ]; then mv "${target}" "${target}.old.$$"; fi`,
       `mv "${staging}" "${target}"`,
-      `rm -rf "${target}.old"`,
+      `(rm -rf "${target}.old" "${target}".old.* 2>/dev/null || true)`,
     ].join(" && "),
     { ...options, timeoutMs: options.timeoutMs ?? 180_000 },
   );
