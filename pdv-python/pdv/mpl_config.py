@@ -13,10 +13,16 @@ kernel process. On a remote host the kernel daemon outlives the ssh channel
 that set its ``$DISPLAY``, so a stale-but-set display is the *common* case,
 not an edge case. Three layers of defense:
 
-1. **Display probe** (probe platforms only, i.e. not macOS/Windows):
-   ``$DISPLAY`` unset → inline immediately; set → a cheap socket probe of
-   the X endpoint (ssh forwards ``localhost:N`` as TCP port ``6000+N``).
-   Dead → inline.
+1. **Display probe + deferred enable on probe platforms** (i.e. not
+   macOS/Windows): ``$DISPLAY`` unset or dead (cheap socket probe; ssh
+   forwards ``localhost:N`` as TCP port ``6000+N``) → inline. Live display
+   with a Qt binding → plots default to native windows, but the event
+   loop is enabled one-shot just before the user's FIRST execution, never
+   mid-handshake — a GUI event loop started during bootstrap can starve
+   the session handshake even after a green pre-flight (observed:
+   ipykernel's ``loop_tk`` under Xvfb starving ``pdv.init``). Qt is the
+   only auto candidate (the one with field mileage); tk/gtk are opt-in
+   via the guarded ``%matplotlib``.
 2. **Subprocess pre-flight**: before enabling any GUI backend, a throwaway
    ``python -c`` child imports the toolkit and connects to the display.
    A SIGABRT lands in the child, not the kernel.
@@ -75,13 +81,6 @@ _PROBE_TIMEOUT = 0.5
 # — a short timeout would misclassify slow-but-fine as broken and silently
 # downgrade the backend.
 _PREFLIGHT_TIMEOUT = 10.0
-
-# Total pre-flight budget across all candidates (seconds). This is silent
-# bootstrap wall clock on the live-display path only (the inline and
-# no-display paths never spawn a subprocess), spent well inside the
-# kernel handshake's 60 s idle allowance — but it is still user-visible
-# startup lag, so it stays bounded.
-_PREFLIGHT_BUDGET = 12.0
 
 # Backends that mean "nothing deliberately configured" — the ambient
 # defaults ipykernel/PDV impose, as opposed to a user choice.
@@ -728,14 +727,16 @@ def check_gui_allowed(gui: Any) -> tuple[bool, str]:
     if state == "none":
         return (
             False,
-            "no DISPLAY is available — interactive plot windows need X "
-            "forwarding (reconnect with ssh -X)",
+            "this session has no display for native windows — X forwarding "
+            "is not active. To enable it, turn on ForwardX11 for this host "
+            "in your SSH config (with an X server such as XQuartz running "
+            "locally) and start a new session",
         )
     if state == "dead":
         return (
             False,
-            f"DISPLAY {display} is not reachable — reconnect with X "
-            "forwarding (ssh -X) and retry",
+            f"DISPLAY {display} is no longer reachable — its X forwarding "
+            "has gone away. Start a new session to re-establish it",
         )
     if family in ("qt", "qt5", "qt6"):
         _ensure_qt_api(family)
@@ -791,7 +792,10 @@ def _install_enable_matplotlib_guard(ip: Any) -> None:
     def _guarded_enable_matplotlib(gui: Any = None) -> tuple:
         ok, reason = check_gui_allowed(gui)
         if not ok:
-            print(f"PDV: refusing %matplotlib {gui}: {reason}. Plots stay inline.")
+            print(
+                f"PDV: refusing %matplotlib {gui}: {reason}. Plots stay "
+                "inline — they render in the PDV console."
+            )
             selected = getattr(ip, "pylab_gui_select", None) or "inline"
             return (selected, _current_backend_name() or "inline")
         # A sanctioned switch supersedes the inline state — the pending
@@ -878,11 +882,14 @@ def _fallback_inline(enable: Any, reason: str | None) -> None:
 def configure(ip: Any) -> None:
     """Choose and enable a matplotlib backend for this kernel.
 
-    Called once from :func:`pdv.bootstrap`. Interactive backends are
-    enabled when the display is live and the toolkit passes pre-flight;
-    otherwise the session starts inline. Always installs the
-    ``%matplotlib`` guard, even when honoring a user-configured backend.
-    Silently skips if matplotlib is not installed.
+    Called once from :func:`pdv.bootstrap`. macOS/Windows auto-enable a
+    native backend (ordinary catchable failures); probe platforms boot
+    the handshake on inline and, when a live display and a pre-flighted
+    Qt binding exist, switch to qt one-shot before the user's first
+    execution (see the module docstring for why the deferral). Always
+    installs the ``%matplotlib`` guard, even when honoring a
+    user-configured backend. Silently skips if matplotlib is not
+    installed.
 
     Parameters
     ----------
@@ -892,8 +899,6 @@ def configure(ip: Any) -> None:
         ``plt.show()`` shim — parity with historical plain-python behavior.
     """
     global decision, decision_reason  # noqa: PLW0603
-
-    import time  # noqa: PLC0415
 
     decision = None
     decision_reason = None
@@ -958,48 +963,108 @@ def configure(ip: Any) -> None:
     if state == "dead":
         _fallback_inline(
             enable,
-            f"DISPLAY {display} is not reachable (use %matplotlib qt after "
-            "fixing X forwarding to retry)",
+            f"DISPLAY {display} is no longer reachable (its X forwarding "
+            "has gone away)",
         )
         return
 
-    candidates = []
+    # Live display: plots default to native windows via qt — but the event
+    # loop is enabled DEFERRED, just before the user's first execution,
+    # never mid-handshake. Rationale, from CI: a GUI event loop started
+    # during bootstrap can starve the session handshake even when the
+    # toolkit pre-flighted green (ipykernel's loop_tk under Xvfb starved
+    # pdv.init until the session timed out). Qt's loop is the one with
+    # field mileage (live feyn validation), so qt is the only AUTO
+    # candidate; tk/gtk stay opt-in through the guarded %matplotlib.
     if _choose_qt_binding("qt") is not None:
-        candidates.append("qt")
-    if _module_available("tkinter"):
-        candidates.append("tk")
-    if _module_available("gi"):
-        candidates.extend(["gtk4", "gtk3"])
-    if not candidates:
-        _fallback_inline(enable, None)
-        return
-
-    deadline = time.monotonic() + _PREFLIGHT_BUDGET
-    failures: list[str] = []
-    for gui in candidates:
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            failures.append("pre-flight budget exhausted")
-            break
-        if gui == "qt":
-            _ensure_qt_api("qt")
-        ok, why = preflight_gui(gui, timeout=min(_PREFLIGHT_TIMEOUT, remaining))
-        if not ok:
-            failures.append(why)
-            continue
-        try:
-            enable(gui)
-            _clear_gui_select(ip)
-            decision = gui
+        _ensure_qt_api("qt")
+        ok, why = preflight_gui("qt")
+        if ok:
+            try:
+                enable("inline")
+            except Exception:  # noqa: BLE001 — inline must never fail bootstrap
+                matplotlib.use("Agg")
+                _patch_plt_show_for_inline_capture()
+            decision = "qt-deferred"
+            _arm_deferred_gui(ip, enable, "qt")
             return
-        except Exception:  # noqa: BLE001 — fall through to the next toolkit
-            failures.append(f"{gui} backend failed to initialize")
-            continue
-    detail = f" ({failures[0]})" if failures else ""
-    _fallback_inline(
-        enable,
-        f"no working GUI backend (tried {', '.join(candidates)}){detail}",
-    )
+        _fallback_inline(enable, why)
+        return
+    _fallback_inline(enable, None)
+
+
+
+def _apply_gui_now(ip: Any, enable: Any, gui: str) -> None:
+    """Enable *gui* for a session that booted inline (deferred switch).
+
+    Re-runs the safety checks first — the environment may have changed
+    between bootstrap and the first execution (a stale display re-probes
+    thanks to the env-keyed pre-flight cache), and a refusal here prints
+    into the user's first cell output, where they can actually see it.
+    Never raises: a failure leaves the already-working inline backend in
+    place.
+
+    Parameters
+    ----------
+    ip : InteractiveShell
+        The shell.
+    enable : callable
+        The original (unguarded) ``enable_matplotlib`` bound method.
+    gui : str
+        The gui to enable (``qt``).
+    """
+    global decision, decision_reason  # noqa: PLW0603
+
+    try:
+        ok, reason = check_gui_allowed(gui)
+        if not ok:
+            decision = "inline"
+            decision_reason = reason
+            print(f"PDV: {reason} — plots stay inline in the PDV console.")
+            return
+        enable(gui)
+        _clear_gui_select(ip)
+        decision = gui
+        decision_reason = None
+    except Exception:  # noqa: BLE001 — inline is active; never break execution
+        decision = "inline"
+
+
+def _arm_deferred_gui(ip: Any, enable: Any, gui: str) -> None:
+    """Apply *gui* one-shot, just before the user's first execution.
+
+    The session handshake completes on the inline backend; the GUI event
+    loop starts only once the kernel is fully up, immediately ahead of the
+    first cell — the earliest moment a window could matter and the latest
+    moment that keeps startup structurally immune to event-loop
+    misbehavior. Shells without the events machinery (test doubles) get
+    the switch applied immediately instead.
+
+    Parameters
+    ----------
+    ip : InteractiveShell
+        The shell whose ``pre_execute`` event triggers the switch.
+    enable : callable
+        The original (unguarded) ``enable_matplotlib`` bound method.
+    gui : str
+        The gui to enable (``qt``).
+    """
+    applied = {"done": False}
+
+    def _deferred_gui_hook() -> None:
+        if applied["done"]:
+            return
+        applied["done"] = True
+        try:
+            ip.events.unregister("pre_execute", _deferred_gui_hook)
+        except Exception:  # noqa: BLE001 — unregister failure must not matter
+            pass
+        _apply_gui_now(ip, enable, gui)
+
+    try:
+        ip.events.register("pre_execute", _deferred_gui_hook)
+    except Exception:  # noqa: BLE001 — no events machinery: apply immediately
+        _apply_gui_now(ip, enable, gui)
 
 
 def _patch_plt_show_for_inline_capture() -> None:

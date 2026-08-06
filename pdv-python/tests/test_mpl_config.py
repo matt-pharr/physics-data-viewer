@@ -229,6 +229,24 @@ class TestChooseQtBinding:
         assert mpl_config._choose_qt_binding("qt") is None
 
 
+class _FakeEvents:
+    """Minimal IPython events double: register/unregister + manual firing."""
+
+    def __init__(self):
+        self.registered = []
+
+    def register(self, name, fn):
+        self.registered.append((name, fn))
+
+    def unregister(self, name, fn):
+        self.registered.remove((name, fn))
+
+    def fire(self, name):
+        for event, fn in list(self.registered):
+            if event == name:
+                fn()
+
+
 class _FakeShell:
     """Minimal shell double: enable_matplotlib records calls.
 
@@ -242,6 +260,7 @@ class _FakeShell:
         self.calls = []
         self.pylab_gui_select = None
         self._side_effects = list(side_effects or [])
+        self.events = _FakeEvents()
 
     def enable_matplotlib(self, gui=None):
         self.calls.append(gui)
@@ -291,71 +310,81 @@ class TestConfigureLinux:
         assert ip.calls == ["inline"]
         out = capsys.readouterr().out
         assert "localhost:10.0" in out
-        assert "not reachable" in out
+        assert "no longer reachable" in out
         # The boot-tail print is invisible to the user; the reason must be
         # re-armed to print on the first plt.show().
         import matplotlib.pyplot as plt
 
         assert getattr(plt.show, "_pdv_inline_notice", False) is True
 
-    def test_live_display_qt_preflight_pass_steers_pyqt5(self, linux, monkeypatch):
+    def _live_qt(self, monkeypatch):
         monkeypatch.setenv("DISPLAY", "localhost:10.0")
         monkeypatch.setattr(mpl_config, "_tcp_connect_ok", lambda *a: True)
         monkeypatch.setattr(
-            mpl_config,
-            "_module_available",
-            lambda name: name in ("PyQt5", "PyQt6"),
+            mpl_config, "_module_available", lambda name: name == "PyQt5"
         )
         monkeypatch.setattr(mpl_config, "_run_subprocess", lambda c, t: (True, ""))
-        ip = _FakeShell()
-        mpl_config.configure(ip)
-        assert ip.calls == ["qt"]
-        assert mpl_config.decision == "qt"
-        assert os.environ["QT_API"] == "pyqt5"
-        # Bootstrap must not consume IPython's one-shot toolkit selection —
-        # the user's first explicit %matplotlib <gui> still gets honored.
-        assert ip.pylab_gui_select is None
 
-    def test_qt_preflight_failure_falls_back_to_tk(self, linux, monkeypatch):
-        monkeypatch.setenv("DISPLAY", "localhost:10.0")
-        monkeypatch.setattr(mpl_config, "_tcp_connect_ok", lambda *a: True)
-        monkeypatch.setattr(
-            mpl_config,
-            "_module_available",
-            lambda name: name in ("PyQt6", "tkinter"),
-        )
-        monkeypatch.setattr(
-            mpl_config,
-            "_run_subprocess",
-            lambda code, t: (False, "died with signal 6")
-            if "QtWidgets" in code
-            else (True, ""),
-        )
-        ip = _FakeShell()
-        mpl_config.configure(ip)
-        assert ip.calls == ["tk"]
-        assert mpl_config.decision == "tk"
+    def test_live_display_defers_qt_until_first_execution(
+        self, linux, monkeypatch
+    ):
+        """Handshake runs on inline; qt arms one-shot on pre_execute.
 
-    def test_all_preflights_fail_goes_inline(self, linux, monkeypatch, capsys):
-        monkeypatch.setenv("DISPLAY", "localhost:10.0")
-        monkeypatch.setattr(mpl_config, "_tcp_connect_ok", lambda *a: True)
-        monkeypatch.setattr(
-            mpl_config,
-            "_module_available",
-            lambda name: name in ("PyQt5", "tkinter"),
-        )
-        monkeypatch.setattr(
-            mpl_config, "_run_subprocess", lambda c, t: (False, "died with signal 6")
-        )
+        A GUI event loop started mid-handshake starved pdv.init on CI
+        (loop_tk under Xvfb) — the enable must never run during bootstrap.
+        """
+        self._live_qt(monkeypatch)
         ip = _FakeShell()
         mpl_config.configure(ip)
         assert ip.calls == ["inline"]
-        out = capsys.readouterr().out
-        assert "no working GUI backend" in out
-        assert "qt, tk" in out
+        assert mpl_config.decision == "qt-deferred"
+        assert os.environ["QT_API"] == "pyqt5"
+        assert [name for name, _ in ip.events.registered] == ["pre_execute"]
+        # First execution: the hook enables qt, unregisters itself, and
+        # releases the one-shot gui selection for the user.
+        ip.events.fire("pre_execute")
+        assert ip.calls == ["inline", "qt"]
+        assert mpl_config.decision == "qt"
+        assert ip.pylab_gui_select is None
+        assert ip.events.registered == []
+        # Second execution: strictly one-shot.
+        ip.events.fire("pre_execute")
+        assert ip.calls == ["inline", "qt"]
 
-    def test_no_toolkit_installed_goes_inline_silently(self, linux, monkeypatch):
-        """Bare install (no Qt/tk/gtk): inline without a scary message."""
+    def test_deferred_qt_refused_if_display_died_before_first_cell(
+        self, linux, monkeypatch, capsys
+    ):
+        """The hook re-checks: a display that died in the gap refuses
+        visibly (into the first cell's output) and inline stays active."""
+        self._live_qt(monkeypatch)
+        alive = {"value": True}
+        monkeypatch.setattr(
+            mpl_config, "_tcp_connect_ok", lambda *a: alive["value"]
+        )
+        ip = _FakeShell()
+        mpl_config.configure(ip)
+        assert mpl_config.decision == "qt-deferred"
+        alive["value"] = False
+        ip.events.fire("pre_execute")
+        assert ip.calls == ["inline"]  # qt never enabled
+        assert mpl_config.decision == "inline"
+        assert "no longer reachable" in capsys.readouterr().out
+
+    def test_deferred_qt_enable_failure_leaves_inline_working(
+        self, linux, monkeypatch
+    ):
+        """orig enable blowing up in the hook must not break execution."""
+        self._live_qt(monkeypatch)
+        ip = _FakeShell(side_effects=[None, RuntimeError("no qtagg")])
+        mpl_config.configure(ip)  # side effect 1: enable("inline") ok
+        ip.events.fire("pre_execute")  # side effect 2: enable("qt") raises
+        assert ip.calls == ["inline", "qt"]
+        assert mpl_config.decision == "inline"
+
+    def test_live_display_without_qt_binding_boots_inline_silently(
+        self, linux, monkeypatch
+    ):
+        """No Qt binding: plain inline, zero subprocesses, no hook."""
         monkeypatch.setenv("DISPLAY", ":0")
         monkeypatch.setattr(mpl_config, "_unix_socket_ok", lambda *a: True)
         monkeypatch.setattr(mpl_config, "_module_available", lambda name: False)
@@ -363,22 +392,30 @@ class TestConfigureLinux:
         ip = _FakeShell()
         mpl_config.configure(ip)
         assert ip.calls == ["inline"]
+        assert mpl_config.decision == "inline"
         assert mpl_config.decision_reason is None
+        assert "QT_API" not in os.environ
+        assert ip.events.registered == []
 
-    def test_enable_failure_after_preflight_does_not_propagate(
+    def test_live_display_qt_preflight_failure_falls_back_with_reason(
         self, linux, monkeypatch
     ):
-        """A backend that pre-flights OK but fails to enable falls through."""
+        """A binding that fails pre-flight boots inline with the reason
+        armed for the first plt.show()."""
         monkeypatch.setenv("DISPLAY", "localhost:10.0")
         monkeypatch.setattr(mpl_config, "_tcp_connect_ok", lambda *a: True)
         monkeypatch.setattr(
-            mpl_config, "_module_available", lambda name: name == "PyQt5"
+            mpl_config, "_module_available", lambda name: name == "PyQt6"
         )
-        monkeypatch.setattr(mpl_config, "_run_subprocess", lambda c, t: (True, ""))
-        ip = _FakeShell(side_effects=[RuntimeError("no qtagg")])
+        monkeypatch.setattr(
+            mpl_config, "_run_subprocess", lambda c, t: (False, "died with signal 6")
+        )
+        ip = _FakeShell()
         mpl_config.configure(ip)
-        assert ip.calls == ["qt", "inline"]
+        assert ip.calls == ["inline"]
         assert mpl_config.decision == "inline"
+        assert "PyQt6" in (mpl_config.decision_reason or "")
+        assert ip.events.registered == []
 
 
 class TestConfigureOtherPlatforms:
@@ -465,7 +502,9 @@ class TestEnableMatplotlibGuard:
         assert isinstance(result[1], str)
         out = capsys.readouterr().out
         assert "refusing %matplotlib qt" in out
-        assert "no DISPLAY" in out
+        assert "no display for native windows" in out
+        # Command-free advice: PDV users never type ssh commands.
+        assert "ssh -X" not in out
 
     def test_allowed_gui_passes_through(self, monkeypatch):
         monkeypatch.setattr(mpl_config, "_platform", lambda: "linux")
