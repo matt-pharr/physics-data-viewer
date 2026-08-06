@@ -53,6 +53,30 @@ describe("@slow KernelManager error paths", { timeout: 90_000 }, () => {
     await fs.rm(dir, { recursive: true, force: true });
   });
 
+  it("ready-wait rejects when the process is already dead at entry", async () => {
+    // The CI-caught ordering: the kernel process exits BEFORE
+    // waitForKernelReady even runs (slow runner), so the exit event fired
+    // pre-registration and only the exitCode check can see it. This used
+    // to reject through done() while idleTimer was still in its temporal
+    // dead zone ("Cannot access 'idleTimer' before initialization").
+    const { EventEmitter } = await import("events");
+    const proc = Object.assign(new EventEmitter(), { exitCode: 3 });
+    const fake = {
+      info: { id: "dead-at-entry" },
+      sessionId: "s",
+      process: proc,
+      shellSocket: { send: async () => {} },
+      connectionInfo: { key: "k" },
+      shellQueue: Promise.resolve(),
+    };
+    const wait = (
+      km as unknown as {
+        waitForKernelReady(m: unknown, a: number, b: number): Promise<void>;
+      }
+    ).waitForKernelReady(fake, 60_000, 120_000);
+    await expect(wait).rejects.toThrow(/exited during startup \(exit code 3\)/);
+  });
+
   it("kernel crash -> kernel:crashed event emitted", async () => {
     const info = await startKernel();
     const managed = (

@@ -1499,6 +1499,11 @@ export class KernelManager extends EventEmitter {
       // the generous idle allowance (sized for silent cold-NFS imports)
       // from slowing down the common failure mode, where a broken
       // interpreter prints a traceback and exits within a second.
+      // NOTE: only DECLARED here — wired at the bottom of this executor,
+      // after every binding `done()` touches is initialized. A process
+      // that dies before this Promise runs (seen on slow CI) would
+      // otherwise reject through `done()` while `idleTimer` is still in
+      // its temporal dead zone.
       const onExit = (code: number | null) =>
         done(
           new Error(
@@ -1506,11 +1511,6 @@ export class KernelManager extends EventEmitter {
               (code === null ? "" : ` (exit code ${code})`)
           )
         );
-      managed.process.once("exit", onExit);
-      if (managed.process.exitCode !== null) {
-        // Already dead before the listener attached.
-        onExit(managed.process.exitCode);
-      }
 
       let idleTimer = setTimeout(
         () =>
@@ -1567,6 +1567,14 @@ export class KernelManager extends EventEmitter {
       // Send immediately and then retry every second.
       sendPing();
       const pingInterval = setInterval(sendPing, 1000);
+
+      // Exit wiring goes LAST (see the note on `onExit` above). Events
+      // cannot fire mid-synchronous-code, so a process that exited before
+      // this line is caught by the exitCode check instead.
+      managed.process.once("exit", onExit);
+      if (managed.process.exitCode !== null) {
+        onExit(managed.process.exitCode);
+      }
     });
   }
 }
