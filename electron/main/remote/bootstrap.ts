@@ -409,7 +409,8 @@ export async function installBundle(
   // was already renamed into place ("Unpacking failed" on a successful
   // install; seen live on feyn). The displaced dir gets a unique name so
   // a ghost-laden leftover from an earlier attempt can never absorb the
-  // mv, and ghosts vanish on their own once the old daemon exits.
+  // mv; once the old daemon exits the ghosts become deletable and the
+  // parked dir is swept by the next install's best-effort pass.
   const install = await execViaSsh(
     control,
     [

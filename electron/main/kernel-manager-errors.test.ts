@@ -77,6 +77,31 @@ describe("@slow KernelManager error paths", { timeout: 90_000 }, () => {
     await expect(wait).rejects.toThrow(/exited during startup \(exit code 3\)/);
   });
 
+  it("ready-wait rejects a signal-killed process at entry", async () => {
+    // A SIGKILLed child (e.g. an OOM kill) has exitCode null and
+    // signalCode set — it must reject immediately, not ride the idle
+    // timer for 180 s.
+    const { EventEmitter } = await import("events");
+    const proc = Object.assign(new EventEmitter(), {
+      exitCode: null,
+      signalCode: "SIGKILL",
+    });
+    const fake = {
+      info: { id: "sigkilled-at-entry" },
+      sessionId: "s",
+      process: proc,
+      shellSocket: { send: async () => {} },
+      connectionInfo: { key: "k" },
+      shellQueue: Promise.resolve(),
+    };
+    const wait = (
+      km as unknown as {
+        waitForKernelReady(m: unknown, a: number, b: number): Promise<void>;
+      }
+    ).waitForKernelReady(fake, 60_000, 120_000);
+    await expect(wait).rejects.toThrow(/killed by SIGKILL/);
+  });
+
   it("kernel crash -> kernel:crashed event emitted", async () => {
     const info = await startKernel();
     const managed = (

@@ -1504,11 +1504,15 @@ export class KernelManager extends EventEmitter {
       // that dies before this Promise runs (seen on slow CI) would
       // otherwise reject through `done()` while `idleTimer` is still in
       // its temporal dead zone.
-      const onExit = (code: number | null) =>
+      const onExit = (code: number | null, signal?: NodeJS.Signals | null) =>
         done(
           new Error(
             `Kernel process exited during startup` +
-              (code === null ? "" : ` (exit code ${code})`)
+              (code !== null
+                ? ` (exit code ${code})`
+                : signal
+                  ? ` (killed by ${signal})`
+                  : "")
           )
         );
 
@@ -1572,8 +1576,12 @@ export class KernelManager extends EventEmitter {
       // cannot fire mid-synchronous-code, so a process that exited before
       // this line is caught by the exitCode check instead.
       managed.process.once("exit", onExit);
-      if (managed.process.exitCode !== null) {
-        onExit(managed.process.exitCode);
+      // Already dead before the listener attached: exitCode for a normal
+      // exit, signalCode for a signal death (e.g. an OOM SIGKILL) — a
+      // signal-killed child has exitCode null and would otherwise ride
+      // the full idle timer.
+      if (managed.process.exitCode !== null || managed.process.signalCode !== null) {
+        onExit(managed.process.exitCode, managed.process.signalCode);
       }
     });
   }

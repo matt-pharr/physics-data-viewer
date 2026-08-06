@@ -261,6 +261,7 @@ class _FakeShell:
         self.pylab_gui_select = None
         self._side_effects = list(side_effects or [])
         self.events = _FakeEvents()
+        self.gui_calls = []
 
     def enable_matplotlib(self, gui=None):
         self.calls.append(gui)
@@ -273,6 +274,9 @@ class _FakeShell:
         if gui is not None and gui != "inline" and self.pylab_gui_select is None:
             self.pylab_gui_select = gui
         return (gui, "backend")
+
+    def enable_gui(self, gui=None):
+        self.gui_calls.append(gui)
 
 
 @pytest.fixture()
@@ -380,6 +384,7 @@ class TestConfigureLinux:
         ip.events.fire("pre_execute")  # side effect 2: enable("qt") raises
         assert ip.calls == ["inline", "qt"]
         assert mpl_config.decision == "inline"
+        assert "could not enable qt" in (mpl_config.decision_reason or "")
 
     def test_live_display_without_qt_binding_boots_inline_silently(
         self, linux, monkeypatch
@@ -440,8 +445,10 @@ class TestConfigureOtherPlatforms:
         assert ip.calls == ["osx", "tk"]
         assert mpl_config.decision == "tk"
 
-    def test_configured_backend_enabled_with_event_loop_when_safe(self, monkeypatch):
-        """MPLBACKEND=qtagg on a healthy display: honored THROUGH enable()."""
+    def test_configured_gui_backend_defers_like_auto_qt(self, monkeypatch):
+        """MPLBACKEND=qtagg on a healthy display: honored, but on the same
+        deferred schedule as auto-qt — a GUI event loop enabled
+        mid-handshake can starve pdv.init regardless of who asked for it."""
         monkeypatch.setattr(mpl_config, "_platform", lambda: "linux")
         monkeypatch.setenv("DISPLAY", "localhost:10.0")
         monkeypatch.setattr(mpl_config, "_tcp_connect_ok", lambda *a: True)
@@ -452,13 +459,23 @@ class TestConfigureOtherPlatforms:
         monkeypatch.setattr(mpl_config, "_current_backend_name", lambda: "qtagg")
         ip = _FakeShell()
         mpl_config.configure(ip)
-        # Enabled through enable_matplotlib so the event loop is installed —
-        # a bare return here reproduced the frozen-window bug for
-        # MPLBACKEND users.
-        assert ip.calls == ["qtagg"]
-        assert mpl_config.decision == "user"
+        assert ip.calls == ["inline"]
+        assert mpl_config.decision == "user-deferred"
+        assert [name for name, _ in ip.events.registered] == ["pre_execute"]
+        ip.events.fire("pre_execute")
+        assert ip.calls == ["inline", "qtagg"]
+        assert mpl_config.decision == "qtagg"
         assert ip.pylab_gui_select is None
         assert getattr(ip.enable_matplotlib, "_pdv_guarded", False) is True
+
+    def test_configured_non_gui_backend_enabled_directly(self, monkeypatch):
+        """A configured non-GUI backend (no event loop) enables at once."""
+        monkeypatch.setattr(mpl_config, "_platform", lambda: "linux")
+        monkeypatch.setattr(mpl_config, "_current_backend_name", lambda: "webagg")
+        ip = _FakeShell()
+        mpl_config.configure(ip)
+        assert ip.calls == ["webagg"]
+        assert mpl_config.decision == "user"
 
     def test_configured_backend_refused_on_dead_display(self, monkeypatch, capsys):
         """MPLBACKEND=qtagg + stale DISPLAY: the kernel must NOT die."""
@@ -512,6 +529,19 @@ class TestEnableMatplotlibGuard:
         mpl_config._install_enable_matplotlib_guard(ip)
         ip.enable_matplotlib("inline")
         assert ip.calls == ["inline"]
+        # Non-GUI switches never touch the event loop.
+        assert ip.gui_calls == []
+
+    def test_family_switch_releases_active_eventloop_first(self, monkeypatch):
+        """ipykernel refuses to run two GUI event loops — and fails AFTER
+        enable_matplotlib already switched the backend. A sanctioned
+        toolkit switch must release the active loop before delegating."""
+        monkeypatch.setattr(mpl_config, "_platform", lambda: "darwin")
+        ip = _FakeShell()
+        mpl_config._install_enable_matplotlib_guard(ip)
+        ip.enable_matplotlib("qt")
+        assert ip.gui_calls == [None]  # released before the enable
+        assert ip.calls == ["qt"]
 
     def test_non_linux_always_passes_through(self, monkeypatch):
         monkeypatch.setattr(mpl_config, "_platform", lambda: "darwin")

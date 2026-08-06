@@ -746,6 +746,30 @@ def check_gui_allowed(gui: Any) -> tuple[bool, str]:
     return (True, "")
 
 
+
+def _release_gui_eventloop(ip: Any) -> None:
+    """Stop any active ipykernel GUI event loop before a toolkit change.
+
+    ipykernel does NOT swap event loops: with one active, ``enable_gui`` for
+    a different toolkit raises ``RuntimeError("Cannot activate multiple GUI
+    eventloops")`` — and it does so AFTER ``enable_matplotlib`` has already
+    switched the backend, leaving a backend/loop mismatch plus a consumed
+    gui selection. Releasing first (``enable_gui(None)`` clears
+    ``kernel.eventloop``) makes a sanctioned cross-toolkit ``%matplotlib``
+    switch clean. Harmless when no loop is active.
+
+    Parameters
+    ----------
+    ip : InteractiveShell
+        The shell whose event loop to release. Best-effort — shells
+        without ``enable_gui`` are ignored.
+    """
+    try:
+        ip.enable_gui(None)
+    except Exception:  # noqa: BLE001 — best-effort; the enable itself will speak
+        pass
+
+
 def _clear_gui_select(ip: Any) -> None:
     """Release IPython's one-shot GUI-toolkit selection after bootstrap.
 
@@ -801,6 +825,11 @@ def _install_enable_matplotlib_guard(ip: Any) -> None:
         # A sanctioned switch supersedes the inline state — the pending
         # "plots render inline because ..." notice no longer applies.
         _disarm_inline_notice()
+        if gui is not None and _GUI_FAMILIES.get(str(gui).lower()) is not None:
+            # Changing toolkits requires releasing the active event loop
+            # first — ipykernel refuses to run two (see
+            # _release_gui_eventloop) and fails AFTER the backend switch.
+            _release_gui_eventloop(ip)
         return original(gui)
 
     _guarded_enable_matplotlib._pdv_guarded = True  # type: ignore[attr-defined]
@@ -930,6 +959,21 @@ def configure(ip: Any) -> None:
                 enable, f"configured backend {configured} was refused ({reason})"
             )
             return
+        if _GUI_FAMILIES.get(configured) is not None and _is_probe_platform():
+            # A GUI backend must not start its event loop mid-handshake —
+            # MPLBACKEND=tkagg with a live display would reproduce exactly
+            # the loop_tk-starves-pdv.init hang the deferral exists to
+            # prevent. Honor the choice, but on the same deferred schedule
+            # as auto-qt.
+            try:
+                enable("inline")
+            except Exception:  # noqa: BLE001 — inline must never fail bootstrap
+                matplotlib.use("Agg")
+                _patch_plt_show_for_inline_capture()
+            decision = "user-deferred"
+            decision_reason = f"honoring configured backend {configured}"
+            _arm_deferred_gui(ip, enable, configured)
+            return
         try:
             enable(configured)
             _clear_gui_select(ip)
@@ -998,9 +1042,12 @@ def _apply_gui_now(ip: Any, enable: Any, gui: str) -> None:
     """Enable *gui* for a session that booted inline (deferred switch).
 
     Re-runs the safety checks first — the environment may have changed
-    between bootstrap and the first execution (a stale display re-probes
-    thanks to the env-keyed pre-flight cache), and a refusal here prints
-    into the user's first cell output, where they can actually see it.
+    between bootstrap and the first execution. The stale-display case is
+    caught by ``_display_gate()``'s FRESH socket probe (the pre-flight
+    cache would return its green verdict for an unchanged-but-dead
+    DISPLAY, so the gate must not be optimized away), and a refusal here
+    prints into the user's first cell output, where they can actually
+    see it.
     Never raises: a failure leaves the already-working inline backend in
     place.
 
@@ -1026,8 +1073,13 @@ def _apply_gui_now(ip: Any, enable: Any, gui: str) -> None:
         _clear_gui_select(ip)
         decision = gui
         decision_reason = None
-    except Exception:  # noqa: BLE001 — inline is active; never break execution
+    except Exception as exc:  # noqa: BLE001 — inline is active; never break execution
         decision = "inline"
+        decision_reason = f"could not enable {gui} ({exc})"
+        print(
+            f"PDV: could not enable {gui} ({exc}) — plots stay inline in "
+            "the PDV console."
+        )
 
 
 def _arm_deferred_gui(ip: Any, enable: Any, gui: str) -> None:
