@@ -664,3 +664,25 @@ class TestCurrentBackendName:
         matplotlib matrix — the single most version-sensitive call here."""
         result = mpl_config._current_backend_name()
         assert result is None or isinstance(result, str)
+
+
+class TestDisplaySeam:
+    """The PDV_MPL_DISPLAY test seam (e2e harnesses on Linux)."""
+
+    def test_override_wins_over_real_display(self, monkeypatch):
+        monkeypatch.setenv("DISPLAY", ":0")  # the app's real (live) display
+        monkeypatch.setenv("PDV_MPL_DISPLAY", "localhost:99.0")
+        monkeypatch.setattr(mpl_config, "_tcp_connect_ok", lambda *a: False)
+        assert mpl_config._display_gate() == ("dead", "localhost:99.0")
+
+    def test_empty_override_means_unset(self, monkeypatch):
+        monkeypatch.setenv("DISPLAY", ":0")
+        monkeypatch.setenv("PDV_MPL_DISPLAY", "")
+        monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
+        assert mpl_config._display_gate() == ("none", None)
+
+    def test_absent_override_falls_through(self, monkeypatch):
+        monkeypatch.delenv("PDV_MPL_DISPLAY", raising=False)
+        monkeypatch.setenv("DISPLAY", "localhost:10.0")
+        monkeypatch.setattr(mpl_config, "_tcp_connect_ok", lambda *a: True)
+        assert mpl_config._display_gate() == ("live", "localhost:10.0")

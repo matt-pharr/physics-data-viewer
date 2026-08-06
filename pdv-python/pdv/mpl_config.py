@@ -51,10 +51,13 @@ followed by figure creation bypasses these guards — arbitrary user code
 cannot be protected from a C-level abort without breaking matplotlib
 semantics.
 
-Test seam: the ``PDV_MPL_PLATFORM`` environment variable overrides
+Test seams: the ``PDV_MPL_PLATFORM`` environment variable overrides
 ``sys.platform`` for the decision logic (e.g. ``PDV_MPL_PLATFORM=linux`` on
 a macOS dev machine exercises the probe/pre-flight paths against a real
-kernel). Test-only; never set it in production.
+kernel), and ``PDV_MPL_DISPLAY`` overrides what the decision logic treats
+as ``$DISPLAY`` (empty string = unset) — needed because an e2e harness on
+Linux cannot override the real ``DISPLAY`` without severing the Electron
+app's own X connection. Test-only; never set them in production.
 
 See Also
 --------
@@ -323,6 +326,24 @@ def display_is_live(display: str, *, timeout: float = _PROBE_TIMEOUT) -> bool:
     return False
 
 
+def _display_env() -> str | None:
+    """Return the ``$DISPLAY`` value the decision logic should use.
+
+    Honors the ``PDV_MPL_DISPLAY`` test seam when present (empty string =
+    treat as unset); otherwise the real ``DISPLAY``. See module docstring.
+
+    Returns
+    -------
+    str or None
+        The effective display value, or None when unset.
+    """
+    import os  # noqa: PLC0415
+
+    if "PDV_MPL_DISPLAY" in os.environ:
+        return os.environ["PDV_MPL_DISPLAY"] or None
+    return os.environ.get("DISPLAY")
+
+
 def _display_gate() -> tuple[str, str | None]:
     """Classify the display environment for GUI-backend decisions.
 
@@ -337,7 +358,7 @@ def _display_gate() -> tuple[str, str | None]:
     """
     import os  # noqa: PLC0415
 
-    display = os.environ.get("DISPLAY")
+    display = _display_env()
     if not display and not os.environ.get("WAYLAND_DISPLAY"):
         return ("none", None)
     if display and not display_is_live(display):
@@ -559,7 +580,7 @@ def preflight_gui(family: str, *, timeout: float = _PREFLIGHT_TIMEOUT) -> tuple[
     """
     import os  # noqa: PLC0415
 
-    key = (family, os.environ.get("QT_API"), os.environ.get("DISPLAY"))
+    key = (family, os.environ.get("QT_API"), _display_env())
     cached = _preflight_cache.get(key)
     if cached is not None:
         return cached
@@ -610,7 +631,7 @@ def preflight_gui(family: str, *, timeout: float = _PREFLIGHT_TIMEOUT) -> tuple[
     if ok:
         verdict = (True, "")
     else:
-        display = os.environ.get("DISPLAY")
+        display = _display_env()
         where = f" on DISPLAY {display}" if display else ""
         if "died with signal" in why:
             # The exact process-fatal class this module exists to contain.

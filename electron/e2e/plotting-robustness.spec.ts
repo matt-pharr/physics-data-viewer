@@ -25,12 +25,15 @@ let launched: LaunchedApp;
 test.beforeAll(async () => {
   launched = await launchPDV({
     env: {
-      // pdv.mpl_config test seam: take the Linux probe/pre-flight path even
-      // on a macOS dev machine or CI runner.
+      // pdv.mpl_config test seams: take the Linux probe/pre-flight path even
+      // on a macOS dev machine or CI runner, and override what the KERNEL's
+      // decision logic sees as $DISPLAY — never the real DISPLAY variable,
+      // which on Linux CI is the xvfb display Electron itself needs (an
+      // override there hangs the app launch; found the hard way on CI).
       PDV_MPL_PLATFORM: "linux",
       // The ssh X11-forwarding shape with nothing behind it: localhost:N
       // maps to TCP port 6000+N, and nothing listens on 6099.
-      DISPLAY: "localhost:99.0",
+      PDV_MPL_DISPLAY: "localhost:99.0",
     },
   });
   await createNewPythonProject(launched.window);
