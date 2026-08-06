@@ -30,6 +30,29 @@ describe("@slow KernelManager error paths", { timeout: 90_000 }, () => {
     await km.shutdownAll();
   }, 30_000);
 
+  it("interpreter that exits at startup -> start() rejects immediately", async () => {
+    // The ready-wait's idle allowance is deliberately generous (180 s) so a
+    // healthy kernel can import silently from a cold-NFS venv; a process
+    // that EXITS must therefore fail the wait at once rather than riding
+    // out the timer. Shim prints a traceback-ish line and dies like a
+    // broken interpreter does.
+    const os = await import("os");
+    const path = await import("path");
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "pdv-dead-python-"));
+    const shim = path.join(dir, "python3");
+    await fs.writeFile(shim, "#!/bin/sh\necho boom >&2\nexit 3\n", {
+      mode: 0o755,
+    });
+
+    const started = Date.now();
+    await expect(
+      km.start({ language: "python", env: { PYTHON_PATH: shim } })
+    ).rejects.toThrow(/exited during startup/);
+    // Well under the 180 s idle allowance — exit is what rejected us.
+    expect(Date.now() - started).toBeLessThan(20_000);
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
   it("kernel crash -> kernel:crashed event emitted", async () => {
     const info = await startKernel();
     const managed = (
