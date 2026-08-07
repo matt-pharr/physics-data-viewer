@@ -111,10 +111,11 @@ def _plot_or_notice(
     handler exceptions would otherwise propagate through ``dispatch_handler``
     and reach the renderer as an opaque ``internal.error``.
 
-    Exactly one figure is created per call, so the inline ``plt.show()``
-    patch installed by :func:`pdv._configure_matplotlib` (which captures
-    ``plt.gcf()``) always resolves to this figure. The success path leaves
-    the figure for ``plt.show()`` to own; any failure path closes it.
+    Exactly one figure is created per call, so both inline paths — the
+    ``matplotlib-inline`` backend enabled by :mod:`pdv.mpl_config` and its
+    legacy ``plt.show()`` shim (which captures ``plt.gcf()``) — always
+    resolve to this figure. The success path leaves the figure for
+    ``plt.show()`` to own; any failure path closes it.
 
     Parameters
     ----------

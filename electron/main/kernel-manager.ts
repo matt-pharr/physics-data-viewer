@@ -618,10 +618,16 @@ export class KernelManager extends EventEmitter {
     // Wait for the kernel to become responsive. Julia gets a much higher
     // activity-capped ceiling: IJulia's own boot legitimately precompiles
     // for minutes after a package update or Julia upgrade (§10.8).
+    // The idle allowance is generous because a HEALTHY kernel can be
+    // completely silent for minutes while importing: measured live on flux
+    // (cold-NFS venv), `import pdv, ipykernel, matplotlib, numpy` took
+    // 2m26s with zero output — a 30 s idle cap killed it every time. The
+    // genuinely-dead cases stay fast: a broken interpreter prints and
+    // exits, and process exit now rejects this wait immediately.
     await this.waitForKernelReady(
       managed,
-      30_000,
-      language === "julia" ? 15 * 60_000 : 120_000
+      180_000,
+      language === "julia" ? 15 * 60_000 : 600_000
     );
 
     kernelInfo.status = "idle";
@@ -1475,6 +1481,7 @@ export class KernelManager extends EventEmitter {
         clearInterval(pingInterval);
         cleanup();
         cleanupOutput();
+        managed.process.removeListener("exit", onExit);
         if (err) { reject(err); } else { resolve(); }
       };
 
@@ -1486,6 +1493,28 @@ export class KernelManager extends EventEmitter {
           done();
         }
       });
+
+      // A kernel whose process has exited can never become ready — fail
+      // NOW instead of letting the idle timer expire. This is what keeps
+      // the generous idle allowance (sized for silent cold-NFS imports)
+      // from slowing down the common failure mode, where a broken
+      // interpreter prints a traceback and exits within a second.
+      // NOTE: only DECLARED here — wired at the bottom of this executor,
+      // after every binding `done()` touches is initialized. A process
+      // that dies before this Promise runs (seen on slow CI) would
+      // otherwise reject through `done()` while `idleTimer` is still in
+      // its temporal dead zone.
+      const onExit = (code: number | null, signal?: NodeJS.Signals | null) =>
+        done(
+          new Error(
+            `Kernel process exited during startup` +
+              (code !== null
+                ? ` (exit code ${code})`
+                : signal
+                  ? ` (killed by ${signal})`
+                  : "")
+          )
+        );
 
       let idleTimer = setTimeout(
         () =>
@@ -1542,6 +1571,18 @@ export class KernelManager extends EventEmitter {
       // Send immediately and then retry every second.
       sendPing();
       const pingInterval = setInterval(sendPing, 1000);
+
+      // Exit wiring goes LAST (see the note on `onExit` above). Events
+      // cannot fire mid-synchronous-code, so a process that exited before
+      // this line is caught by the exitCode check instead.
+      managed.process.once("exit", onExit);
+      // Already dead before the listener attached: exitCode for a normal
+      // exit, signalCode for a signal death (e.g. an OOM SIGKILL) — a
+      // signal-killed child has exitCode null and would otherwise ride
+      // the full idle timer.
+      if (managed.process.exitCode !== null || managed.process.signalCode !== null) {
+        onExit(managed.process.exitCode, managed.process.signalCode);
+      }
     });
   }
 }

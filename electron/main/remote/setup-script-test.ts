@@ -132,10 +132,15 @@ export async function runSetupScriptTest(
   // Source with output redirected to a file, then replay it between
   // markers AFTER the source finishes — capturing live would interleave
   // the script's output with the markers and the probes.
+  // Both redirects write to files mktemp ALREADY CREATED, so they must be
+  // `>|` (clobber-override): a login shell whose profile sets `noclobber`
+  // (observed on flux) refuses plain `>`, the candidate script is never
+  // written, and an empty file gets sourced — the redirect's rc=1 was then
+  // misreported as the script's own exit status.
   const inner =
     `s=$(mktemp) && o=$(mktemp) || exit 90; ` +
-    `printf '%s' ${posixShellQuote(content)} > "$s"; ` +
-    `. "$s" > "$o" 2>&1; rc=$?; ` +
+    `printf '%s' ${posixShellQuote(content)} >| "$s"; ` +
+    `. "$s" >| "$o" 2>&1; rc=$?; ` +
     `printf 'PDVSOURCERC:%s\\n' "$rc"; ` +
     `printf 'PDVOUTPUT-BEGIN\\n'; cat "$o"; printf '\\nPDVOUTPUT-END\\n'; ` +
     `rm -f "$s" "$o"; ` +

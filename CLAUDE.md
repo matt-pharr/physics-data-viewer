@@ -46,6 +46,8 @@ pdv-python/              ← Python kernel package (pip install pdv-python)
         comms.py         ← comm target registration, message dispatch, bootstrap()
         namespace.py     ← PDVNamespace (protected dict), pdv_namespace(), inspect_namespace()
         serialization.py ← type detection, format readers/writers
+        mpl_config.py    ← safe matplotlib backend selection (display probe,
+                           subprocess pre-flight, %matplotlib crash guard)
         environment.py   ← working dir helpers, path safety checks
         handlers/        ← one file per PDV message domain (lifecycle, project, tree, script, note, ...)
     tests/

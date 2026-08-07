@@ -50,7 +50,10 @@ const localExec: typeof execViaSsh = async (_control, command) => {
   };
 };
 
-describe("runSetupScriptTest against a real shell", () => {
+// Real `bash -l` spawns (two per test) can exceed vitest's 5 s default on a
+// loaded CI runner with parallel test files — seen as a spurious timeout of
+// the first test in this file.
+describe("runSetupScriptTest against a real shell", { timeout: 30_000 }, () => {
   it("reports an interpreter the script makes visible", async () => {
     // A fake python3 in a private bin dir that only the script adds to PATH.
     const dir = tempDir();
@@ -75,6 +78,40 @@ describe("runSetupScriptTest against a real shell", () => {
     expect(before?.path).not.toBe(shim);
     // Both lists cover the same interpreters, in order.
     expect(result.before.map((i) => i.name)).toEqual(result.after.map((i) => i.name));
+  });
+
+  it("survives a login shell that sets noclobber", async () => {
+    // Observed on flux: a profile with `set -o noclobber` refuses plain `>`
+    // to the files mktemp already created, so the candidate script was never
+    // written and an empty file was sourced — the refused redirect's rc=1
+    // then masqueraded as the script's own exit status. The command must use
+    // `>|` throughout. Reproduced with a real `bash -l` reading a profile
+    // from a private HOME.
+    const home = tempDir();
+    fs.writeFileSync(path.join(home, ".bash_profile"), "set -o noclobber\n");
+    const noclobberExec: typeof execViaSsh = async (_control, command) => {
+      const run = spawnSync("/bin/sh", ["-c", command], {
+        encoding: "utf8",
+        timeout: 30_000,
+        env: { ...process.env, HOME: home },
+      });
+      return {
+        ok: run.status === 0,
+        exitCode: run.status,
+        stdout: run.stdout,
+        stderr: run.stderr,
+        failure: null,
+      };
+    };
+
+    const result = await runSetupScriptTest({
+      control: CONTROL,
+      content: "echo hello from the script\n",
+      exec: noclobberExec,
+    });
+    expect(result.ok).toBe(true);
+    expect(result.exitCode).toBe(0);
+    expect(result.output).toContain("hello from the script");
   });
 
   it("captures the script's own output and its exit status", async () => {
