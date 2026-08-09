@@ -50,6 +50,53 @@ export interface LaunchedApp {
 }
 
 
+/**
+ * Kill any pdv-server session daemon this launch created under its temp
+ * HOME. Daemons are DESIGNED to outlive the app (session survival is the
+ * feature), and the idle cap can never reap them here: idle shutdown
+ * autosaves first, the autosave target lives in this temp HOME — deleted
+ * by cleanup — and a failed autosave blocks shutdown by design. Without
+ * this, every remote spec leaks an immortal daemon + kernel pair on the
+ * dev machine (observed: eleven pairs, the oldest eleven days).
+ *
+ * The daemon is a setsid group leader and its kernels share its process
+ * group, so signalling the negative pid reaps the whole family at once.
+ */
+async function reapSessionDaemons(homeDir: string): Promise<void> {
+  const sessionsDir = path.join(homeDir, ".pdv-server", "run", "sessions");
+  let entries: string[];
+  try {
+    entries = await fs.readdir(sessionsDir);
+  } catch {
+    return; // No daemon ever started under this HOME.
+  }
+  for (const entry of entries) {
+    try {
+      const meta = JSON.parse(
+        await fs.readFile(path.join(sessionsDir, entry, "session.json"), "utf8"),
+      ) as { pid?: number };
+      if (typeof meta.pid !== "number" || !Number.isInteger(meta.pid) || meta.pid <= 1) {
+        continue;
+      }
+      try {
+        process.kill(-meta.pid, "SIGTERM");
+      } catch {
+        continue; // Already gone (or a platform without process groups).
+      }
+      // Brief grace, then make sure: the graceful stop can park on the
+      // (now doomed) autosave, and cleanup must stay bounded.
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      try {
+        process.kill(-meta.pid, "SIGKILL");
+      } catch {
+        // Exited during the grace period — the good case.
+      }
+    } catch {
+      // Unreadable metadata — nothing identifiable to reap for this entry.
+    }
+  }
+}
+
 async function seedPreferences(
   homeDir: string,
   pythonPath: string,
@@ -200,6 +247,9 @@ export async function launchPDV(opts: LaunchOptions = {}): Promise<LaunchedApp> 
     } finally {
       if (closeTimer) clearTimeout(closeTimer);
     }
+    // Before deleting the temp HOME (session.json — the pid record — lives
+    // in it), reap any session daemon this launch spawned.
+    await reapSessionDaemons(homeDir);
     // app.close() resolves before the OS has necessarily flushed every last
     // write the closing session made under HOME/.PDV (a final autosave, the
     // restart-reload's file copies). If one lands mid-walk, a plain recursive
