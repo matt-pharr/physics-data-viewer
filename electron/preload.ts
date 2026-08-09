@@ -338,6 +338,7 @@ const api: PDVApi = {
   launchers: {
     openAgent: () => invoke(IPC.launchers.openAgent),
     openWorkingDir: () => invoke(IPC.launchers.openWorkingDir),
+    openTerminal: () => invoke(IPC.launchers.openTerminal),
     checkAvailability: (check) => invoke(IPC.launchers.checkAvailability, check),
   },
   chrome: {

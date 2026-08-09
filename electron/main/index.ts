@@ -127,7 +127,7 @@ export async function registerIpcHandlers(
   // Connection control only. Establishing an ssh connection and running a
   // session over it are separate steps: nothing here swaps the active
   // ServerHandle, so local mode is unaffected by its presence.
-  registerRemoteIpcHandlers({
+  const remoteManager = registerRemoteIpcHandlers({
     win,
     controlDir: path.join(userDataDir, "ssh-control"),
     // Built by `npm run build:server-bundle`. Absent in a checkout that has
@@ -168,6 +168,20 @@ export async function registerIpcHandlers(
         INTERNAL_CHANNELS.resolveTreeFile,
         treePath
       )) as string | null,
+    // Remote identity comes from the ROUTER's kind (is the active session
+    // remote?) plus the connection manager (which host, and is the master
+    // usable right now). Never from connection state alone: a remote
+    // session mid-reconnect must refuse ssh-carried launches, not fall
+    // back to spawning against cluster paths locally.
+    getRemoteContext: () => {
+      if (!(server instanceof SessionRouter) || server.kind !== "remote") {
+        return null;
+      }
+      return {
+        host: remoteManager.getStatus().host ?? "",
+        control: remoteManager.control,
+      };
+    },
   });
 
   // Light session reset on renderer load/reload: clears in-session server

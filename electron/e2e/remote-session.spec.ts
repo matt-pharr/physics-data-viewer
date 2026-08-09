@@ -189,6 +189,15 @@ test("connects to a host and moves the session onto it", async () => {
   await expect(
     page.locator(".log-stdout").filter({ hasText: "marker=" }).first(),
   ).toContainText("marker=shipped and sourced", { timeout: 30_000 });
+
+  // Launcher routing (B5a): with a remote session and a live kernel, the
+  // Open Terminal launcher targets the session's host, while the agent
+  // launcher is disabled with an explanation — MCP is local-only, and its
+  // `.pdv-mcp.json` write must never chase a cluster working dir.
+  await expect(page.getByTitle("Open terminal on testhost")).toBeEnabled();
+  await expect(
+    page.getByTitle(/AI agent launch isn't available in remote sessions/),
+  ).toBeDisabled();
 });
 
 test("welcome Disconnect returns the window to a local session", async () => {

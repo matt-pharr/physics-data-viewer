@@ -92,6 +92,19 @@ export interface EditorLauncherConfig {
    * (see {@link isTerminalEditorCommand}).
    */
   isTuiEditor?: boolean;
+  /**
+   * Override for opening a *file* in a remote session. `{host}` and
+   * `{path}` placeholders are substituted (`{path}` is appended when
+   * absent). When unset, PDV derives a remote form from `fileCommand`:
+   * Remote-SSH-capable editors (code/cursor/windsurf) get
+   * `--remote ssh-remote+<host>`, TUI editors run on the host over ssh,
+   * and anything else refuses with an explanation. Hand-edited config
+   * only — no settings UI (see `main/remote/remote-launchers.ts`).
+   */
+  remoteFileCommand?: string;
+  /** Remote-session override for opening a *directory*; same rules as
+   *  {@link remoteFileCommand}, derived from `dirCommand` when unset. */
+  remoteDirCommand?: string;
 }
 
 /**
@@ -503,6 +516,35 @@ export function resolveEditorSpawn(
     return { file: command, args };
   }
 
+  return wrapInTerminalPreset(command, args, { terminal: opts?.terminal, platform });
+}
+
+/**
+ * Wrap a command in the user's terminal preset, with the custom-template
+ * and empty-template fallback ladder.
+ *
+ * Extracted from {@link resolveEditorSpawn} so the terminal launcher can
+ * wrap a plain login shell without routing through editor semantics. The
+ * `'none'` preset is NOT handled here — callers decide what opting out
+ * means for them (an editor spawns bare; the terminal launcher refuses).
+ *
+ * @param command - Executable to run inside the terminal.
+ * @param args - Its argv.
+ * @param opts - Terminal preset selection + target platform (defaults to
+ *   `process.platform`).
+ * @returns Spawn-ready file + args for the terminal emulator.
+ */
+export function wrapInTerminalPreset(
+  command: string,
+  args: string[],
+  opts?: {
+    terminal?: TerminalLauncherConfig;
+    platform?: NodeJS.Platform;
+  },
+): { file: string; args: string[] } {
+  const platform = opts?.platform ?? process.platform;
+  const preset = opts?.terminal?.preset ?? defaultTerminalPreset(platform);
+
   const template =
     preset === "custom"
       ? (opts?.terminal?.customTemplate ?? "").trim()
@@ -529,4 +571,30 @@ export function resolveEditorSpawn(
   }
 
   return expandTerminalTemplate(template, command, args, platform);
+}
+
+/**
+ * Spawn spec for an interactive login shell in a directory, suitable for
+ * wrapping with {@link wrapInTerminalPreset}.
+ *
+ * POSIX platforms run `sh -c 'cd <dir>; exec "${SHELL:-sh}" -l'` — the `;`
+ * (not `&&`) means a vanished directory still opens a shell at `$HOME`
+ * with a visible `cd` error instead of a window that closes unread.
+ * Windows opens `cmd.exe /K cd /d <dir>`.
+ *
+ * @param workingDir - Directory to land in, or null for the user's home.
+ * @param platform - Target platform (defaults to `process.platform`).
+ * @returns Spawn-ready file + args for the inner shell.
+ */
+export function loginShellCommand(
+  workingDir: string | null,
+  platform: NodeJS.Platform = process.platform,
+): { file: string; args: string[] } {
+  if (platform === "win32") {
+    return workingDir
+      ? { file: "cmd.exe", args: ["/K", `cd /d ${workingDir}`] }
+      : { file: "cmd.exe", args: [] };
+  }
+  const cd = workingDir ? `cd ${posixShellQuote(workingDir)}; ` : "";
+  return { file: "sh", args: ["-c", `${cd}exec "\${SHELL:-sh}" -l`] };
 }

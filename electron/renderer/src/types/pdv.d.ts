@@ -1432,6 +1432,8 @@ export interface PDVApi {
     openAgent(): Promise<{ success: boolean; error?: string }>;
     /** Open the active kernel's working directory in the configured editor/IDE. */
     openWorkingDir(): Promise<{ success: boolean; error?: string }>;
+    /** Open the user's terminal in the working directory (remote: over ssh). */
+    openTerminal(): Promise<{ success: boolean; error?: string }>;
     /** Check whether a launcher is installed (no launch), to gate Settings Save. */
     checkAvailability(check: LauncherCheck): Promise<boolean>;
   };
