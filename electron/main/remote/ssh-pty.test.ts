@@ -245,6 +245,40 @@ describe("establishMasterInteractive (real pty)", () => {
 });
 
 describe("establishMasterInteractive (injected pty)", () => {
+  it("adds -o ForwardX11=yes to the master argv only when the per-host toggle asks", () => {
+    const seenArgs: string[][] = [];
+    const capturingModule = (pty: FakePty): PtyModule => ({
+      spawn: (_file, args) => {
+        seenArgs.push([...args]);
+        return pty;
+      },
+    });
+
+    const withToggle = establishMasterInteractive({
+      host: "feyn",
+      controlPath: "/tmp/x",
+      forwardX11: true,
+      sshPath: MISSING_SSH,
+      ptyModule: capturingModule(new FakePty()),
+    });
+    withToggle.cancel();
+    const without = establishMasterInteractive({
+      host: "feyn",
+      controlPath: "/tmp/x",
+      sshPath: MISSING_SSH,
+      ptyModule: capturingModule(new FakePty()),
+    });
+    without.cancel();
+
+    const withJoined = seenArgs[0].join(" ");
+    expect(withJoined).toContain("-o ForwardX11=yes");
+    // As an -o pair, before the destination — where ssh reads options.
+    expect(seenArgs[0].indexOf("ForwardX11=yes")).toBeLessThan(
+      seenArgs[0].indexOf("feyn"),
+    );
+    expect(seenArgs[1].join(" ")).not.toContain("ForwardX11");
+  });
+
   it("appends the newline a prompt needs to complete", () => {
     const pty = new FakePty();
     const session = establishMasterInteractive({

@@ -43,6 +43,7 @@ const serialize = (draft: Pick<HostDraft, 'settings' | 'setupScript'>): string =
   return JSON.stringify({
     workingDirBase: draft.settings.workingDirBase ?? null,
     defaultSaveLocation: draft.settings.defaultSaveLocation ?? null,
+    forwardX11: draft.settings.forwardX11 ?? null,
     launch: launch
       ? {
           mode: launch.mode,
@@ -204,6 +205,10 @@ export const RemoteHostsTab: React.FC = () => {
         for (const key of ['workingDirBase', 'defaultSaveLocation'] as const) {
           if (settings[key] !== undefined && !settings[key].trim()) delete settings[key];
         }
+        // The unchecked toggle arrives as an explicit `undefined` (cleared,
+        // not `false`) — drop the key so the draft matches what the store
+        // will persist and dirtiness stays honest.
+        if (settings.forwardX11 === undefined) delete settings.forwardX11;
         return { ...prev, [selected]: { ...current, settings } };
       });
     },
@@ -513,6 +518,22 @@ export const RemoteHostsTab: React.FC = () => {
                 directory (e.g. <code>…/pdv-projects</code>) keeps them
                 grouped. Saved projects should NOT live in purged scratch
                 space.
+              </div>
+
+              <label htmlFor="sr-forward-x11">Forward X11</label>
+              <input
+                id="sr-forward-x11"
+                type="checkbox"
+                checked={draft.settings.forwardX11 ?? false}
+                onChange={(e) =>
+                  editSettings({ forwardX11: e.target.checked || undefined })
+                }
+              />
+              <div className="settings-general-desc">
+                Request X11 forwarding when connecting, so interactive plot
+                windows can open from this host. Needs an X server running on
+                this machine (XQuartz on macOS). Applies to sessions started
+                after the change.
               </div>
             </div>
 

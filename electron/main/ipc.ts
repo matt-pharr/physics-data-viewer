@@ -855,6 +855,14 @@ export interface RemoteHostSettings {
   workingDirBase?: string;
   /** Default save location on this host; pushed like `workingDirBase`. */
   defaultSaveLocation?: string;
+  /**
+   * Request X11 forwarding (`-o ForwardX11=yes`) on connections to this
+   * host, so interactive matplotlib windows work without ssh-config
+   * knowledge (issue #377). Needs a local X server (XQuartz on macOS).
+   * Applies to sessions started after the change: the session daemon
+   * captures its environment — including DISPLAY — once at boot.
+   */
+  forwardX11?: boolean;
   /** Kernel launch configuration. */
   launch?: RemoteHostLaunchConfig;
 }

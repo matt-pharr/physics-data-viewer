@@ -2360,6 +2360,17 @@ swap — a failure declines the move loudly and leaves the window on its
 working local session, because a kernel quietly writing to the NFS home
 the user pointed at scratch is the harder bug to notice.
 
+The per-host **Forward X11** toggle (issue #377) requests `ForwardX11=yes`
+in two places, because they answer different questions: on a master PDV
+creates (so forwarding is *allowed* on the connection at all), and on the
+session-attach channel (whose environment the `--create`-spawned daemon
+inherits — that DISPLAY, captured once at daemon boot, is what the
+kernels' matplotlib sees). A master borrowed from the user's own ssh
+config is never reconfigured; there the channel-level request succeeds
+exactly when the user's config permits forwarding. The known limitation
+stands: a DISPLAY rots if the forwarding channel dies while the daemon
+lives — the comm-carried plot window (issue #369) is the structural fix.
+
 **Launcher routing** (`remote/remote-launchers.ts`, consumed by
 `ipc-register-launchers.ts`) routes the shell-side external-app launchers
 by session kind, read synchronously from the session router + connection
@@ -3052,7 +3063,7 @@ PDV does not ship a static API reference, which would drift. Instead:
 The following features are acknowledged as future work and must not influence the current architecture in ways that complicate the above design:
 
 - **Modules ecosystem hardening** — core module lifecycle is implemented (install from disk/GitHub, import, uninstall, update, bundled examples, project-local storage); deeper registry/trust features are deferred
-- **Remote session completeness** — remote sessions work end to end (§11.7 area above: connect, bootstrap, session daemon, environment provisioning via the bundled uv, path picking, launcher routing incl. the Open Terminal launcher); still deferred are Slurm-aware kernel launch (interactive analysis on a login node is the sanctioned beta scope; the per-host setup script, login-environment capture, Remote Hosts settings tab and per-host launch-config schema have landed), remote Julia sessions (need juliaup on the host), remote→local file export, and the VS Code-style command palette that will replace the placeholder path picker
+- **Remote session completeness** — remote sessions work end to end (§11.7 area above: connect, bootstrap, session daemon, environment provisioning via the bundled uv, path picking, launcher routing incl. the Open Terminal launcher and the per-host Forward X11 toggle); still deferred are Slurm-aware kernel launch (interactive analysis on a login node is the sanctioned beta scope; the per-host setup script, login-environment capture, Remote Hosts settings tab and per-host launch-config schema have landed), remote Julia sessions (need juliaup on the host), remote→local file export, and the VS Code-style command palette that will replace the placeholder path picker
 - **Local→remote upload import and remote MCP** — explicitly excluded from remote v1
 - **Multiple simultaneous kernels** — architecture supports it (kernels have IDs) but UI exposes only one at a time
 - **R kernel support** — deferred; would follow the `pdv-julia` pattern (a kernel-side package implementing the language-agnostic protocol of §3)

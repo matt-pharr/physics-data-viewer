@@ -162,6 +162,14 @@ export interface EstablishMasterOptions {
    * the alias (ProxyCommand, IdentityAgent, User) still applies.
    */
   hostNameOverride?: string;
+  /**
+   * Request X11 forwarding on the master (`-o ForwardX11=yes`), from the
+   * per-host toggle (issue #377). The master's forwarding alone is not
+   * enough for a session daemon to inherit a DISPLAY — the channel that
+   * spawns it must request forwarding too (see `remote-channel.ts`) — but
+   * an un-forwarded master would refuse the channel's request outright.
+   */
+  forwardX11?: boolean;
   /** Called with each chunk of ssh output, for live display. */
   onOutput?: (chunk: string) => void;
   /** Injected `node-pty` replacement. Tests pass a fake; production omits it. */
@@ -288,6 +296,9 @@ function buildMasterArgs(options: EstablishMasterOptions): string[] {
     ...(options.hostNameOverride
       ? ["-o", `HostName=${options.hostNameOverride}`]
       : []),
+    // Per-host X11 toggle (see forwardX11's JSDoc). `ForwardX11=yes` rather
+    // than `-X` so it reads uniformly beside the other -o options.
+    ...(options.forwardX11 ? ["-o", "ForwardX11=yes"] : []),
     "-o",
     `ConnectTimeout=${options.connectTimeoutSeconds ?? DEFAULT_CONNECT_TIMEOUT_SECONDS}`,
     // A host whose config sets RemoteCommand would otherwise conflict with

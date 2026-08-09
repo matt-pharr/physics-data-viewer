@@ -186,6 +186,8 @@ export function registerRemoteIpcHandlers(
       // last seen on (recorded below at session start). See the option's
       // JSDoc for why a round-robin alias needs this.
       sessionNodeFor: (host) => options.hostStore?.get(host).sessionNode ?? null,
+      // Per-host X11 toggle (#377), applied to masters PDV creates.
+      forwardX11For: (host) => options.hostStore?.get(host).forwardX11 === true,
     });
 
   handleIpc(IPC.remote.listHosts, async (): Promise<RemoteHostAlias[]> => manager.listHosts());
@@ -471,6 +473,10 @@ export function registerRemoteIpcHandlers(
           create: true,
           sshPath,
           muxOptions: { batchMode },
+          // Per-host X11 toggle (#377): the daemon spawned by --create
+          // inherits this channel's env, so forwarding requested HERE is
+          // what gives its kernels a DISPLAY.
+          forwardX11: host ? options.hostStore?.get(host).forwardX11 === true : false,
           onStderr: (chunk) => {
             attachStderrTail = (attachStderrTail + chunk).slice(-4096);
           },

@@ -132,6 +132,14 @@ export interface RemoteConnectionOptions {
    * guard on the host is the backstop for that case.
    */
   sessionNodeFor?: (host: string) => string | null;
+  /**
+   * Whether the per-host "Forward X11" toggle is on for a host (issue
+   * #377). Applied to masters PDV creates; a master the user already runs
+   * is not PDV's to reconfigure (the channel-level request in
+   * `remote-channel.ts` still applies there, and succeeds exactly when the
+   * user's own config enabled forwarding on it).
+   */
+  forwardX11For?: (host: string) => boolean;
 }
 
 /**
@@ -447,6 +455,7 @@ export class RemoteConnectionManager {
       host,
       controlPath,
       hostNameOverride: pin ?? undefined,
+      forwardX11: this.options.forwardX11For?.(host) ?? false,
       sshPath: this.options.sshPath,
       ptyModule: this.options.ptyModule,
       overallTimeoutMs: this.options.overallTimeoutMs,
