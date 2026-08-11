@@ -99,7 +99,13 @@ export const ActivityBar: React.FC<ActivityBarProps> = ({
         className="activity-btn"
         onClick={onOpenWorkingDir}
         disabled={!kernelId}
-        title={kernelId ? 'Open working directory in editor' : 'Start a kernel to open its working directory'}
+        title={
+          !kernelId
+            ? 'Start a kernel to open its working directory'
+            : isRemote && remoteHost
+              ? `Open working directory on ${remoteHost} in editor`
+              : 'Open working directory in editor'
+        }
       >
         <FolderCodeIcon />
       </button>

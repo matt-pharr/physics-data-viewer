@@ -524,14 +524,19 @@ export const RemoteHostsTab: React.FC = () => {
             <h4 className="settings-general-section">Display</h4>
             <div className="settings-general-grid">
               <label htmlFor="sr-forward-x11">Forward X11</label>
-              <input
-                id="sr-forward-x11"
-                type="checkbox"
-                checked={draft.settings.forwardX11 ?? false}
-                onChange={(e) =>
-                  editSettings({ forwardX11: e.target.checked || undefined })
-                }
-              />
+              {/* The wrapper keeps the checkbox glyph-sized and beside its
+                  label — a bare input stretches to the grid column and
+                  becomes a huge invisible hit target (B5a UI audit). */}
+              <div className="settings-general-check">
+                <input
+                  id="sr-forward-x11"
+                  type="checkbox"
+                  checked={draft.settings.forwardX11 ?? false}
+                  onChange={(e) =>
+                    editSettings({ forwardX11: e.target.checked || undefined })
+                  }
+                />
+              </div>
               <div className="settings-general-desc">
                 Request X11 forwarding when connecting, so interactive plot
                 windows can open from this host. Needs an X server running on

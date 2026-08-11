@@ -2367,9 +2367,14 @@ session-attach channel (whose environment the `--create`-spawned daemon
 inherits — that DISPLAY, captured once at daemon boot, is what the
 kernels' matplotlib sees). A master borrowed from the user's own ssh
 config is never reconfigured; there the channel-level request succeeds
-exactly when the user's config permits forwarding. The known limitation
-stands: a DISPLAY rots if the forwarding channel dies while the daemon
-lives — the comm-carried plot window (issue #369) is the structural fix.
+exactly when the user's config permits forwarding. Toggling the setting
+while connected takes effect on the next session for real: the connect
+path compares the toggle against the state PDV's live master was
+established with and tears a mismatched master down rather than reusing
+it (a borrowed master is never rebuilt — it is the user's). The known
+limitation stands: a DISPLAY rots if the forwarding channel dies while
+the daemon lives — the comm-carried plot window (issue #369) is the
+structural fix.
 
 **Launcher routing** (`remote/remote-launchers.ts`, consumed by
 `ipc-register-launchers.ts`) routes the shell-side external-app launchers
@@ -2382,11 +2387,12 @@ Remote-SSH-capable editor (code/cursor/windsurf basenames, or an explicit
 `{host}`/`{path}` placeholders) spawns locally with
 `--remote ssh-remote+<host>` and makes its own connection via the user's
 ssh config; a TUI editor runs *on the host* inside the user's terminal
-preset wrapping `ssh -t` over PDV's ControlMaster (no re-auth, and the
-channel lands on the session's pinned node — which matters for node-local
-scratch working dirs, where a round-robin alias can land a Remote-SSH
-editor on the wrong node); anything else refuses with the alternatives
-named. `launchers.openTerminal` (the Open Terminal button) opens the
+preset wrapping `ssh -t` over PDV's ControlMaster (no re-auth while the
+master lives) with an `-o HostName=` pin to the recorded session node —
+so even a fresh connection after a master death lands beside the
+session's working dir, which matters for node-local scratch, where a
+round-robin alias can land a Remote-SSH editor on the wrong node;
+anything else refuses with the alternatives named. `launchers.openTerminal` (the Open Terminal button) opens the
 terminal preset around a local login shell in the working dir, or
 remotely around `ssh -t <host> 'cd <wd>; exec "${SHELL:-sh}" -l'`.
 `launchers.openAgent` refuses in remote sessions before doing any work —

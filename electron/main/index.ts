@@ -35,6 +35,7 @@ import { registerModuleWindowIpcHandlers } from "./ipc-register-module-windows";
 import { removeAllIpcHandlers } from "./ipc-registry";
 import { ModuleWindowManager } from "./module-window-manager";
 import { RemoteHostStore } from "./remote/host-config";
+import { RemoteServerHandle } from "./shell/remote-server";
 import { readMergedConfig, registerConfigBridge } from "./shell/config-bridge";
 import { SessionRouter } from "./shell/session-router";
 import type { LocalConfigStore } from "./shell/local-config-store";
@@ -124,10 +125,15 @@ export async function registerIpcHandlers(
     updateCheckStamp,
   });
 
+  // Per-host settings (directories, launch config, X11 toggle, recorded
+  // session node). Constructed per registration: a macOS window reopen
+  // builds a fresh one, which simply re-reads the file.
+  const hostStore = new RemoteHostStore(userDataDir);
+
   // Connection control only. Establishing an ssh connection and running a
   // session over it are separate steps: nothing here swaps the active
   // ServerHandle, so local mode is unaffected by its presence.
-  const remoteManager = registerRemoteIpcHandlers({
+  registerRemoteIpcHandlers({
     win,
     controlDir: path.join(userDataDir, "ssh-control"),
     // Built by `npm run build:server-bundle`. Absent in a checkout that has
@@ -136,10 +142,7 @@ export async function registerIpcHandlers(
     // Per-host setup-script master copies (one `<host>.sh` per alias),
     // edited in Settings → Remote Hosts.
     setupScriptDir: path.join(userDataDir, "remote-setup"),
-    // Per-host settings (directories, launch config, recorded session
-    // node). Constructed per registration: a macOS window reopen builds a
-    // fresh one, which simply re-reads the file.
-    hostStore: new RemoteHostStore(userDataDir),
+    hostStore,
     // Only a router can move the session; anything else (a bare handle in a
     // test) gets connection control without session swapping rather than a
     // menu item that fails when used.
@@ -168,18 +171,28 @@ export async function registerIpcHandlers(
         INTERNAL_CHANNELS.resolveTreeFile,
         treePath
       )) as string | null,
-    // Remote identity comes from the ROUTER's kind (is the active session
-    // remote?) plus the connection manager (which host, and is the master
-    // usable right now). Never from connection state alone: a remote
-    // session mid-reconnect must refuse ssh-carried launches, not fall
-    // back to spawning against cluster paths locally.
+    // Remote identity comes from the ROUTER'S ACTIVE HANDLE, never from
+    // the per-window connection manager: handles outlive window
+    // registrations (a macOS reopen builds a fresh manager with no
+    // connection), and the manager can be connected to a DIFFERENT host
+    // than the one serving the session (connect and startSession are
+    // separate steps). The handle carries the session's own host/control,
+    // and its connectionState gates ssh-carried launches — a session
+    // mid-reconnect refuses them rather than falling back to spawning
+    // against cluster paths locally.
     getRemoteContext: () => {
-      if (!(server instanceof SessionRouter) || server.kind !== "remote") {
-        return null;
-      }
+      const active = server instanceof SessionRouter ? server.active : null;
+      if (!(active instanceof RemoteServerHandle)) return null;
+      const target = active.launcherTarget;
+      if (!target) return { host: "", control: null, hostNameOverride: null };
+      const usable = active.connectionState === "connected";
       return {
-        host: remoteManager.getStatus().host ?? "",
-        control: remoteManager.control,
+        host: target.host,
+        control: usable ? target.control : null,
+        // Pin ssh-carried launches to the login node the session daemon
+        // lives on — a round-robin alias would otherwise land the
+        // terminal/editor beside a working dir it cannot see.
+        hostNameOverride: hostStore.get(target.host).sessionNode ?? null,
       };
     },
   });

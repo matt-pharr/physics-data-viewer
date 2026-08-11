@@ -284,6 +284,22 @@ describe("launchers.openTerminal", () => {
     expect(argv).toContain("cd '/tmp/wd'; exec");
   });
 
+  it("pins ssh-carried launches to the recorded session node", async () => {
+    setup({
+      remoteContext: { ...FEYN, hostNameOverride: "feynman.ap.columbia.edu" },
+      config: { launchers: { terminal: { preset: "kitty" } } },
+    });
+    const result = (await getHandler(IPC.launchers.openTerminal)({})) as {
+      success: boolean;
+    };
+    expect(result.success).toBe(true);
+    const [file, args] = childProcessMocks.spawn.mock.calls[0] as unknown as [
+      string,
+      string[],
+    ];
+    expect([file, ...args].join(" ")).toContain("HostName=feynman.ap.columbia.edu");
+  });
+
   it("remotely runs ssh -t to a login shell in the session working dir", async () => {
     setup({
       remoteContext: FEYN,

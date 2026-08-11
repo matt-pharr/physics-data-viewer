@@ -465,6 +465,10 @@ export function registerRemoteIpcHandlers(
 
     const handle = new RemoteServerHandle({
       sessionId,
+      // Launcher routing derives host/control from the HANDLE (via the
+      // router), never from the per-window manager — see the option's
+      // JSDoc for the window-reopen staleness this avoids.
+      launcherTarget: host ? { host, control } : undefined,
       openChannel: async ({ batchMode }) =>
         open({
           control,

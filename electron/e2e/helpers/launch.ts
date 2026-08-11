@@ -63,12 +63,24 @@ export interface LaunchedApp {
  * group, so signalling the negative pid reaps the whole family at once.
  */
 async function reapSessionDaemons(homeDir: string): Promise<void> {
+  // Layout owned by main/server/session-paths.ts (REMOTE_ROOT + run/sessions).
+  // If that layout ever moves, the canary below makes this reap fail loudly
+  // in the test log instead of silently regressing back to leaked daemons.
   const sessionsDir = path.join(homeDir, ".pdv-server", "run", "sessions");
   let entries: string[];
   try {
     entries = await fs.readdir(sessionsDir);
   } catch {
-    return; // No daemon ever started under this HOME.
+    try {
+      await fs.access(path.join(homeDir, ".pdv-server"));
+      console.error(
+        `[e2e] ${homeDir}/.pdv-server exists but run/sessions does not — ` +
+          `has the session-paths layout moved? Daemon reap skipped.`,
+      );
+    } catch {
+      // No daemon ever started under this HOME — the common local-spec case.
+    }
+    return;
   }
   for (const entry of entries) {
     try {
@@ -77,6 +89,14 @@ async function reapSessionDaemons(homeDir: string): Promise<void> {
       ) as { pid?: number };
       if (typeof meta.pid !== "number" || !Number.isInteger(meta.pid) || meta.pid <= 1) {
         continue;
+      }
+      try {
+        // Liveness probe first: signalling a recycled pgid would hit an
+        // unrelated process group. kill(pid, 0) narrows the window to
+        // genuinely-alive daemons recorded seconds ago by this launch.
+        process.kill(meta.pid, 0);
+      } catch {
+        continue; // Daemon already exited.
       }
       try {
         process.kill(-meta.pid, "SIGTERM");

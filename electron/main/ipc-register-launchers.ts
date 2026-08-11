@@ -91,6 +91,13 @@ export interface RemoteLauncherContext {
    * editor makes its own connection (`code --remote`) still work.
    */
   control: SshControl | null;
+  /**
+   * The concrete login node the session daemon lives on, or null when
+   * none is recorded. Pins ssh-carried launches so a fresh connection
+   * (dead master, round-robin alias) still lands beside the session's
+   * working dir.
+   */
+  hostNameOverride?: string | null;
 }
 
 /** Dependency bag for {@link registerLaunchersIpcHandlers}. */
@@ -171,6 +178,7 @@ export function registerLaunchersIpcHandlers(
           // For directories, auto-detect: unlike the local no-wrap rule, a
           // TUI dirCommand (vim + netrw) is genuinely usable over ssh.
           isTuiEditor: target === "file" ? editor?.isTuiEditor : undefined,
+          target,
         },
       );
       if (resolution.kind === "unsupported") {
@@ -183,7 +191,9 @@ export function registerLaunchersIpcHandlers(
         if (!remote.control) {
           return { success: false, error: REMOTE_CONNECTION_DOWN_ERROR };
         }
-        const ssh = buildSshLauncherCommand(remote.control, resolution.remoteCommand);
+        const ssh = buildSshLauncherCommand(remote.control, resolution.remoteCommand, {
+          hostNameOverride: remote.hostNameOverride,
+        });
         spawnSpec = wrapInTerminalPreset(ssh.file, ssh.args, {
           terminal: config.launchers?.terminal,
         });
@@ -324,7 +334,9 @@ export function registerLaunchersIpcHandlers(
           return { success: false, error: REMOTE_CONNECTION_DOWN_ERROR };
         }
         const inner = remote?.control
-          ? buildSshLauncherCommand(remote.control, remoteLoginShellCommand(workingDir))
+          ? buildSshLauncherCommand(remote.control, remoteLoginShellCommand(workingDir), {
+              hostNameOverride: remote.hostNameOverride,
+            })
           : loginShellCommand(workingDir);
         const spawnSpec = wrapInTerminalPreset(inner.file, inner.args, {
           terminal: config.launchers?.terminal,

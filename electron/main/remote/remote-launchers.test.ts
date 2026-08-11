@@ -93,6 +93,34 @@ describe("resolveRemoteEditorSpawn", () => {
     }
   });
 
+  it("the dir-target refusal names remoteDirCommand, the key that path reads", () => {
+    const res = resolveRemoteEditorSpawn("subl {}", {
+      host: "feyn",
+      targetPath: "/u/mp/wd",
+      target: "dir",
+    });
+    expect(res.kind).toBe("unsupported");
+    if (res.kind === "unsupported") {
+      expect(res.message).toContain("remoteDirCommand");
+      expect(res.message).not.toContain("remoteFileCommand");
+    }
+  });
+
+  it("tokenizes templates with shell-like quoting, substituting after the split", () => {
+    const res = resolveRemoteEditorSpawn(undefined, {
+      host: "feyn",
+      targetPath: "/u/mp/has space/f.py",
+      template: `"/Applications/My Editor.app/bin/ed" --open {path}`,
+    });
+    expect(res).toEqual({
+      kind: "local-spawn",
+      file: "/Applications/My Editor.app/bin/ed",
+      // Substitution happens inside an already-split token, so the spaced
+      // path stays one argv element without the user quoting {path}.
+      args: ["--open", "/u/mp/has space/f.py"],
+    });
+  });
+
   it("a config template wins over everything, substituting {host} and {path}", () => {
     const res = resolveRemoteEditorSpawn("subl {}", {
       host: "flux",
@@ -151,6 +179,28 @@ describe("buildSshLauncherCommand", () => {
   it("never forces BatchMode — the terminal is a place a prompt can be answered", () => {
     const spec = buildSshLauncherCommand({ host: "feyn", controlPath: null }, "true");
     expect(spec.args.join(" ")).not.toContain("BatchMode");
+  });
+
+  it("pins a fresh connection to the recorded session node via -o HostName=", () => {
+    // The pin is what keeps a dead-master relaunch off a round-robin'd
+    // OTHER login node whose node-local scratch cannot see the session's
+    // working dir.
+    const spec = buildSshLauncherCommand(
+      { host: "flux", controlPath: "/tmp/ctl" },
+      "true",
+      { hostNameOverride: "flux-login2.pppl.gov" },
+    );
+    const at = spec.args.indexOf("HostName=flux-login2.pppl.gov");
+    expect(at).toBeGreaterThan(0);
+    expect(spec.args[at - 1]).toBe("-o");
+    expect(at).toBeLessThan(spec.args.indexOf("flux"));
+
+    const unpinned = buildSshLauncherCommand(
+      { host: "flux", controlPath: null },
+      "true",
+      { hostNameOverride: null },
+    );
+    expect(unpinned.args.join(" ")).not.toContain("HostName");
   });
 });
 

@@ -273,9 +273,12 @@ describe("establishMasterInteractive (injected pty)", () => {
     const withJoined = seenArgs[0].join(" ");
     expect(withJoined).toContain("-o ForwardX11=yes");
     // As an -o pair, before the destination — where ssh reads options.
-    expect(seenArgs[0].indexOf("ForwardX11=yes")).toBeLessThan(
-      seenArgs[0].indexOf("feyn"),
-    );
+    // Guard the index first: indexOf's -1 would vacuously pass the
+    // less-than comparison if the flag were missing.
+    const x11At = seenArgs[0].indexOf("ForwardX11=yes");
+    expect(x11At).toBeGreaterThan(0);
+    expect(seenArgs[0][x11At - 1]).toBe("-o");
+    expect(x11At).toBeLessThan(seenArgs[0].indexOf("feyn"));
     expect(seenArgs[1].join(" ")).not.toContain("ForwardX11");
   });
 

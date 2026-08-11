@@ -27,6 +27,7 @@ import {
   buildEditorSpawn,
   isTerminalEditorCommand,
   posixShellQuote,
+  tokenizeShellLike,
 } from "../editor-spawn";
 import { controlPathOption, type SshControl } from "./ssh-mux";
 
@@ -63,9 +64,13 @@ export type RemoteEditorResolution =
  *
  * Resolution order:
  * 1. An explicit config template (`launchers.editor.remoteFileCommand` /
- *    `remoteDirCommand`) wins outright. `{host}`/`{path}` are substituted
- *    inside tokens (so `ssh-remote+{host}` works); a template without
- *    `{path}` gets the path appended.
+ *    `remoteDirCommand`) wins outright. The template is tokenized with
+ *    shell-like quoting (same rules as `launchers.terminal.customTemplate`),
+ *    then `{host}`/`{path}` are substituted inside tokens (so
+ *    `ssh-remote+{host}` works); a template without `{path}` gets the path
+ *    appended. The result is spawned DIRECTLY and DETACHED — no shell, no
+ *    terminal window — so templates must name a GUI program; a TUI or bare
+ *    `ssh` command here would run invisibly and appear to do nothing.
  * 2. A TUI editor (the explicit `isTuiEditor` flag, else basename
  *    auto-detection) becomes an `ssh-terminal` command running the editor
  *    on the host — riding PDV's master means no re-auth and landing on the
@@ -85,11 +90,22 @@ export function resolveRemoteEditorSpawn(
     targetPath: string;
     template?: string;
     isTuiEditor?: boolean;
+    /** What the path is, for accurate refusal copy. Defaults to "file". */
+    target?: "file" | "dir";
   },
 ): RemoteEditorResolution {
   const template = opts.template?.trim();
   if (template) {
-    const parts = template.split(/\s+/).filter(Boolean);
+    // Tokenize with the same shell-like quoting as terminal custom
+    // templates, so a quoted binary path survives — then substitute inside
+    // tokens. Placeholder substitution happens AFTER tokenizing, so a path
+    // with spaces stays one argv element without the user quoting it.
+    let parts: string[];
+    try {
+      parts = tokenizeShellLike(template);
+    } catch {
+      parts = template.split(/\s+/).filter(Boolean);
+    }
     const expanded = parts.map((part) =>
       part.replace(/\{host\}/g, opts.host).replace(/\{path\}/g, opts.targetPath),
     );
@@ -122,13 +138,15 @@ export function resolveRemoteEditorSpawn(
     };
   }
 
+  const templateKey =
+    opts.target === "dir" ? "remoteDirCommand" : "remoteFileCommand";
   return {
     kind: "unsupported",
     message:
-      `"${bin}" cannot open files on the remote host. Use VS Code, Cursor, or ` +
-      `Windsurf (they connect via Remote SSH), pick a terminal editor like vim, ` +
-      `or set a custom remote command in the launchers config ` +
-      `(launchers.editor.remoteFileCommand).`,
+      `"${bin}" cannot open ${opts.target === "dir" ? "directories" : "files"} ` +
+      `on the remote host. Use VS Code, Cursor, or Windsurf (they connect via ` +
+      `Remote SSH), pick a terminal editor like vim, or set a custom remote ` +
+      `command in the launchers config (launchers.editor.${templateKey}).`,
   };
 }
 
@@ -137,28 +155,34 @@ export function resolveRemoteEditorSpawn(
  * terminal the user can see.
  *
  * `-t` forces tty allocation (ssh skips it when given a remote command), so
- * TUI editors and login shells behave exactly as in a hand-typed ssh. The
- * ControlPath rides PDV's master when one exists — no second auth prompt,
- * and the channel lands on the same login node as the session, which
- * matters when the working dir is node-local scratch. `BatchMode` is
- * deliberately not forced: this runs in a visible terminal where an auth
- * prompt is answerable if the master has died.
+ * TUI editors and login shells behave exactly as in a hand-typed ssh.
+ * While the master is alive, the channel rides it — no second auth prompt,
+ * and it reaches the same login node as the session. If the master has
+ * died, ssh opens a FRESH connection in the visible terminal (auth prompts
+ * are answerable there — `BatchMode` is deliberately not forced), and the
+ * `hostNameOverride` pin keeps that fresh connection aimed at the login
+ * node the session daemon lives on: without it, a round-robin alias could
+ * land the terminal beside a node-local working dir it cannot see.
  *
  * @param control - The session's host + control socket (null path = the
  *   user's own ssh config supplies the master).
  * @param remoteCommand - Shell command to run on the host (already quoted
  *   by the caller where needed).
- * @param opts - Optional ssh binary override (test seam).
+ * @param opts - Optional ssh binary override (test seam) and the recorded
+ *   session-node pin.
  * @returns Spawn-ready file + args for the local `ssh` process.
  */
 export function buildSshLauncherCommand(
   control: SshControl,
   remoteCommand: string,
-  opts?: { sshPath?: string },
+  opts?: { sshPath?: string; hostNameOverride?: string | null },
 ): { file: string; args: string[] } {
   const args = ["-t", "-o", "RemoteCommand=none"];
   if (control.controlPath) {
     args.push("-o", controlPathOption(control.controlPath));
+  }
+  if (opts?.hostNameOverride) {
+    args.push("-o", `HostName=${opts.hostNameOverride}`);
   }
   args.push(control.host, remoteCommand);
   return { file: opts?.sshPath ?? "ssh", args };
