@@ -229,7 +229,7 @@ export const RemoteHostsTab: React.FC = () => {
         return { ...prev, [selected]: { ...current, baseline: serialize(sent) } };
       });
       setConfigured(await window.pdv.remote.listConfiguredHosts().catch(() => configured));
-      setSaveStatus('Saved. Directory and script changes apply the next time a session starts on this host.');
+      setSaveStatus('Saved. Changes apply the next time a session starts on this host.');
     } catch (err) {
       setSaveStatus(`Could not save: ${err instanceof Error ? err.message : String(err)}`);
     }
@@ -519,7 +519,10 @@ export const RemoteHostsTab: React.FC = () => {
                 grouped. Saved projects should NOT live in purged scratch
                 space.
               </div>
+            </div>
 
+            <h4 className="settings-general-section">Display</h4>
+            <div className="settings-general-grid">
               <label htmlFor="sr-forward-x11">Forward X11</label>
               <input
                 id="sr-forward-x11"
