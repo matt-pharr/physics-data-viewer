@@ -728,9 +728,9 @@ def check_gui_allowed(gui: Any) -> tuple[bool, str]:
         return (
             False,
             "this session has no display for native windows — X forwarding "
-            "is not active. To enable it, turn on ForwardX11 for this host "
-            "in your SSH config (with an X server such as XQuartz running "
-            "locally) and start a new session",
+            "is not active. To enable it, turn on 'Forward X11' for this "
+            "host in Settings → Remote (with an X server such as XQuartz "
+            "running locally) and start a new session",
         )
     if state == "dead":
         return (

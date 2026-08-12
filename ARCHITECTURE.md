@@ -1065,10 +1065,14 @@ invokes external applications:
   (`terminal-app` on macOS, `x-terminal-emulator` on Linux, `wt.exe` on
   Windows).
 
-- `launchers.editor` — `{ fileCommand?, dirCommand?, isTuiEditor? }`. The
-  command PDV uses to open a script (`fileCommand`) or a directory
-  (`dirCommand`); `{}` is the path placeholder. `isTuiEditor` forces terminal
-  wrapping on/off; when unset PDV auto-detects from the command basename.
+- `launchers.editor` — `{ fileCommand?, dirCommand?, isTuiEditor?,
+  remoteFileCommand?, remoteDirCommand? }`. The command PDV uses to open a
+  script (`fileCommand`) or a directory (`dirCommand`); `{}` is the path
+  placeholder. `isTuiEditor` forces terminal wrapping on/off; when unset PDV
+  auto-detects from the command basename. The two `remote*` keys are
+  optional overrides for remote sessions (`{host}`/`{path}` placeholders,
+  hand-edited config only — the built-in derivation covers
+  code/cursor/windsurf and TUI editors; see §11.7 launcher routing).
   This slot supersedes the legacy `pythonEditorCmd` / `juliaEditorCmd` keys —
   `ConfigStore` migrates a pre-existing `pythonEditorCmd` into
   `launchers.editor.fileCommand` once, at load, and drops the legacy keys.
@@ -1995,7 +1999,7 @@ The API surface:
 - `window.pdv.environment.*` — Python environment management: `list`, `check`, `install`, `refresh`, `activeInfo` (active kernel's environment metadata — mode, interpreter, Python version — for the Project Environment tab), plus the uv package UI: `listPackages`, `addPackage`, `removePackage`, `upgradePackage`; push: `onInstallOutput(cb) → unsub`, `onEnvActivity(cb) → unsub` (streaming uv output)
 - `window.pdv.chrome.*` — window chrome controls: `getInfo`, `minimize`, `toggleMaximize`, `close`; push: `onStateChanged(cb) → unsub`
 - `window.pdv.system.*` — constant host facts injected at preload time: `platform` (the main process's `process.platform`), `supportedPythonVersions` and `defaultPythonVersion` (the New Project dialog's version range, from `python-versions.ts`), and their Julia siblings `supportedJuliaVersions` and `defaultJuliaVersion` (from `julia-versions.ts`, §10.6.5). Exposed as plain values, not functions — they never change during a session, so they need no IPC channel
-- `window.pdv.launchers.*` — action-bar external-app launchers: `openAgent` (launch the configured AI agent in a terminal), `openWorkingDir` (open the active kernel's working directory in the configured editor/IDE), `checkAvailability` (probe whether a terminal/editor/file-manager is installed, without launching it — used to gate Settings Save)
+- `window.pdv.launchers.*` — action-bar external-app launchers: `openAgent` (launch the configured AI agent in a terminal; local sessions only), `openWorkingDir` (open the active kernel's working directory in the configured editor/IDE), `openTerminal` (open the user's terminal in the working directory — over `ssh -t` in remote sessions), `checkAvailability` (probe whether a terminal/editor/file-manager is installed, without launching it — used to gate Settings Save)
 - `window.pdv.progress.*` — operation progress: push only: `onProgress(cb) → unsub`
 - `window.pdv.menu.*` — menu bridge: `updateRecentProjects(paths)`, `onAction(cb) → unsub`
 - `window.pdv.autosave.*` — autosave lifecycle: `run`, `clear`, `check`, `scanWorkingDirs`, `recoverUnsaved`, `deleteOrphan`; push: `onTrigger(cb) → unsub`, `onInFlightChange(cb) → unsub`
@@ -2355,6 +2359,46 @@ keys: at `startSession` the configured values are pushed into the host's
 swap — a failure declines the move loudly and leaves the window on its
 working local session, because a kernel quietly writing to the NFS home
 the user pointed at scratch is the harder bug to notice.
+
+The per-host **Forward X11** toggle (issue #377) requests `ForwardX11=yes`
+in two places, because they answer different questions: on a master PDV
+creates (so forwarding is *allowed* on the connection at all), and on the
+session-attach channel (whose environment the `--create`-spawned daemon
+inherits — that DISPLAY, captured once at daemon boot, is what the
+kernels' matplotlib sees). A master borrowed from the user's own ssh
+config is never reconfigured; there the channel-level request succeeds
+exactly when the user's config permits forwarding. Toggling the setting
+while connected takes effect on the next session for real: the connect
+path compares the toggle against the state PDV's live master was
+established with and tears a mismatched master down rather than reusing
+it (a borrowed master is never rebuilt — it is the user's). The known
+limitation stands: a DISPLAY rots if the forwarding channel dies while
+the daemon lives — the comm-carried plot window (issue #369) is the
+structural fix.
+
+**Launcher routing** (`remote/remote-launchers.ts`, consumed by
+`ipc-register-launchers.ts`) routes the shell-side external-app launchers
+by session kind, read synchronously from the session router + connection
+manager — never from connection *state* alone, so a remote session
+mid-reconnect refuses ssh-carried launches rather than falling back to
+spawning cluster paths locally. `script.edit` / `openWorkingDir`: a
+Remote-SSH-capable editor (code/cursor/windsurf basenames, or an explicit
+`launchers.editor.remoteFileCommand`/`remoteDirCommand` template with
+`{host}`/`{path}` placeholders) spawns locally with
+`--remote ssh-remote+<host>` and makes its own connection via the user's
+ssh config; a TUI editor runs *on the host* inside the user's terminal
+preset wrapping `ssh -t` over PDV's ControlMaster (no re-auth while the
+master lives) with an `-o HostName=` pin to the recorded session node —
+so even a fresh connection after a master death lands beside the
+session's working dir, which matters for node-local scratch, where a
+round-robin alias can land a Remote-SSH editor on the wrong node;
+anything else refuses with the alternatives named. `launchers.openTerminal` (the Open Terminal button) opens the
+terminal preset around a local login shell in the working dir, or
+remotely around `ssh -t <host> 'cd <wd>; exec "${SHELL:-sh}" -l'`.
+`launchers.openAgent` refuses in remote sessions before doing any work —
+MCP is local-only (§15.9), and the refusal is also what makes the
+`.pdv-mcp.json` write (which targets the kernel's working directory, a
+cluster path when remote) unreachable cross-host.
 
 `shell/remote-server.ts` is the remote `ServerHandle`. The transport is
 unchanged — an ssh channel is a stream pair and `RpcClient` already takes one
@@ -3025,7 +3069,7 @@ PDV does not ship a static API reference, which would drift. Instead:
 The following features are acknowledged as future work and must not influence the current architecture in ways that complicate the above design:
 
 - **Modules ecosystem hardening** — core module lifecycle is implemented (install from disk/GitHub, import, uninstall, update, bundled examples, project-local storage); deeper registry/trust features are deferred
-- **Remote session completeness** — remote sessions work end to end (§11.7 area above: connect, bootstrap, session daemon, environment provisioning via the bundled uv, path picking); still deferred are Slurm-aware kernel launch (interactive analysis on a login node is the sanctioned beta scope; the per-host setup script, login-environment capture, Remote Hosts settings tab and per-host launch-config schema have landed), remote Julia sessions (need juliaup on the host), remote→local file export, remote launchers, and the VS Code-style command palette that will replace the placeholder path picker
+- **Remote session completeness** — remote sessions work end to end (§11.7 area above: connect, bootstrap, session daemon, environment provisioning via the bundled uv, path picking, launcher routing incl. the Open Terminal launcher and the per-host Forward X11 toggle); still deferred are Slurm-aware kernel launch (interactive analysis on a login node is the sanctioned beta scope; the per-host setup script, login-environment capture, Remote Hosts settings tab and per-host launch-config schema have landed), remote Julia sessions (need juliaup on the host), remote→local file export, and the VS Code-style command palette that will replace the placeholder path picker
 - **Local→remote upload import and remote MCP** — explicitly excluded from remote v1
 - **Multiple simultaneous kernels** — architecture supports it (kernels have IDs) but UI exposes only one at a time
 - **R kernel support** — deferred; would follow the `pdv-julia` pattern (a kernel-side package implementing the language-agnostic protocol of §3)

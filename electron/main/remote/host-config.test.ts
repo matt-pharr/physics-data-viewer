@@ -53,6 +53,35 @@ describe("RemoteHostStore persistence", () => {
     expect(store.get("nowhere")).toEqual({});
   });
 
+  it("round-trips the forwardX11 toggle and drops a non-boolean value", () => {
+    const dir = tempDir();
+    const store = new RemoteHostStore(dir);
+    store.setSettings("feyn", { forwardX11: true });
+    expect(new RemoteHostStore(dir).get("feyn")).toEqual({ forwardX11: true });
+
+    // parseRecord is a hardcoded whitelist: a field missing its branch is
+    // silently dropped on save AND load. A truthy string must not survive
+    // as a boolean — and only THAT key may be dropped, not the record
+    // (the seeded dir setting must survive the bad value).
+    store.setSettings("feyn", {
+      workingDirBase: "/scratch/mp",
+      forwardX11: "yes" as unknown as boolean,
+    });
+    expect(new RemoteHostStore(dir).get("feyn")).toEqual({
+      workingDirBase: "/scratch/mp",
+    });
+  });
+
+  it("a full-replace save without forwardX11 clears a previously-set toggle", () => {
+    const dir = tempDir();
+    const store = new RemoteHostStore(dir);
+    store.setSettings("feyn", { workingDirBase: "/scratch/mp", forwardX11: true });
+    store.setSettings("feyn", { workingDirBase: "/scratch/mp" });
+    expect(new RemoteHostStore(dir).get("feyn")).toEqual({
+      workingDirBase: "/scratch/mp",
+    });
+  });
+
   it("get() returns a snapshot the caller cannot mutate in place", () => {
     const store = new RemoteHostStore(tempDir());
     store.setSettings("feyn", { workingDirBase: "/tmp/w" });

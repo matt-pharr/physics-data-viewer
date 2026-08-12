@@ -94,6 +94,31 @@ describe("RemoteHostsTab", () => {
     );
   });
 
+  it("saves the Forward X11 toggle, and unchecking clears the key entirely", async () => {
+    await renderLoaded();
+    const checkbox = screen.getByLabelText("Forward X11");
+    fireEvent.click(checkbox);
+    fireEvent.click(screen.getByRole("button", { name: /Save flux/ }));
+    await waitFor(() =>
+      expect(remote.setHostConfig).toHaveBeenCalledWith("flux", {
+        settings: { forwardX11: true },
+        setupScript: "",
+      }),
+    );
+
+    // Unchecking must drop the key (undefined), not persist `false` — the
+    // store treats an absent field as cleared and dirtiness compares the
+    // serialized shapes.
+    fireEvent.click(checkbox);
+    fireEvent.click(screen.getByRole("button", { name: /Save flux/ }));
+    await waitFor(() =>
+      expect(remote.setHostConfig).toHaveBeenLastCalledWith("flux", {
+        settings: {},
+        setupScript: "",
+      }),
+    );
+  });
+
   it("parks unsaved edits when switching hosts instead of destroying them", async () => {
     await renderLoaded();
     fireEvent.change(screen.getByLabelText("Working directory"), {

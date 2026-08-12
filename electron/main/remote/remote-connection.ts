@@ -132,6 +132,14 @@ export interface RemoteConnectionOptions {
    * guard on the host is the backstop for that case.
    */
   sessionNodeFor?: (host: string) => string | null;
+  /**
+   * Whether the per-host "Forward X11" toggle is on for a host (issue
+   * #377). Applied to masters PDV creates; a master the user already runs
+   * is not PDV's to reconfigure (the channel-level request in
+   * `remote-channel.ts` still applies there, and succeeds exactly when the
+   * user's own config enabled forwarding on it).
+   */
+  forwardX11For?: (host: string) => boolean;
 }
 
 /**
@@ -153,7 +161,33 @@ export class RemoteConnectionManager {
    */
   private master: PtyMasterSession | null = null;
 
+  /**
+   * Whether the held PDV-created master was established with X11
+   * forwarding. Meaningless while {@link master} is null. Compared against
+   * the per-host toggle on reconnect so a toggle flip rebuilds the master
+   * instead of being silently ignored.
+   */
+  private masterForwardX11 = false;
+
   constructor(private readonly options: RemoteConnectionOptions) {}
+
+  /**
+   * Stop and reap PDV's own master, leaving state ready for a fresh
+   * establish. No-op when PDV holds no master (borrowed connections are
+   * never PDV's to stop).
+   *
+   * @returns Nothing.
+   */
+  private async teardownOwnMaster(): Promise<void> {
+    const control = this.activeControl;
+    const master = this.master;
+    this.activeControl = null;
+    this.master = null;
+    if (master) {
+      if (control?.controlPath) await stopMaster(control, this.muxOptions());
+      master.close();
+    }
+  }
 
   /** The control socket of the live connection, or null when disconnected. */
   get control(): SshControl | null {
@@ -335,13 +369,25 @@ export class RemoteConnectionManager {
         message: "A connection attempt is already in progress.",
       };
     }
+    const wantX11 = this.options.forwardX11For?.(host) ?? false;
     if (this.status.phase === "connected" && this.status.host === host && this.activeControl) {
       const state = await checkMaster(this.activeControl, this.muxOptions());
       if (state === "alive") {
-        return { ok: true, failure: null, message: `Already connected to ${host}.` };
+        if (this.master && this.masterForwardX11 !== wantX11) {
+          // The per-host Forward X11 toggle changed since this master was
+          // established. X11 forwarding is a property of the master's
+          // connection, so reusing it would silently ignore the toggle —
+          // the "applies to the next session" promise in the settings copy
+          // depends on tearing the old master down here. Only PDV's own
+          // master is rebuilt; a borrowed one is the user's to configure.
+          await this.teardownOwnMaster();
+        } else {
+          return { ok: true, failure: null, message: `Already connected to ${host}.` };
+        }
       }
-      // The master died while PDV believed it was connected. Fall through
-      // and reconnect rather than reporting a connection that is not there.
+      // The master died while PDV believed it was connected (or was torn
+      // down above). Fall through and reconnect rather than reporting a
+      // connection that is not there.
     }
 
     const attemptId = crypto.randomBytes(8).toString("hex");
@@ -362,6 +408,15 @@ export class RemoteConnectionManager {
       this.options.controlDir,
       this.muxOptions(),
     );
+    if (masterState === "alive" && wantX11 && control.controlPath && !this.master) {
+      // An alive master at PDV's own socket path that THIS manager does
+      // not hold (a previous instance's leftover) has unknowable X11
+      // state. With the toggle on, guessing wrong silently produces
+      // sessions with no DISPLAY — stop it and establish fresh; it is
+      // PDV's socket, never the user's.
+      await stopMaster(control, this.muxOptions());
+      return await this.authenticate(host, attemptId, control);
+    }
     if (masterState === "alive") {
       this.activeControl = control;
       const node = await this.resolveNode(control);
@@ -419,6 +474,7 @@ export class RemoteConnectionManager {
     }
     this.activeControl = { host, controlPath };
     this.master = result.session;
+    this.masterForwardX11 = this.options.forwardX11For?.(host) ?? false;
     const node = await this.resolveNode(this.activeControl);
     const problem = await this.prepareHost(host, attemptId, this.activeControl);
     if (problem) return this.fail(host, attemptId, "bootstrap", problem);
@@ -447,6 +503,7 @@ export class RemoteConnectionManager {
       host,
       controlPath,
       hostNameOverride: pin ?? undefined,
+      forwardX11: this.options.forwardX11For?.(host) ?? false,
       sshPath: this.options.sshPath,
       ptyModule: this.options.ptyModule,
       overallTimeoutMs: this.options.overallTimeoutMs,
@@ -538,19 +595,12 @@ export class RemoteConnectionManager {
    */
   async disconnect(): Promise<void> {
     this.cancel();
-    const control = this.activeControl;
-    const master = this.master;
-    this.activeControl = null;
-    this.master = null;
-    if (master) {
-      // PDV holds this master's process, so ask ssh to stop first (clean
-      // channel shutdown) and then reap the process, which also takes any
-      // ProxyCommand helper with it.
-      if (control?.controlPath) await stopMaster(control, this.muxOptions());
-      master.close();
-    }
-    // A master PDV merely borrowed is left running: other terminals may be
-    // using it, and stopping it would be a surprising side effect.
+    // PDV holds its own master's process: ask ssh to stop first (clean
+    // channel shutdown), then reap the process, which also takes any
+    // ProxyCommand helper with it. A master PDV merely borrowed is left
+    // running: other terminals may be using it, and stopping it would be
+    // a surprising side effect.
+    await this.teardownOwnMaster();
     this.emit({ phase: "idle", host: null, attemptId: null, node: null, message: "Disconnected." });
   }
 }

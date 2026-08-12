@@ -103,6 +103,23 @@ export interface RemoteServerHandleOptions {
   reconnectDelaysMs?: readonly number[];
   /** Injected clock for tests; monotonic in production. */
   now?: () => number;
+  /**
+   * The session's ssh identity, for shell-side launcher routing (open a
+   * terminal / TUI editor on the session's host). Carried ON the handle —
+   * not read from the per-window connection manager — because handles
+   * outlive window registrations: after a macOS window reopen the fresh
+   * registration builds a fresh manager with no connection state, while
+   * the router keeps serving this handle. Deriving launcher targets from
+   * the manager there would refuse launches on a healthy session (or,
+   * worse, aim them at a host the manager later connected to while this
+   * handle's session stayed elsewhere).
+   */
+  launcherTarget?: {
+    /** The ssh alias/destination this session was started against. */
+    host: string;
+    /** The control socket its channels ride (null = user-config master). */
+    control: { host: string; controlPath: string | null };
+  };
 }
 
 /** Where a remote session's connection stands. */
@@ -158,6 +175,17 @@ export class RemoteServerHandle implements ServerHandle {
   constructor(opts: RemoteServerHandleOptions) {
     this.opts = opts;
     this.now = opts.now ?? (() => Number(process.hrtime.bigint() / 1_000_000n));
+  }
+
+  /**
+   * The session's ssh identity for launcher routing, or null when the
+   * creator supplied none. See {@link RemoteServerHandleOptions.launcherTarget}
+   * for why this lives on the handle rather than the connection manager.
+   *
+   * @returns Host + control socket, or null.
+   */
+  get launcherTarget(): RemoteServerHandleOptions["launcherTarget"] | null {
+    return this.opts.launcherTarget ?? null;
   }
 
   /**

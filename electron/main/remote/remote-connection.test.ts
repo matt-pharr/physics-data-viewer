@@ -252,6 +252,34 @@ describe("session-node pinning", () => {
     await manager.disconnect();
   }, 30_000);
 
+  it("rebuilds PDV's own master when the Forward X11 toggle changed", async () => {
+    setEnv("FAKE_SSH_MASTER", "stateful");
+    setEnv("FAKE_SSH_AUTH", "hold");
+    const logPath = path.join(dir, "ssh-args.log");
+    setEnv("FAKE_SSH_LOG", logPath);
+    let x11 = false;
+    const manager = makeManager({ forwardX11For: () => x11 });
+
+    expect((await manager.connect("feyn")).ok).toBe(true);
+    expect(masterInvocations(logPath)).toHaveLength(1);
+    expect(masterInvocations(logPath)[0]).not.toContain("ForwardX11");
+
+    // Unchanged toggle → the live master is reused, no second establish.
+    expect((await manager.connect("feyn")).ok).toBe(true);
+    expect(masterInvocations(logPath)).toHaveLength(1);
+
+    // Toggle flipped → the old master (no forwarding) must be torn down
+    // and a fresh one established WITH the flag, or the settings copy
+    // ("applies to the next session") silently lies.
+    x11 = true;
+    const result = await manager.connect("feyn");
+    expect(result.ok).toBe(true);
+    const masters = masterInvocations(logPath);
+    expect(masters).toHaveLength(2);
+    expect(masters[1]).toContain("ForwardX11=yes");
+    await manager.disconnect();
+  }, 30_000);
+
   it("does not pin when nothing is recorded", async () => {
     setEnv("FAKE_SSH_MASTER", "stateful");
     setEnv("FAKE_SSH_AUTH", "hold");

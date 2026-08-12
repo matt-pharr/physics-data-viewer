@@ -10,8 +10,10 @@ import {
   escapeForAppleScriptString,
   expandTerminalTemplate,
   isTerminalEditorCommand,
+  loginShellCommand,
   resolveEditorSpawn,
   tokenizeShellLike,
+  wrapInTerminalPreset,
 } from "./editor-spawn";
 
 describe("buildEditorSpawn", () => {
@@ -489,5 +491,47 @@ describe("resolveEditorSpawn", () => {
     expect(args[1]).toBe(
       `tell application "Terminal" to do script "'vim' '/tmp/it'\\\\''s a test.py'" & "; exit"`,
     );
+  });
+});
+
+describe("loginShellCommand", () => {
+  it("cds with ';' so a vanished dir still opens a shell, quoting the path", () => {
+    expect(loginShellCommand("/tmp/my work", "linux")).toEqual({
+      file: "sh",
+      args: ["-c", `cd '/tmp/my work'; exec "\${SHELL:-sh}" -l`],
+    });
+  });
+
+  it("goes straight to the login shell without a directory", () => {
+    expect(loginShellCommand(null, "darwin")).toEqual({
+      file: "sh",
+      args: ["-c", `exec "\${SHELL:-sh}" -l`],
+    });
+  });
+
+  it("uses cmd.exe /K on Windows", () => {
+    expect(loginShellCommand("C:\\work", "win32")).toEqual({
+      file: "cmd.exe",
+      args: ["/K", "cd /d C:\\work"],
+    });
+  });
+});
+
+describe("wrapInTerminalPreset", () => {
+  it("wraps an arbitrary command in the selected preset", () => {
+    const { file, args } = wrapInTerminalPreset("ssh", ["-t", "feyn", "exec bash -l"], {
+      terminal: { preset: "kitty" },
+      platform: "linux",
+    });
+    expect(file).toBe("kitty");
+    expect(args).toEqual(["--", "ssh", "-t", "feyn", "exec bash -l"]);
+  });
+
+  it("falls back to the platform default when a custom template is empty", () => {
+    const { file } = wrapInTerminalPreset("sh", ["-c", "true"], {
+      terminal: { preset: "custom", customTemplate: "  " },
+      platform: "linux",
+    });
+    expect(file).toBe("x-terminal-emulator");
   });
 });

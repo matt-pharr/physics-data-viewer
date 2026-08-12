@@ -467,6 +467,15 @@ const App: React.FC = () => {
     });
   }, []);
 
+  const handleOpenTerminal = useCallback(() => {
+    void window.pdv.launchers.openTerminal().then((result) => {
+      if (!result.success) {
+        console.error('[pdv] failed to open terminal:', result.error);
+        window.alert(result.error ?? 'Failed to open a terminal.');
+      }
+    });
+  }, []);
+
   const handleKernelCrash = useCallback((crashedKernelId: string) => {
     if (crashedKernelId === currentKernelIdRef.current) {
       setKernelStatus('error');
@@ -1685,6 +1694,7 @@ const App: React.FC = () => {
           onSettingsClick={() => openSettings('general')}
           onAgentClick={handleOpenAgent}
           onOpenWorkingDir={handleOpenWorkingDir}
+          onOpenTerminal={handleOpenTerminal}
           guiModules={importedGuiModules}
           kernelId={currentKernelId}
         />

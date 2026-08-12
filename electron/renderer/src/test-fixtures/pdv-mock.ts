@@ -285,6 +285,7 @@ function buildBase() {
     launchers: {
       openAgent: stub<PDVApi["launchers"]["openAgent"]>(async () => ({ success: true })),
       openWorkingDir: stub<PDVApi["launchers"]["openWorkingDir"]>(async () => ({ success: true })),
+      openTerminal: stub<PDVApi["launchers"]["openTerminal"]>(async () => ({ success: true })),
       checkAvailability: stub<PDVApi["launchers"]["checkAvailability"]>(async () => true),
     },
     chrome: {

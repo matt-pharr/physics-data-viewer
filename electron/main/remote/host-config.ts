@@ -58,7 +58,7 @@ export interface RemoteHostRecord extends RemoteHostSettings {
 }
 
 /** The keys `setSettings` owns; everything else is recorded state. */
-const SETTINGS_KEYS = ["workingDirBase", "defaultSaveLocation", "launch"] as const;
+const SETTINGS_KEYS = ["workingDirBase", "defaultSaveLocation", "forwardX11", "launch"] as const;
 
 /**
  * Validate one host's record from raw JSON.
@@ -78,6 +78,7 @@ function parseRecord(raw: unknown): RemoteHostRecord | null {
     const value = obj[key];
     if (typeof value === "string" && value.trim()) out[key] = value;
   }
+  if (typeof obj.forwardX11 === "boolean") out.forwardX11 = obj.forwardX11;
   if (Array.isArray(obj.pushedDirKeys)) {
     const keys = obj.pushedDirKeys.filter(
       (k): k is PushedDirKey => k === "workingDirBase" || k === "defaultSaveLocation",

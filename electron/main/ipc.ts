@@ -132,6 +132,7 @@ export const IPC = {
   launchers: {
     openAgent: "launchers:openAgent",
     openWorkingDir: "launchers:openWorkingDir",
+    openTerminal: "launchers:openTerminal",
     checkAvailability: "launchers:checkAvailability",
   },
   /** Markdown note channels. */
@@ -854,6 +855,14 @@ export interface RemoteHostSettings {
   workingDirBase?: string;
   /** Default save location on this host; pushed like `workingDirBase`. */
   defaultSaveLocation?: string;
+  /**
+   * Request X11 forwarding (`-o ForwardX11=yes`) on connections to this
+   * host, so interactive matplotlib windows work without ssh-config
+   * knowledge (issue #377). Needs a local X server (XQuartz on macOS).
+   * Applies to sessions started after the change: the session daemon
+   * captures its environment — including DISPLAY — once at boot.
+   */
+  forwardX11?: boolean;
   /** Kernel launch configuration. */
   launch?: RemoteHostLaunchConfig;
 }
@@ -3622,6 +3631,16 @@ export interface PDVApi {
      *   kernel is active or the spawn fails.
      */
     openWorkingDir(): Promise<ScriptOperationResult>;
+    /**
+     * Open the user's terminal application in the active kernel's working
+     * directory. In a remote session the terminal runs `ssh -t` through
+     * PDV's ControlMaster, landing a login shell in the working directory
+     * on the session's host.
+     *
+     * @returns `{ success: true }`, or `{ success: false, error }` when no
+     *   kernel is active, the terminal preset is 'none', or the spawn fails.
+     */
+    openTerminal(): Promise<ScriptOperationResult>;
     /**
      * Check whether a launcher is installed, without launching it. Used by
      * the Settings dialog to gate Save on a valid selection.

@@ -520,6 +520,10 @@ class TestEnableMatplotlibGuard:
         out = capsys.readouterr().out
         assert "refusing %matplotlib qt" in out
         assert "no display for native windows" in out
+        # The fix is a PDV setting now (#377), so the advice must point at
+        # the Remote tab's toggle, not at the user's ssh configuration.
+        assert "Settings → Remote" in out
+        assert "SSH config" not in out
         # Command-free advice: PDV users never type ssh commands.
         assert "ssh -X" not in out
 
