@@ -6291,149 +6291,153 @@ source with <code>Meta.parseall</code>, never executing it — same rule as the 
 <a id="__codelineno-15-26" name="__codelineno-15-26" href="#__codelineno-15-26"></a>  (`terminal-app` on macOS, `x-terminal-emulator` on Linux, `wt.exe` on
 <a id="__codelineno-15-27" name="__codelineno-15-27" href="#__codelineno-15-27"></a>  Windows).
 <a id="__codelineno-15-28" name="__codelineno-15-28" href="#__codelineno-15-28"></a>
-<a id="__codelineno-15-29" name="__codelineno-15-29" href="#__codelineno-15-29"></a>- `launchers.editor` — `{ fileCommand?, dirCommand?, isTuiEditor? }`. The
-<a id="__codelineno-15-30" name="__codelineno-15-30" href="#__codelineno-15-30"></a>  command PDV uses to open a script (`fileCommand`) or a directory
-<a id="__codelineno-15-31" name="__codelineno-15-31" href="#__codelineno-15-31"></a>  (`dirCommand`); `{}` is the path placeholder. `isTuiEditor` forces terminal
-<a id="__codelineno-15-32" name="__codelineno-15-32" href="#__codelineno-15-32"></a>  wrapping on/off; when unset PDV auto-detects from the command basename.
-<a id="__codelineno-15-33" name="__codelineno-15-33" href="#__codelineno-15-33"></a>  This slot supersedes the legacy `pythonEditorCmd` / `juliaEditorCmd` keys —
-<a id="__codelineno-15-34" name="__codelineno-15-34" href="#__codelineno-15-34"></a>  `ConfigStore` migrates a pre-existing `pythonEditorCmd` into
-<a id="__codelineno-15-35" name="__codelineno-15-35" href="#__codelineno-15-35"></a>  `launchers.editor.fileCommand` once, at load, and drops the legacy keys.
-<a id="__codelineno-15-36" name="__codelineno-15-36" href="#__codelineno-15-36"></a>
-<a id="__codelineno-15-37" name="__codelineno-15-37" href="#__codelineno-15-37"></a>- `launchers.agent` — `{ command?, cwd? }`. The AI-agent CLI launched by the
-<a id="__codelineno-15-38" name="__codelineno-15-38" href="#__codelineno-15-38"></a>  activity-bar agent button. The command runs inside the configured terminal
-<a id="__codelineno-15-39" name="__codelineno-15-39" href="#__codelineno-15-39"></a>  preset, in a login shell that has `cd`-ed into the project (`cwd: &#39;project&#39;`)
-<a id="__codelineno-15-40" name="__codelineno-15-40" href="#__codelineno-15-40"></a>  or session working directory (`cwd: &#39;working&#39;`). Three placeholders are
-<a id="__codelineno-15-41" name="__codelineno-15-41" href="#__codelineno-15-41"></a>  substituted with quoted absolute paths: `{mcpConfig}`, `{projectRoot}`,
-<a id="__codelineno-15-42" name="__codelineno-15-42" href="#__codelineno-15-42"></a>  `{workingDir}`. Before launch, `mcp/mcp-config-writer.ts` materializes a
-<a id="__codelineno-15-43" name="__codelineno-15-43" href="#__codelineno-15-43"></a>  `.pdv-mcp.json` (mode `0600`) into the kernel working directory so the agent
-<a id="__codelineno-15-44" name="__codelineno-15-44" href="#__codelineno-15-44"></a>  — Claude Code by default — connects back to PDV&#39;s MCP server. The working
-<a id="__codelineno-15-45" name="__codelineno-15-45" href="#__codelineno-15-45"></a>  directory is ephemeral, so the embedded bearer token never lands in a
-<a id="__codelineno-15-46" name="__codelineno-15-46" href="#__codelineno-15-46"></a>  user-visible or version-controlled location.
-<a id="__codelineno-15-47" name="__codelineno-15-47" href="#__codelineno-15-47"></a>
-<a id="__codelineno-15-48" name="__codelineno-15-48" href="#__codelineno-15-48"></a>The renderer reads the host platform synchronously via the preload value
-<a id="__codelineno-15-49" name="__codelineno-15-49" href="#__codelineno-15-49"></a>`window.pdv.system.platform` — exposed as a constant rather than an IPC
-<a id="__codelineno-15-50" name="__codelineno-15-50" href="#__codelineno-15-50"></a>channel because `process.platform` never changes during a session.
+<a id="__codelineno-15-29" name="__codelineno-15-29" href="#__codelineno-15-29"></a>- `launchers.editor` — `{ fileCommand?, dirCommand?, isTuiEditor?,
+<a id="__codelineno-15-30" name="__codelineno-15-30" href="#__codelineno-15-30"></a>  remoteFileCommand?, remoteDirCommand? }`. The command PDV uses to open a
+<a id="__codelineno-15-31" name="__codelineno-15-31" href="#__codelineno-15-31"></a>  script (`fileCommand`) or a directory (`dirCommand`); `{}` is the path
+<a id="__codelineno-15-32" name="__codelineno-15-32" href="#__codelineno-15-32"></a>  placeholder. `isTuiEditor` forces terminal wrapping on/off; when unset PDV
+<a id="__codelineno-15-33" name="__codelineno-15-33" href="#__codelineno-15-33"></a>  auto-detects from the command basename. The two `remote*` keys are
+<a id="__codelineno-15-34" name="__codelineno-15-34" href="#__codelineno-15-34"></a>  optional overrides for remote sessions (`{host}`/`{path}` placeholders,
+<a id="__codelineno-15-35" name="__codelineno-15-35" href="#__codelineno-15-35"></a>  hand-edited config only — the built-in derivation covers
+<a id="__codelineno-15-36" name="__codelineno-15-36" href="#__codelineno-15-36"></a>  code/cursor/windsurf and TUI editors; see §11.7 launcher routing).
+<a id="__codelineno-15-37" name="__codelineno-15-37" href="#__codelineno-15-37"></a>  This slot supersedes the legacy `pythonEditorCmd` / `juliaEditorCmd` keys —
+<a id="__codelineno-15-38" name="__codelineno-15-38" href="#__codelineno-15-38"></a>  `ConfigStore` migrates a pre-existing `pythonEditorCmd` into
+<a id="__codelineno-15-39" name="__codelineno-15-39" href="#__codelineno-15-39"></a>  `launchers.editor.fileCommand` once, at load, and drops the legacy keys.
+<a id="__codelineno-15-40" name="__codelineno-15-40" href="#__codelineno-15-40"></a>
+<a id="__codelineno-15-41" name="__codelineno-15-41" href="#__codelineno-15-41"></a>- `launchers.agent` — `{ command?, cwd? }`. The AI-agent CLI launched by the
+<a id="__codelineno-15-42" name="__codelineno-15-42" href="#__codelineno-15-42"></a>  activity-bar agent button. The command runs inside the configured terminal
+<a id="__codelineno-15-43" name="__codelineno-15-43" href="#__codelineno-15-43"></a>  preset, in a login shell that has `cd`-ed into the project (`cwd: &#39;project&#39;`)
+<a id="__codelineno-15-44" name="__codelineno-15-44" href="#__codelineno-15-44"></a>  or session working directory (`cwd: &#39;working&#39;`). Three placeholders are
+<a id="__codelineno-15-45" name="__codelineno-15-45" href="#__codelineno-15-45"></a>  substituted with quoted absolute paths: `{mcpConfig}`, `{projectRoot}`,
+<a id="__codelineno-15-46" name="__codelineno-15-46" href="#__codelineno-15-46"></a>  `{workingDir}`. Before launch, `mcp/mcp-config-writer.ts` materializes a
+<a id="__codelineno-15-47" name="__codelineno-15-47" href="#__codelineno-15-47"></a>  `.pdv-mcp.json` (mode `0600`) into the kernel working directory so the agent
+<a id="__codelineno-15-48" name="__codelineno-15-48" href="#__codelineno-15-48"></a>  — Claude Code by default — connects back to PDV&#39;s MCP server. The working
+<a id="__codelineno-15-49" name="__codelineno-15-49" href="#__codelineno-15-49"></a>  directory is ephemeral, so the embedded bearer token never lands in a
+<a id="__codelineno-15-50" name="__codelineno-15-50" href="#__codelineno-15-50"></a>  user-visible or version-controlled location.
 <a id="__codelineno-15-51" name="__codelineno-15-51" href="#__codelineno-15-51"></a>
-<a id="__codelineno-15-52" name="__codelineno-15-52" href="#__codelineno-15-52"></a>---
-<a id="__codelineno-15-53" name="__codelineno-15-53" href="#__codelineno-15-53"></a>
-<a id="__codelineno-15-54" name="__codelineno-15-54" href="#__codelineno-15-54"></a>## 7. The Tree: Data Model and Authority
+<a id="__codelineno-15-52" name="__codelineno-15-52" href="#__codelineno-15-52"></a>The renderer reads the host platform synchronously via the preload value
+<a id="__codelineno-15-53" name="__codelineno-15-53" href="#__codelineno-15-53"></a>`window.pdv.system.platform` — exposed as a constant rather than an IPC
+<a id="__codelineno-15-54" name="__codelineno-15-54" href="#__codelineno-15-54"></a>channel because `process.platform` never changes during a session.
 <a id="__codelineno-15-55" name="__codelineno-15-55" href="#__codelineno-15-55"></a>
-<a id="__codelineno-15-56" name="__codelineno-15-56" href="#__codelineno-15-56"></a>### 7.1 Single Authority Rule
+<a id="__codelineno-15-56" name="__codelineno-15-56" href="#__codelineno-15-56"></a>---
 <a id="__codelineno-15-57" name="__codelineno-15-57" href="#__codelineno-15-57"></a>
-<a id="__codelineno-15-58" name="__codelineno-15-58" href="#__codelineno-15-58"></a>**The `PDVTree` object in the kernel is the sole authority on all project data.** No other component — not the Electron main process, not the renderer, not the filesystem — may be treated as a source of truth for what nodes exist or what their values are.
+<a id="__codelineno-15-58" name="__codelineno-15-58" href="#__codelineno-15-58"></a>## 7. The Tree: Data Model and Authority
 <a id="__codelineno-15-59" name="__codelineno-15-59" href="#__codelineno-15-59"></a>
-<a id="__codelineno-15-60" name="__codelineno-15-60" href="#__codelineno-15-60"></a>- The renderer always fetches tree state via `pdv.tree.list` / `pdv.tree.get` (routed through the query channel when available)
-<a id="__codelineno-15-61" name="__codelineno-15-61" href="#__codelineno-15-61"></a>- The main process never caches tree state
-<a id="__codelineno-15-62" name="__codelineno-15-62" href="#__codelineno-15-62"></a>- The filesystem layout is a persistence artifact, not an authority
+<a id="__codelineno-15-60" name="__codelineno-15-60" href="#__codelineno-15-60"></a>### 7.1 Single Authority Rule
+<a id="__codelineno-15-61" name="__codelineno-15-61" href="#__codelineno-15-61"></a>
+<a id="__codelineno-15-62" name="__codelineno-15-62" href="#__codelineno-15-62"></a>**The `PDVTree` object in the kernel is the sole authority on all project data.** No other component — not the Electron main process, not the renderer, not the filesystem — may be treated as a source of truth for what nodes exist or what their values are.
 <a id="__codelineno-15-63" name="__codelineno-15-63" href="#__codelineno-15-63"></a>
-<a id="__codelineno-15-64" name="__codelineno-15-64" href="#__codelineno-15-64"></a>### 7.1.1 Tree Panel Rendering
-<a id="__codelineno-15-65" name="__codelineno-15-65" href="#__codelineno-15-65"></a>
-<a id="__codelineno-15-66" name="__codelineno-15-66" href="#__codelineno-15-66"></a>The tree panel uses **virtualized rendering** (`react-window` `List` component) to efficiently handle trees with thousands of nodes. Only the visible rows (~30-40) are rendered as DOM elements regardless of total tree size. Key design decisions:
+<a id="__codelineno-15-64" name="__codelineno-15-64" href="#__codelineno-15-64"></a>- The renderer always fetches tree state via `pdv.tree.list` / `pdv.tree.get` (routed through the query channel when available)
+<a id="__codelineno-15-65" name="__codelineno-15-65" href="#__codelineno-15-65"></a>- The main process never caches tree state
+<a id="__codelineno-15-66" name="__codelineno-15-66" href="#__codelineno-15-66"></a>- The filesystem layout is a persistence artifact, not an authority
 <a id="__codelineno-15-67" name="__codelineno-15-67" href="#__codelineno-15-67"></a>
-<a id="__codelineno-15-68" name="__codelineno-15-68" href="#__codelineno-15-68"></a>- `TreeNodeRow` is wrapped in `React.memo` with stable props to prevent unnecessary re-renders
-<a id="__codelineno-15-69" name="__codelineno-15-69" href="#__codelineno-15-69"></a>- Expand/collapse discards children (no expansion state persistence across sessions). Re-expanding a node always fetches fresh children from the kernel.
-<a id="__codelineno-15-70" name="__codelineno-15-70" href="#__codelineno-15-70"></a>- After code cell or script execution completes, the renderer bumps `treeRefreshToken` (in `executeImmediate`&#39;s `finally` block) so the tree does a full refetch. This runs **in addition to** push-driven updates and serves as defense in depth for the nested-dict limitation in §7.1.2 — silent sub-tree mutations during a run are caught when the cell finishes.
-<a id="__codelineno-15-71" name="__codelineno-15-71" href="#__codelineno-15-71"></a>- Incremental updates from `pdv.tree.changed` push notifications update only affected subtrees (selective parent re-fetch)
-<a id="__codelineno-15-72" name="__codelineno-15-72" href="#__codelineno-15-72"></a>
-<a id="__codelineno-15-73" name="__codelineno-15-73" href="#__codelineno-15-73"></a>### 7.1.2 Change Notification Debouncing
-<a id="__codelineno-15-74" name="__codelineno-15-74" href="#__codelineno-15-74"></a>
-<a id="__codelineno-15-75" name="__codelineno-15-75" href="#__codelineno-15-75"></a>`PDVTree._emit_changed()` uses a **100ms debounce timer**. Rapid mutations (e.g. a script adding 1000 nodes in a loop) are batched into a single `pdv.tree.changed` notification with `change_type: &quot;batch&quot;` and all affected paths. This prevents flooding the ZeroMQ comm channel with thousands of individual notifications.
+<a id="__codelineno-15-68" name="__codelineno-15-68" href="#__codelineno-15-68"></a>### 7.1.1 Tree Panel Rendering
+<a id="__codelineno-15-69" name="__codelineno-15-69" href="#__codelineno-15-69"></a>
+<a id="__codelineno-15-70" name="__codelineno-15-70" href="#__codelineno-15-70"></a>The tree panel uses **virtualized rendering** (`react-window` `List` component) to efficiently handle trees with thousands of nodes. Only the visible rows (~30-40) are rendered as DOM elements regardless of total tree size. Key design decisions:
+<a id="__codelineno-15-71" name="__codelineno-15-71" href="#__codelineno-15-71"></a>
+<a id="__codelineno-15-72" name="__codelineno-15-72" href="#__codelineno-15-72"></a>- `TreeNodeRow` is wrapped in `React.memo` with stable props to prevent unnecessary re-renders
+<a id="__codelineno-15-73" name="__codelineno-15-73" href="#__codelineno-15-73"></a>- Expand/collapse discards children (no expansion state persistence across sessions). Re-expanding a node always fetches fresh children from the kernel.
+<a id="__codelineno-15-74" name="__codelineno-15-74" href="#__codelineno-15-74"></a>- After code cell or script execution completes, the renderer bumps `treeRefreshToken` (in `executeImmediate`&#39;s `finally` block) so the tree does a full refetch. This runs **in addition to** push-driven updates and serves as defense in depth for the nested-dict limitation in §7.1.2 — silent sub-tree mutations during a run are caught when the cell finishes.
+<a id="__codelineno-15-75" name="__codelineno-15-75" href="#__codelineno-15-75"></a>- Incremental updates from `pdv.tree.changed` push notifications update only affected subtrees (selective parent re-fetch)
 <a id="__codelineno-15-76" name="__codelineno-15-76" href="#__codelineno-15-76"></a>
-<a id="__codelineno-15-77" name="__codelineno-15-77" href="#__codelineno-15-77"></a>All mutating `dict` methods are overridden to emit notifications: `__setitem__`, `__delitem__`, `pop`, `update`, `clear`, `setdefault`, `popitem`, `__ior__` (the `|=` operator). The standard `dict.fromkeys()` classmethod is not overridden because new instances have no comm attached.
+<a id="__codelineno-15-77" name="__codelineno-15-77" href="#__codelineno-15-77"></a>### 7.1.2 Change Notification Debouncing
 <a id="__codelineno-15-78" name="__codelineno-15-78" href="#__codelineno-15-78"></a>
-<a id="__codelineno-15-79" name="__codelineno-15-79" href="#__codelineno-15-79"></a>**Non-root PDVTree mutations**: Only the root `PDVTree` (which has `_send_fn` attached) can emit precise-path notifications, because absolute paths are only known relative to the root. Sub-trees accessed via `pdv_tree[&#39;path&#39;]` and scratch `PDVTree` instances the user constructs locally have no awareness of their parent. To keep the renderer in sync without parent pointers or aliasing bookkeeping, every `PDVTree` instance — root or not — falls back on a class-level &quot;global ping&quot; channel. Mutations on a non-root `PDVTree` fire a single coarse `change_type: &quot;unknown&quot;` notification (with empty `changed_paths`) that signals the renderer to do a full refresh-with-expansion. The class-level send_fn is registered alongside the root&#39;s `_send_fn` in `_attach_comm` and torn down in `_detach_comm`. Plain `dict` values stored in the tree (`pdv_tree[&#39;data&#39;] = {&#39;x&#39;: 1}`) bypass this entirely — they have no emission machinery — and are caught by the 1 Hz safety-net poll instead (see §7.4).
+<a id="__codelineno-15-79" name="__codelineno-15-79" href="#__codelineno-15-79"></a>`PDVTree._emit_changed()` uses a **100ms debounce timer**. Rapid mutations (e.g. a script adding 1000 nodes in a loop) are batched into a single `pdv.tree.changed` notification with `change_type: &quot;batch&quot;` and all affected paths. This prevents flooding the ZeroMQ comm channel with thousands of individual notifications.
 <a id="__codelineno-15-80" name="__codelineno-15-80" href="#__codelineno-15-80"></a>
-<a id="__codelineno-15-81" name="__codelineno-15-81" href="#__codelineno-15-81"></a>### 7.2 Node Types
+<a id="__codelineno-15-81" name="__codelineno-15-81" href="#__codelineno-15-81"></a>All mutating `dict` methods are overridden to emit notifications: `__setitem__`, `__delitem__`, `pop`, `update`, `clear`, `setdefault`, `popitem`, `__ior__` (the `|=` operator). The standard `dict.fromkeys()` classmethod is not overridden because new instances have no comm attached.
 <a id="__codelineno-15-82" name="__codelineno-15-82" href="#__codelineno-15-82"></a>
-<a id="__codelineno-15-83" name="__codelineno-15-83" href="#__codelineno-15-83"></a>The following node types are supported:
+<a id="__codelineno-15-83" name="__codelineno-15-83" href="#__codelineno-15-83"></a>**Non-root PDVTree mutations**: Only the root `PDVTree` (which has `_send_fn` attached) can emit precise-path notifications, because absolute paths are only known relative to the root. Sub-trees accessed via `pdv_tree[&#39;path&#39;]` and scratch `PDVTree` instances the user constructs locally have no awareness of their parent. To keep the renderer in sync without parent pointers or aliasing bookkeeping, every `PDVTree` instance — root or not — falls back on a class-level &quot;global ping&quot; channel. Mutations on a non-root `PDVTree` fire a single coarse `change_type: &quot;unknown&quot;` notification (with empty `changed_paths`) that signals the renderer to do a full refresh-with-expansion. The class-level send_fn is registered alongside the root&#39;s `_send_fn` in `_attach_comm` and torn down in `_detach_comm`. Plain `dict` values stored in the tree (`pdv_tree[&#39;data&#39;] = {&#39;x&#39;: 1}`) bypass this entirely — they have no emission machinery — and are caught by the 1 Hz safety-net poll instead (see §7.4).
 <a id="__codelineno-15-84" name="__codelineno-15-84" href="#__codelineno-15-84"></a>
-<a id="__codelineno-15-85" name="__codelineno-15-85" href="#__codelineno-15-85"></a>| Type | Description | Backed by |
-<a id="__codelineno-15-86" name="__codelineno-15-86" href="#__codelineno-15-86"></a>|---|---|---|
-<a id="__codelineno-15-87" name="__codelineno-15-87" href="#__codelineno-15-87"></a>| `folder` | A `PDVTree` sub-dict with no associated file | In-memory only |
-<a id="__codelineno-15-88" name="__codelineno-15-88" href="#__codelineno-15-88"></a>| `module` | A `PDVModule` dict subclass carrying module metadata | Inline metadata in tree-index.json |
-<a id="__codelineno-15-89" name="__codelineno-15-89" href="#__codelineno-15-89"></a>| `gui` | A `PDVGui` file-backed GUI definition node | `.gui.json` file in working or save directory |
-<a id="__codelineno-15-90" name="__codelineno-15-90" href="#__codelineno-15-90"></a>| `namelist` | A `PDVNamelist` file-backed namelist definition | Namelist file in working or save directory |
-<a id="__codelineno-15-91" name="__codelineno-15-91" href="#__codelineno-15-91"></a>| `lib` | A `PDVLib` file-backed Python library provided by a module | `.py` file in working or save directory |
-<a id="__codelineno-15-92" name="__codelineno-15-92" href="#__codelineno-15-92"></a>| `file` | A generic `PDVFile` subclass (fallback for file-backed nodes that don&#39;t match a more specific type) | File in working or save directory |
-<a id="__codelineno-15-93" name="__codelineno-15-93" href="#__codelineno-15-93"></a>| `script` | A `PDVScript` object | `.py` file in working or save directory |
-<a id="__codelineno-15-94" name="__codelineno-15-94" href="#__codelineno-15-94"></a>| `markdown` | A `PDVNote` object | `.md` file in working or save directory |
-<a id="__codelineno-15-95" name="__codelineno-15-95" href="#__codelineno-15-95"></a>| `ndarray` | NumPy array | `.npy` file |
-<a id="__codelineno-15-96" name="__codelineno-15-96" href="#__codelineno-15-96"></a>| `dataframe` | Pandas DataFrame | `.pickle` file |
-<a id="__codelineno-15-97" name="__codelineno-15-97" href="#__codelineno-15-97"></a>| `series` | Pandas Series | `.pickle` file |
-<a id="__codelineno-15-98" name="__codelineno-15-98" href="#__codelineno-15-98"></a>| `scalar` | Python int, float, bool, None | Inline in tree-index.json |
-<a id="__codelineno-15-99" name="__codelineno-15-99" href="#__codelineno-15-99"></a>| `text` | Python string | `.txt` file (if large) or inline |
-<a id="__codelineno-15-100" name="__codelineno-15-100" href="#__codelineno-15-100"></a>| `mapping` | Plain Python dict (not PDVTree) | Inline JSON |
-<a id="__codelineno-15-101" name="__codelineno-15-101" href="#__codelineno-15-101"></a>| `sequence` | Python list or tuple | Inline JSON |
-<a id="__codelineno-15-102" name="__codelineno-15-102" href="#__codelineno-15-102"></a>| `dataset` | xarray.Dataset (in-memory) | Pickle |
-<a id="__codelineno-15-103" name="__codelineno-15-103" href="#__codelineno-15-103"></a>| `dataarray` | xarray.DataArray (in-memory) | Pickle |
-<a id="__codelineno-15-104" name="__codelineno-15-104" href="#__codelineno-15-104"></a>| `dataset_file` | `PDVDataset` — lazy file-backed NetCDF dataset (§5.8.1) | `.nc`/`.cdf` file, copied as-is (`storage.format: &quot;netcdf&quot;`) |
-<a id="__codelineno-15-105" name="__codelineno-15-105" href="#__codelineno-15-105"></a>| `hdf5_file` | `PDVHdf5` — lazy file-backed HDF5 file (§5.8.1) | `.h5`/`.hdf5` file, copied as-is (`storage.format: &quot;hdf5&quot;`) |
-<a id="__codelineno-15-106" name="__codelineno-15-106" href="#__codelineno-15-106"></a>| `hdf5_group` | Virtual child: group inside an open HDF5 file | Runtime-only — never written to tree-index.json |
-<a id="__codelineno-15-107" name="__codelineno-15-107" href="#__codelineno-15-107"></a>| `hdf5_dataset` | Virtual child: dataset inside an open HDF5 file | Runtime-only — never written to tree-index.json |
-<a id="__codelineno-15-108" name="__codelineno-15-108" href="#__codelineno-15-108"></a>
-<a id="__codelineno-15-109" name="__codelineno-15-109" href="#__codelineno-15-109"></a>`mapping` and `sequence` containers are expandable in the tree panel. The `pdv.tree.list` handler descends into either kind, returning one descriptor per child. Sequence children carry stringified-int keys (`&quot;0&quot;`, `&quot;1&quot;`, …) and a `parent_is_opaque: true` flag; the renderer suppresses rename / move / duplicate / delete on those rows since the tree-mutation handlers can&#39;t address a child by key inside a non-dict parent. Sequence children remain navigable from Python: a numeric segment in a dot-path indexes into a list or tuple value (e.g. `tree[&quot;records.0.name&quot;]` resolves through a list of dicts). Negative indices are supported (`tree[&quot;xs.-1&quot;]` returns the last element).
-<a id="__codelineno-15-110" name="__codelineno-15-110" href="#__codelineno-15-110"></a>
-<a id="__codelineno-15-111" name="__codelineno-15-111" href="#__codelineno-15-111"></a>On Julia sessions, **NamedTuples ride the `mapping` kind** — they are the idiomatic &quot;results bundle&quot; (a nested dictionary in spirit), so they expand in the tree with field-name keys, dot-paths resolve through them (`tree[&quot;run.fields.b&quot;]`), and the chip reads `NamedTuple`. Their children carry `parent_is_opaque` (NamedTuples are immutable — no structural mutations), and they persist as a single `.jls` leaf rather than the composite mapping split so the concrete NamedTuple type survives save/load (§10.6-era fidelity rule: a per-child split would reload as a Dict).
+<a id="__codelineno-15-85" name="__codelineno-15-85" href="#__codelineno-15-85"></a>### 7.2 Node Types
+<a id="__codelineno-15-86" name="__codelineno-15-86" href="#__codelineno-15-86"></a>
+<a id="__codelineno-15-87" name="__codelineno-15-87" href="#__codelineno-15-87"></a>The following node types are supported:
+<a id="__codelineno-15-88" name="__codelineno-15-88" href="#__codelineno-15-88"></a>
+<a id="__codelineno-15-89" name="__codelineno-15-89" href="#__codelineno-15-89"></a>| Type | Description | Backed by |
+<a id="__codelineno-15-90" name="__codelineno-15-90" href="#__codelineno-15-90"></a>|---|---|---|
+<a id="__codelineno-15-91" name="__codelineno-15-91" href="#__codelineno-15-91"></a>| `folder` | A `PDVTree` sub-dict with no associated file | In-memory only |
+<a id="__codelineno-15-92" name="__codelineno-15-92" href="#__codelineno-15-92"></a>| `module` | A `PDVModule` dict subclass carrying module metadata | Inline metadata in tree-index.json |
+<a id="__codelineno-15-93" name="__codelineno-15-93" href="#__codelineno-15-93"></a>| `gui` | A `PDVGui` file-backed GUI definition node | `.gui.json` file in working or save directory |
+<a id="__codelineno-15-94" name="__codelineno-15-94" href="#__codelineno-15-94"></a>| `namelist` | A `PDVNamelist` file-backed namelist definition | Namelist file in working or save directory |
+<a id="__codelineno-15-95" name="__codelineno-15-95" href="#__codelineno-15-95"></a>| `lib` | A `PDVLib` file-backed Python library provided by a module | `.py` file in working or save directory |
+<a id="__codelineno-15-96" name="__codelineno-15-96" href="#__codelineno-15-96"></a>| `file` | A generic `PDVFile` subclass (fallback for file-backed nodes that don&#39;t match a more specific type) | File in working or save directory |
+<a id="__codelineno-15-97" name="__codelineno-15-97" href="#__codelineno-15-97"></a>| `script` | A `PDVScript` object | `.py` file in working or save directory |
+<a id="__codelineno-15-98" name="__codelineno-15-98" href="#__codelineno-15-98"></a>| `markdown` | A `PDVNote` object | `.md` file in working or save directory |
+<a id="__codelineno-15-99" name="__codelineno-15-99" href="#__codelineno-15-99"></a>| `ndarray` | NumPy array | `.npy` file |
+<a id="__codelineno-15-100" name="__codelineno-15-100" href="#__codelineno-15-100"></a>| `dataframe` | Pandas DataFrame | `.pickle` file |
+<a id="__codelineno-15-101" name="__codelineno-15-101" href="#__codelineno-15-101"></a>| `series` | Pandas Series | `.pickle` file |
+<a id="__codelineno-15-102" name="__codelineno-15-102" href="#__codelineno-15-102"></a>| `scalar` | Python int, float, bool, None | Inline in tree-index.json |
+<a id="__codelineno-15-103" name="__codelineno-15-103" href="#__codelineno-15-103"></a>| `text` | Python string | `.txt` file (if large) or inline |
+<a id="__codelineno-15-104" name="__codelineno-15-104" href="#__codelineno-15-104"></a>| `mapping` | Plain Python dict (not PDVTree) | Inline JSON |
+<a id="__codelineno-15-105" name="__codelineno-15-105" href="#__codelineno-15-105"></a>| `sequence` | Python list or tuple | Inline JSON |
+<a id="__codelineno-15-106" name="__codelineno-15-106" href="#__codelineno-15-106"></a>| `dataset` | xarray.Dataset (in-memory) | Pickle |
+<a id="__codelineno-15-107" name="__codelineno-15-107" href="#__codelineno-15-107"></a>| `dataarray` | xarray.DataArray (in-memory) | Pickle |
+<a id="__codelineno-15-108" name="__codelineno-15-108" href="#__codelineno-15-108"></a>| `dataset_file` | `PDVDataset` — lazy file-backed NetCDF dataset (§5.8.1) | `.nc`/`.cdf` file, copied as-is (`storage.format: &quot;netcdf&quot;`) |
+<a id="__codelineno-15-109" name="__codelineno-15-109" href="#__codelineno-15-109"></a>| `hdf5_file` | `PDVHdf5` — lazy file-backed HDF5 file (§5.8.1) | `.h5`/`.hdf5` file, copied as-is (`storage.format: &quot;hdf5&quot;`) |
+<a id="__codelineno-15-110" name="__codelineno-15-110" href="#__codelineno-15-110"></a>| `hdf5_group` | Virtual child: group inside an open HDF5 file | Runtime-only — never written to tree-index.json |
+<a id="__codelineno-15-111" name="__codelineno-15-111" href="#__codelineno-15-111"></a>| `hdf5_dataset` | Virtual child: dataset inside an open HDF5 file | Runtime-only — never written to tree-index.json |
 <a id="__codelineno-15-112" name="__codelineno-15-112" href="#__codelineno-15-112"></a>
-<a id="__codelineno-15-113" name="__codelineno-15-113" href="#__codelineno-15-113"></a>**Virtual-children protocol.** Beyond dicts and sequences, some values expose children that are *not* real tree entries — a live `xarray.Dataset`&#39;s variables, or the contents of a `PDVDataset`/`PDVHdf5` file read from its header on demand. These all flow through one dispatch point, `pdv/virtual.py`: PDV-owned classes implement `__pdv_children__()` / `__pdv_child__(key)` / `__pdv_has_children__()` directly, while foreign types (live `xr.Dataset`, `h5py.Group`) are matched by predicate in a registry of `VirtualAdapter`s (guarded via `sys.modules`, never triggering an import). `handle_tree_list`, per-child `has_children` computation, and dot-path resolution (`PDVTree._resolve_nested`) all dispatch through `get_virtual_adapter()`, so a new expandable type needs only an adapter (or the dunders) — no handler changes. Adapter enumeration failures (missing optional dependency, corrupt/missing file) surface as a `tree.load_error` response with an actionable message; they never crash the listing.
+<a id="__codelineno-15-113" name="__codelineno-15-113" href="#__codelineno-15-113"></a>`mapping` and `sequence` containers are expandable in the tree panel. The `pdv.tree.list` handler descends into either kind, returning one descriptor per child. Sequence children carry stringified-int keys (`&quot;0&quot;`, `&quot;1&quot;`, …) and a `parent_is_opaque: true` flag; the renderer suppresses rename / move / duplicate / delete on those rows since the tree-mutation handlers can&#39;t address a child by key inside a non-dict parent. Sequence children remain navigable from Python: a numeric segment in a dot-path indexes into a list or tuple value (e.g. `tree[&quot;records.0.name&quot;]` resolves through a list of dicts). Negative indices are supported (`tree[&quot;xs.-1&quot;]` returns the last element).
 <a id="__codelineno-15-114" name="__codelineno-15-114" href="#__codelineno-15-114"></a>
-<a id="__codelineno-15-115" name="__codelineno-15-115" href="#__codelineno-15-115"></a>Every adapter-served child is tagged `parent_is_opaque: true` (same suppression semantics as sequence children — the tree-mutation handlers can&#39;t address a child by key inside a non-dict parent). `dataset` and `dataset_file` rows enumerate data variables in insertion order **followed by coordinates**; coordinate rows additionally carry `is_coord: true`, which the renderer shows as a `coord` chip with muted styling so grids read as supporting context under the variables. (Through v0.2.x coords were omitted from live-Dataset listings; the file-backed dataset feature unified both on vars + coords.) `hdf5_group` children expand recursively to arbitrary depth; `dataarray` and `hdf5_dataset` are leaves — dot-paths cannot descend past one (`tree[&quot;ds.var.0&quot;]` raises `PDVKeyError`). xarray and h5py are optional dependencies; PDV runs unchanged when they aren&#39;t installed.
-<a id="__codelineno-15-116" name="__codelineno-15-116" href="#__codelineno-15-116"></a>| `binary` | bytes / bytearray | `.bin` file |
-<a id="__codelineno-15-117" name="__codelineno-15-117" href="#__codelineno-15-117"></a>| `unknown` | Unrecognized type | Custom serializer file (if a module registered one for the type), otherwise `.pickle` (only if `trusted=True`) |
+<a id="__codelineno-15-115" name="__codelineno-15-115" href="#__codelineno-15-115"></a>On Julia sessions, **NamedTuples ride the `mapping` kind** — they are the idiomatic &quot;results bundle&quot; (a nested dictionary in spirit), so they expand in the tree with field-name keys, dot-paths resolve through them (`tree[&quot;run.fields.b&quot;]`), and the chip reads `NamedTuple`. Their children carry `parent_is_opaque` (NamedTuples are immutable — no structural mutations), and they persist as a single `.jls` leaf rather than the composite mapping split so the concrete NamedTuple type survives save/load (§10.6-era fidelity rule: a per-child split would reload as a Dict).
+<a id="__codelineno-15-116" name="__codelineno-15-116" href="#__codelineno-15-116"></a>
+<a id="__codelineno-15-117" name="__codelineno-15-117" href="#__codelineno-15-117"></a>**Virtual-children protocol.** Beyond dicts and sequences, some values expose children that are *not* real tree entries — a live `xarray.Dataset`&#39;s variables, or the contents of a `PDVDataset`/`PDVHdf5` file read from its header on demand. These all flow through one dispatch point, `pdv/virtual.py`: PDV-owned classes implement `__pdv_children__()` / `__pdv_child__(key)` / `__pdv_has_children__()` directly, while foreign types (live `xr.Dataset`, `h5py.Group`) are matched by predicate in a registry of `VirtualAdapter`s (guarded via `sys.modules`, never triggering an import). `handle_tree_list`, per-child `has_children` computation, and dot-path resolution (`PDVTree._resolve_nested`) all dispatch through `get_virtual_adapter()`, so a new expandable type needs only an adapter (or the dunders) — no handler changes. Adapter enumeration failures (missing optional dependency, corrupt/missing file) surface as a `tree.load_error` response with an actionable message; they never crash the listing.
 <a id="__codelineno-15-118" name="__codelineno-15-118" href="#__codelineno-15-118"></a>
-<a id="__codelineno-15-119" name="__codelineno-15-119" href="#__codelineno-15-119"></a>**Custom serializer hook.** Module developers can register save/load
-<a id="__codelineno-15-120" name="__codelineno-15-120" href="#__codelineno-15-120"></a>callbacks for a class via `pdv.register_serializer(MyClass, format=&quot;my_fmt&quot;,
-<a id="__codelineno-15-121" name="__codelineno-15-121" href="#__codelineno-15-121"></a>extension=&quot;.h5&quot;, save=..., load=...)`. PDV chooses the on-disk filename and
-<a id="__codelineno-15-122" name="__codelineno-15-122" href="#__codelineno-15-122"></a>passes the absolute path to the callbacks; the module just reads or writes
-<a id="__codelineno-15-123" name="__codelineno-15-123" href="#__codelineno-15-123"></a>that file. Lookup walks `type(value).__mro__` so subclasses inherit. The
-<a id="__codelineno-15-124" name="__codelineno-15-124" href="#__codelineno-15-124"></a>node&#39;s `type` field stays `&quot;unknown&quot;`, but `storage.format` carries the
-<a id="__codelineno-15-125" name="__codelineno-15-125" href="#__codelineno-15-125"></a>registered name and `metadata` records `python_type` and `serializer`. Format
-<a id="__codelineno-15-126" name="__codelineno-15-126" href="#__codelineno-15-126"></a>names must be unique and must not collide with builtin formats. The module
-<a id="__codelineno-15-127" name="__codelineno-15-127" href="#__codelineno-15-127"></a>that registered the serializer must be imported before a project that
-<a id="__codelineno-15-128" name="__codelineno-15-128" href="#__codelineno-15-128"></a>contains nodes of that format is loaded; otherwise load fails with a clear
-<a id="__codelineno-15-129" name="__codelineno-15-129" href="#__codelineno-15-129"></a>error. Implementation lives in `pdv/serializers.py`.
-<a id="__codelineno-15-130" name="__codelineno-15-130" href="#__codelineno-15-130"></a>
-<a id="__codelineno-15-131" name="__codelineno-15-131" href="#__codelineno-15-131"></a>**Dunder-protocol hook.** Classes the package author defines can opt into PDV
-<a id="__codelineno-15-132" name="__codelineno-15-132" href="#__codelineno-15-132"></a>compatibility without calling `register_serializer` by implementing
-<a id="__codelineno-15-133" name="__codelineno-15-133" href="#__codelineno-15-133"></a>`__pdv_format__`, `__pdv_serialize__`, and `__pdv_deserialize__` (required as
-<a id="__codelineno-15-134" name="__codelineno-15-134" href="#__codelineno-15-134"></a>a set; partial trios are silently treated as &quot;no protocol&quot; so the same dunder
-<a id="__codelineno-15-135" name="__codelineno-15-135" href="#__codelineno-15-135"></a>names may be used for unrelated purposes). Optional companion methods:
-<a id="__codelineno-15-136" name="__codelineno-15-136" href="#__codelineno-15-136"></a>`__pdv_preview__`, `__pdv_handle__`, `__pdv_digest__`. Lookup walks
-<a id="__codelineno-15-137" name="__codelineno-15-137" href="#__codelineno-15-137"></a>`type(value).__mro__` via standard attribute access. `register_serializer` and
-<a id="__codelineno-15-138" name="__codelineno-15-138" href="#__codelineno-15-138"></a>`@pdv.handle` win over the corresponding dunder when both are present —
-<a id="__codelineno-15-139" name="__codelineno-15-139" href="#__codelineno-15-139"></a>explicit registration is for wrapping types you don&#39;t own; the dunder protocol
-<a id="__codelineno-15-140" name="__codelineno-15-140" href="#__codelineno-15-140"></a>is for types you do. Load-time class recovery uses the descriptor&#39;s
-<a id="__codelineno-15-141" name="__codelineno-15-141" href="#__codelineno-15-141"></a>`metadata.python_type` field with `importlib.import_module`; the defining
-<a id="__codelineno-15-142" name="__codelineno-15-142" href="#__codelineno-15-142"></a>package must be installed (no need to be imported beforehand). Reserved and
-<a id="__codelineno-15-143" name="__codelineno-15-143" href="#__codelineno-15-143"></a>registered-serializer format names are rejected at save time. Dunder-served
-<a id="__codelineno-15-144" name="__codelineno-15-144" href="#__codelineno-15-144"></a>nodes carry `metadata.serializer = &quot;dunder:&lt;class_name&gt;&quot;` in `tree-index.json`
-<a id="__codelineno-15-145" name="__codelineno-15-145" href="#__codelineno-15-145"></a>to distinguish them from `register_serializer`-served nodes. Implementation
-<a id="__codelineno-15-146" name="__codelineno-15-146" href="#__codelineno-15-146"></a>lives in `pdv/serializers.py` (`find_for_value_dunder`,
-<a id="__codelineno-15-147" name="__codelineno-15-147" href="#__codelineno-15-147"></a>`find_for_format_dunder`) with integration points in `pdv/serialization.py`,
-<a id="__codelineno-15-148" name="__codelineno-15-148" href="#__codelineno-15-148"></a>`pdv/modules.py`, and `pdv/checksum.py`.
-<a id="__codelineno-15-149" name="__codelineno-15-149" href="#__codelineno-15-149"></a>
-<a id="__codelineno-15-150" name="__codelineno-15-150" href="#__codelineno-15-150"></a>### 7.3 Node Descriptors
-<a id="__codelineno-15-151" name="__codelineno-15-151" href="#__codelineno-15-151"></a>
-<a id="__codelineno-15-152" name="__codelineno-15-152" href="#__codelineno-15-152"></a>There are two related but distinct descriptor formats: one for **`tree-index.json`** (written by `serialize_node` during project save) and one for **`pdv.tree.list` responses** (constructed at runtime by the tree list handler). Both share the same base fields but diverge on type-specific data.
+<a id="__codelineno-15-119" name="__codelineno-15-119" href="#__codelineno-15-119"></a>Every adapter-served child is tagged `parent_is_opaque: true` (same suppression semantics as sequence children — the tree-mutation handlers can&#39;t address a child by key inside a non-dict parent). `dataset` and `dataset_file` rows enumerate data variables in insertion order **followed by coordinates**; coordinate rows additionally carry `is_coord: true`, which the renderer shows as a `coord` chip with muted styling so grids read as supporting context under the variables. (Through v0.2.x coords were omitted from live-Dataset listings; the file-backed dataset feature unified both on vars + coords.) `hdf5_group` children expand recursively to arbitrary depth; `dataarray` and `hdf5_dataset` are leaves — dot-paths cannot descend past one (`tree[&quot;ds.var.0&quot;]` raises `PDVKeyError`). xarray and h5py are optional dependencies; PDV runs unchanged when they aren&#39;t installed.
+<a id="__codelineno-15-120" name="__codelineno-15-120" href="#__codelineno-15-120"></a>| `binary` | bytes / bytearray | `.bin` file |
+<a id="__codelineno-15-121" name="__codelineno-15-121" href="#__codelineno-15-121"></a>| `unknown` | Unrecognized type | Custom serializer file (if a module registered one for the type), otherwise `.pickle` (only if `trusted=True`) |
+<a id="__codelineno-15-122" name="__codelineno-15-122" href="#__codelineno-15-122"></a>
+<a id="__codelineno-15-123" name="__codelineno-15-123" href="#__codelineno-15-123"></a>**Custom serializer hook.** Module developers can register save/load
+<a id="__codelineno-15-124" name="__codelineno-15-124" href="#__codelineno-15-124"></a>callbacks for a class via `pdv.register_serializer(MyClass, format=&quot;my_fmt&quot;,
+<a id="__codelineno-15-125" name="__codelineno-15-125" href="#__codelineno-15-125"></a>extension=&quot;.h5&quot;, save=..., load=...)`. PDV chooses the on-disk filename and
+<a id="__codelineno-15-126" name="__codelineno-15-126" href="#__codelineno-15-126"></a>passes the absolute path to the callbacks; the module just reads or writes
+<a id="__codelineno-15-127" name="__codelineno-15-127" href="#__codelineno-15-127"></a>that file. Lookup walks `type(value).__mro__` so subclasses inherit. The
+<a id="__codelineno-15-128" name="__codelineno-15-128" href="#__codelineno-15-128"></a>node&#39;s `type` field stays `&quot;unknown&quot;`, but `storage.format` carries the
+<a id="__codelineno-15-129" name="__codelineno-15-129" href="#__codelineno-15-129"></a>registered name and `metadata` records `python_type` and `serializer`. Format
+<a id="__codelineno-15-130" name="__codelineno-15-130" href="#__codelineno-15-130"></a>names must be unique and must not collide with builtin formats. The module
+<a id="__codelineno-15-131" name="__codelineno-15-131" href="#__codelineno-15-131"></a>that registered the serializer must be imported before a project that
+<a id="__codelineno-15-132" name="__codelineno-15-132" href="#__codelineno-15-132"></a>contains nodes of that format is loaded; otherwise load fails with a clear
+<a id="__codelineno-15-133" name="__codelineno-15-133" href="#__codelineno-15-133"></a>error. Implementation lives in `pdv/serializers.py`.
+<a id="__codelineno-15-134" name="__codelineno-15-134" href="#__codelineno-15-134"></a>
+<a id="__codelineno-15-135" name="__codelineno-15-135" href="#__codelineno-15-135"></a>**Dunder-protocol hook.** Classes the package author defines can opt into PDV
+<a id="__codelineno-15-136" name="__codelineno-15-136" href="#__codelineno-15-136"></a>compatibility without calling `register_serializer` by implementing
+<a id="__codelineno-15-137" name="__codelineno-15-137" href="#__codelineno-15-137"></a>`__pdv_format__`, `__pdv_serialize__`, and `__pdv_deserialize__` (required as
+<a id="__codelineno-15-138" name="__codelineno-15-138" href="#__codelineno-15-138"></a>a set; partial trios are silently treated as &quot;no protocol&quot; so the same dunder
+<a id="__codelineno-15-139" name="__codelineno-15-139" href="#__codelineno-15-139"></a>names may be used for unrelated purposes). Optional companion methods:
+<a id="__codelineno-15-140" name="__codelineno-15-140" href="#__codelineno-15-140"></a>`__pdv_preview__`, `__pdv_handle__`, `__pdv_digest__`. Lookup walks
+<a id="__codelineno-15-141" name="__codelineno-15-141" href="#__codelineno-15-141"></a>`type(value).__mro__` via standard attribute access. `register_serializer` and
+<a id="__codelineno-15-142" name="__codelineno-15-142" href="#__codelineno-15-142"></a>`@pdv.handle` win over the corresponding dunder when both are present —
+<a id="__codelineno-15-143" name="__codelineno-15-143" href="#__codelineno-15-143"></a>explicit registration is for wrapping types you don&#39;t own; the dunder protocol
+<a id="__codelineno-15-144" name="__codelineno-15-144" href="#__codelineno-15-144"></a>is for types you do. Load-time class recovery uses the descriptor&#39;s
+<a id="__codelineno-15-145" name="__codelineno-15-145" href="#__codelineno-15-145"></a>`metadata.python_type` field with `importlib.import_module`; the defining
+<a id="__codelineno-15-146" name="__codelineno-15-146" href="#__codelineno-15-146"></a>package must be installed (no need to be imported beforehand). Reserved and
+<a id="__codelineno-15-147" name="__codelineno-15-147" href="#__codelineno-15-147"></a>registered-serializer format names are rejected at save time. Dunder-served
+<a id="__codelineno-15-148" name="__codelineno-15-148" href="#__codelineno-15-148"></a>nodes carry `metadata.serializer = &quot;dunder:&lt;class_name&gt;&quot;` in `tree-index.json`
+<a id="__codelineno-15-149" name="__codelineno-15-149" href="#__codelineno-15-149"></a>to distinguish them from `register_serializer`-served nodes. Implementation
+<a id="__codelineno-15-150" name="__codelineno-15-150" href="#__codelineno-15-150"></a>lives in `pdv/serializers.py` (`find_for_value_dunder`,
+<a id="__codelineno-15-151" name="__codelineno-15-151" href="#__codelineno-15-151"></a>`find_for_format_dunder`) with integration points in `pdv/serialization.py`,
+<a id="__codelineno-15-152" name="__codelineno-15-152" href="#__codelineno-15-152"></a>`pdv/modules.py`, and `pdv/checksum.py`.
 <a id="__codelineno-15-153" name="__codelineno-15-153" href="#__codelineno-15-153"></a>
-<a id="__codelineno-15-154" name="__codelineno-15-154" href="#__codelineno-15-154"></a>#### 7.3.1 `tree-index.json` Entry (Serialized Descriptor)
+<a id="__codelineno-15-154" name="__codelineno-15-154" href="#__codelineno-15-154"></a>### 7.3 Node Descriptors
 <a id="__codelineno-15-155" name="__codelineno-15-155" href="#__codelineno-15-155"></a>
-<a id="__codelineno-15-156" name="__codelineno-15-156" href="#__codelineno-15-156"></a>Each node in `tree-index.json` is produced by `serialization.serialize_node()`. Type-specific data lives in a nested `metadata` dict, and a `storage` dict describes where the data lives on disk.
+<a id="__codelineno-15-156" name="__codelineno-15-156" href="#__codelineno-15-156"></a>There are two related but distinct descriptor formats: one for **`tree-index.json`** (written by `serialize_node` during project save) and one for **`pdv.tree.list` responses** (constructed at runtime by the tree list handler). Both share the same base fields but diverge on type-specific data.
 <a id="__codelineno-15-157" name="__codelineno-15-157" href="#__codelineno-15-157"></a>
-<a id="__codelineno-15-158" name="__codelineno-15-158" href="#__codelineno-15-158"></a>**Common fields (all types):**
-<a id="__codelineno-15-159" name="__codelineno-15-159" href="#__codelineno-15-159"></a>```json
-<a id="__codelineno-15-160" name="__codelineno-15-160" href="#__codelineno-15-160"></a>{
-<a id="__codelineno-15-161" name="__codelineno-15-161" href="#__codelineno-15-161"></a>  &quot;id&quot;: &quot;data.waveforms.ch1&quot;,
-<a id="__codelineno-15-162" name="__codelineno-15-162" href="#__codelineno-15-162"></a>  &quot;path&quot;: &quot;data.waveforms.ch1&quot;,
-<a id="__codelineno-15-163" name="__codelineno-15-163" href="#__codelineno-15-163"></a>  &quot;key&quot;: &quot;ch1&quot;,
-<a id="__codelineno-15-164" name="__codelineno-15-164" href="#__codelineno-15-164"></a>  &quot;parent_path&quot;: &quot;data.waveforms&quot;,
-<a id="__codelineno-15-165" name="__codelineno-15-165" href="#__codelineno-15-165"></a>  &quot;type&quot;: &quot;ndarray&quot;,
-<a id="__codelineno-15-166" name="__codelineno-15-166" href="#__codelineno-15-166"></a>  &quot;has_children&quot;: false,
-<a id="__codelineno-15-167" name="__codelineno-15-167" href="#__codelineno-15-167"></a>  &quot;lazy&quot;: false,
-<a id="__codelineno-15-168" name="__codelineno-15-168" href="#__codelineno-15-168"></a>  &quot;updated_at&quot;: &quot;&lt;iso8601&gt;&quot;,
-<a id="__codelineno-15-169" name="__codelineno-15-169" href="#__codelineno-15-169"></a>  &quot;storage&quot;: { },
-<a id="__codelineno-15-170" name="__codelineno-15-170" href="#__codelineno-15-170"></a>  &quot;metadata&quot;: { &quot;preview&quot;: &quot;...&quot; }
-<a id="__codelineno-15-171" name="__codelineno-15-171" href="#__codelineno-15-171"></a>}
+<a id="__codelineno-15-158" name="__codelineno-15-158" href="#__codelineno-15-158"></a>#### 7.3.1 `tree-index.json` Entry (Serialized Descriptor)
+<a id="__codelineno-15-159" name="__codelineno-15-159" href="#__codelineno-15-159"></a>
+<a id="__codelineno-15-160" name="__codelineno-15-160" href="#__codelineno-15-160"></a>Each node in `tree-index.json` is produced by `serialization.serialize_node()`. Type-specific data lives in a nested `metadata` dict, and a `storage` dict describes where the data lives on disk.
+<a id="__codelineno-15-161" name="__codelineno-15-161" href="#__codelineno-15-161"></a>
+<a id="__codelineno-15-162" name="__codelineno-15-162" href="#__codelineno-15-162"></a>**Common fields (all types):**
+<a id="__codelineno-15-163" name="__codelineno-15-163" href="#__codelineno-15-163"></a>```json
+<a id="__codelineno-15-164" name="__codelineno-15-164" href="#__codelineno-15-164"></a>{
+<a id="__codelineno-15-165" name="__codelineno-15-165" href="#__codelineno-15-165"></a>  &quot;id&quot;: &quot;data.waveforms.ch1&quot;,
+<a id="__codelineno-15-166" name="__codelineno-15-166" href="#__codelineno-15-166"></a>  &quot;path&quot;: &quot;data.waveforms.ch1&quot;,
+<a id="__codelineno-15-167" name="__codelineno-15-167" href="#__codelineno-15-167"></a>  &quot;key&quot;: &quot;ch1&quot;,
+<a id="__codelineno-15-168" name="__codelineno-15-168" href="#__codelineno-15-168"></a>  &quot;parent_path&quot;: &quot;data.waveforms&quot;,
+<a id="__codelineno-15-169" name="__codelineno-15-169" href="#__codelineno-15-169"></a>  &quot;type&quot;: &quot;ndarray&quot;,
+<a id="__codelineno-15-170" name="__codelineno-15-170" href="#__codelineno-15-170"></a>  &quot;has_children&quot;: false,
+<a id="__codelineno-15-171" name="__codelineno-15-171" href="#__codelineno-15-171"></a>  &quot;lazy&quot;: false,
+<a id="__codelineno-15-172" name="__codelineno-15-172" href="#__codelineno-15-172"></a>  &quot;updated_at&quot;: &quot;&lt;iso8601&gt;&quot;,
+<a id="__codelineno-15-173" name="__codelineno-15-173" href="#__codelineno-15-173"></a>  &quot;storage&quot;: { },
+<a id="__codelineno-15-174" name="__codelineno-15-174" href="#__codelineno-15-174"></a>  &quot;metadata&quot;: { &quot;preview&quot;: &quot;...&quot; }
+<a id="__codelineno-15-175" name="__codelineno-15-175" href="#__codelineno-15-175"></a>}
 </code></pre></div></p>
 <table>
 <thead>
@@ -7205,7 +7209,7 @@ source with <code>Meta.parseall</code>, never executing it — same rule as the 
 - <code>window.pdv.environment.*</code> — Python environment management: <code>list</code>, <code>check</code>, <code>install</code>, <code>refresh</code>, <code>activeInfo</code> (active kernel's environment metadata — mode, interpreter, Python version — for the Project Environment tab), plus the uv package UI: <code>listPackages</code>, <code>addPackage</code>, <code>removePackage</code>, <code>upgradePackage</code>; push: <code>onInstallOutput(cb) → unsub</code>, <code>onEnvActivity(cb) → unsub</code> (streaming uv output)
 - <code>window.pdv.chrome.*</code> — window chrome controls: <code>getInfo</code>, <code>minimize</code>, <code>toggleMaximize</code>, <code>close</code>; push: <code>onStateChanged(cb) → unsub</code>
 - <code>window.pdv.system.*</code> — constant host facts injected at preload time: <code>platform</code> (the main process's <code>process.platform</code>), <code>supportedPythonVersions</code> and <code>defaultPythonVersion</code> (the New Project dialog's version range, from <code>python-versions.ts</code>), and their Julia siblings <code>supportedJuliaVersions</code> and <code>defaultJuliaVersion</code> (from <code>julia-versions.ts</code>, §10.6.5). Exposed as plain values, not functions — they never change during a session, so they need no IPC channel
-- <code>window.pdv.launchers.*</code> — action-bar external-app launchers: <code>openAgent</code> (launch the configured AI agent in a terminal), <code>openWorkingDir</code> (open the active kernel's working directory in the configured editor/IDE), <code>checkAvailability</code> (probe whether a terminal/editor/file-manager is installed, without launching it — used to gate Settings Save)
+- <code>window.pdv.launchers.*</code> — action-bar external-app launchers: <code>openAgent</code> (launch the configured AI agent in a terminal; local sessions only), <code>openWorkingDir</code> (open the active kernel's working directory in the configured editor/IDE), <code>openTerminal</code> (open the user's terminal in the working directory — over <code>ssh -t</code> in remote sessions), <code>checkAvailability</code> (probe whether a terminal/editor/file-manager is installed, without launching it — used to gate Settings Save)
 - <code>window.pdv.progress.*</code> — operation progress: push only: <code>onProgress(cb) → unsub</code>
 - <code>window.pdv.menu.*</code> — menu bridge: <code>updateRecentProjects(paths)</code>, <code>onAction(cb) → unsub</code>
 - <code>window.pdv.autosave.*</code> — autosave lifecycle: <code>run</code>, <code>clear</code>, <code>check</code>, <code>scanWorkingDirs</code>, <code>recoverUnsaved</code>, <code>deleteOrphan</code>; push: <code>onTrigger(cb) → unsub</code>, <code>onInFlightChange(cb) → unsub</code>
@@ -7527,6 +7531,44 @@ keys: at <code>startSession</code> the configured values are pushed into the hos
 swap — a failure declines the move loudly and leaves the window on its
 working local session, because a kernel quietly writing to the NFS home
 the user pointed at scratch is the harder bug to notice.</p>
+<p>The per-host <strong>Forward X11</strong> toggle (issue #377) requests <code>ForwardX11=yes</code>
+in two places, because they answer different questions: on a master PDV
+creates (so forwarding is <em>allowed</em> on the connection at all), and on the
+session-attach channel (whose environment the <code>--create</code>-spawned daemon
+inherits — that DISPLAY, captured once at daemon boot, is what the
+kernels' matplotlib sees). A master borrowed from the user's own ssh
+config is never reconfigured; there the channel-level request succeeds
+exactly when the user's config permits forwarding. Toggling the setting
+while connected takes effect on the next session for real: the connect
+path compares the toggle against the state PDV's live master was
+established with and tears a mismatched master down rather than reusing
+it (a borrowed master is never rebuilt — it is the user's). The known
+limitation stands: a DISPLAY rots if the forwarding channel dies while
+the daemon lives — the comm-carried plot window (issue #369) is the
+structural fix.</p>
+<p><strong>Launcher routing</strong> (<code>remote/remote-launchers.ts</code>, consumed by
+<code>ipc-register-launchers.ts</code>) routes the shell-side external-app launchers
+by session kind, read synchronously from the session router + connection
+manager — never from connection <em>state</em> alone, so a remote session
+mid-reconnect refuses ssh-carried launches rather than falling back to
+spawning cluster paths locally. <code>script.edit</code> / <code>openWorkingDir</code>: a
+Remote-SSH-capable editor (code/cursor/windsurf basenames, or an explicit
+<code>launchers.editor.remoteFileCommand</code>/<code>remoteDirCommand</code> template with
+<code>{host}</code>/<code>{path}</code> placeholders) spawns locally with
+<code>--remote ssh-remote+&lt;host&gt;</code> and makes its own connection via the user's
+ssh config; a TUI editor runs <em>on the host</em> inside the user's terminal
+preset wrapping <code>ssh -t</code> over PDV's ControlMaster (no re-auth while the
+master lives) with an <code>-o HostName=</code> pin to the recorded session node —
+so even a fresh connection after a master death lands beside the
+session's working dir, which matters for node-local scratch, where a
+round-robin alias can land a Remote-SSH editor on the wrong node;
+anything else refuses with the alternatives named. <code>launchers.openTerminal</code> (the Open Terminal button) opens the
+terminal preset around a local login shell in the working dir, or
+remotely around <code>ssh -t &lt;host&gt; 'cd &lt;wd&gt;; exec "${SHELL:-sh}" -l'</code>.
+<code>launchers.openAgent</code> refuses in remote sessions before doing any work —
+MCP is local-only (§15.9), and the refusal is also what makes the
+<code>.pdv-mcp.json</code> write (which targets the kernel's working directory, a
+cluster path when remote) unreachable cross-host.</p>
 <p><code>shell/remote-server.ts</code> is the remote <code>ServerHandle</code>. The transport is
 unchanged — an ssh channel is a stream pair and <code>RpcClient</code> already takes one
 — but the <em>lifetime</em> differs, which is why it is a separate implementation:
@@ -8105,7 +8147,7 @@ unrecoverable, so real gaps are made legible rather than papered over.</p>
 <p>The following features are acknowledged as future work and must not influence the current architecture in ways that complicate the above design:</p>
 <ul>
 <li><strong>Modules ecosystem hardening</strong> — core module lifecycle is implemented (install from disk/GitHub, import, uninstall, update, bundled examples, project-local storage); deeper registry/trust features are deferred</li>
-<li><strong>Remote session completeness</strong> — remote sessions work end to end (§11.7 area above: connect, bootstrap, session daemon, environment provisioning via the bundled uv, path picking); still deferred are Slurm-aware kernel launch (interactive analysis on a login node is the sanctioned beta scope; the per-host setup script, login-environment capture, Remote Hosts settings tab and per-host launch-config schema have landed), remote Julia sessions (need juliaup on the host), remote→local file export, remote launchers, and the VS Code-style command palette that will replace the placeholder path picker</li>
+<li><strong>Remote session completeness</strong> — remote sessions work end to end (§11.7 area above: connect, bootstrap, session daemon, environment provisioning via the bundled uv, path picking, launcher routing incl. the Open Terminal launcher and the per-host Forward X11 toggle); still deferred are Slurm-aware kernel launch (interactive analysis on a login node is the sanctioned beta scope; the per-host setup script, login-environment capture, Remote Hosts settings tab and per-host launch-config schema have landed), remote Julia sessions (need juliaup on the host), remote→local file export, and the VS Code-style command palette that will replace the placeholder path picker</li>
 <li><strong>Local→remote upload import and remote MCP</strong> — explicitly excluded from remote v1</li>
 <li><strong>Multiple simultaneous kernels</strong> — architecture supports it (kernels have IDs) but UI exposes only one at a time</li>
 <li><strong>R kernel support</strong> — deferred; would follow the <code>pdv-julia</code> pattern (a kernel-side package implementing the language-agnostic protocol of §3)</li>
