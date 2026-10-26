@@ -32,12 +32,13 @@ import {
 import { ShortcutCapture } from './ShortcutCapture';
 import { AppearanceTab } from './AppearanceTab';
 import { AgentsTab } from './AgentsTab';
+import { RemoteHostsTab } from './RemoteHostsTab';
 import { GeneralTab } from './GeneralTab';
 import { AboutTab } from './AboutTab';
 import { PackagesTab } from './PackagesTab';
 import { DEFAULT_AUTOSAVE_INTERVAL_S } from '../../app/constants';
 
-type SettingsTab = 'general' | 'shortcuts' | 'appearance' | 'agents' | 'runtime' | 'packages' | 'about';
+type SettingsTab = 'general' | 'shortcuts' | 'appearance' | 'agents' | 'remote' | 'runtime' | 'packages' | 'about';
 
 const DEFAULT_VSCODE_PAIR = THEME_PAIRS.find((pair) => pair.name === 'VSCode');
 
@@ -65,6 +66,13 @@ interface SettingsDialogProps {
    * future sessions but never stop or demote the live session (§10.5.19).
    */
   kernelRunning?: boolean;
+  /**
+   * True when remote sessions are enabled (the PDV_REMOTE release gate).
+   * Shows the Remote Hosts tab; mirrors the welcome screen's gated button.
+   */
+  remoteEnabled?: boolean;
+  /** Host the session runs on, or null — see GeneralTab's directory note. */
+  remoteHost?: string | null;
 }
 
 /** Top-level settings modal used by the App shell. */
@@ -81,6 +89,8 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
   envWarning,
   environmentMode,
   kernelRunning = false,
+  remoteEnabled = false,
+  remoteHost = null,
 }) => {
   const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab);
   const [editedShortcuts, setEditedShortcuts] = useState<Shortcuts>(shortcuts);
@@ -493,6 +503,11 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
           <button className={`tab ${activeTab === 'shortcuts' ? 'active' : ''}`} onClick={() => setActiveTab('shortcuts')}>Keyboard Shortcuts</button>
           <button className={`tab ${activeTab === 'appearance' ? 'active' : ''}`} onClick={() => setActiveTab('appearance')}>Appearance</button>
           <button className={`tab ${activeTab === 'agents' ? 'active' : ''}`} onClick={() => setActiveTab('agents')}>Agents</button>
+          {remoteEnabled && (
+            /* "Remote", not "Remote Hosts": the eighth tab has to fit the
+               one-row strip at the default dialog width. */
+            <button className={`tab ${activeTab === 'remote' ? 'active' : ''}`} onClick={() => setActiveTab('remote')}>Remote</button>
+          )}
           <button className={`tab ${activeTab === 'runtime' ? 'active' : ''}`} onClick={() => setActiveTab('runtime')}>Default Runtime</button>
           <button className={`tab ${activeTab === 'packages' ? 'active' : ''}`} onClick={() => setActiveTab('packages')}>Project Environment</button>
           <button className={`tab ${activeTab === 'about' ? 'active' : ''}`} onClick={() => setActiveTab('about')}>About</button>
@@ -500,6 +515,7 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
         <div className="dialog-body">
           {activeTab === 'general' ? (
             <GeneralTab
+              remoteHost={remoteHost}
               editorPresetId={editorPresetId}
               editorCustomCommand={editorCustomCommand}
               editorCustomIsTui={editorCustomIsTui}
@@ -548,6 +564,8 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
             </div>
           ) : activeTab === 'agents' ? (
             <AgentsTab />
+          ) : activeTab === 'remote' ? (
+            <RemoteHostsTab />
           ) : activeTab === 'runtime' ? (
             <div className="settings-runtime">
               <p className="settings-general-hint">
@@ -614,7 +632,9 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
             />
           )}
         </div>
-        {activeTab !== 'runtime' && activeTab !== 'about' && activeTab !== 'agents' && (
+        {/* Self-contained tabs (own persistence, or read-only) hide the
+            dialog-wide footer; Remote Hosts saves per host inline. */}
+        {activeTab !== 'runtime' && activeTab !== 'about' && activeTab !== 'agents' && activeTab !== 'remote' && (
           <div className="dialog-footer">
             <button className="btn btn-secondary" onClick={handleCancel}>Cancel</button>
             <button

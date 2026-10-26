@@ -47,20 +47,42 @@
   letter-spacing: 0.01em;
 }
 
-/* Action buttons */
+/* Action buttons. A 2-column grid: four nowrap buttons in one flex row
+   overflow the 440px card, and a grid keeps the pairs aligned when the
+   remote-gated fourth button is absent (three buttons = 2 + 1). */
 .welcome-actions {
-  display: flex;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
   gap: 12px;
   width: 100%;
 }
 
 .welcome-action-btn {
-  flex: 1;
   padding: 10px 16px !important;
   font-size: 13px !important;
   text-align: center;
   /* "New Python / Project" wrapping to two lines looked broken. */
   white-space: nowrap;
+  min-width: 0;
+}
+
+/* The disconnect/reconnect variants embed a hostname of arbitrary length —
+   a half-width grid cell gives the label ~140px, which truncates every
+   realistic hostname ("Disconnect from 'tes…"). Span the full card width
+   instead; the ellipsis stays as a last resort for pathological names. */
+.welcome-remote-btn {
+  grid-column: 1 / -1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* When the full-width remote button is present, "Open Project…" would sit
+   alone beside an empty cell SANDWICHED between two full rows — which
+   reads as a layout bug rather than a grid remainder. Span it too, so the
+   stack reads: two primaries / Open Project / Disconnect. The plain 2×2
+   (with the half-width "Connect to Host…") is unaffected. */
+.welcome-action-btn:nth-child(odd):has(+ .welcome-remote-btn) {
+  grid-column: 1 / -1;
 }
 
 /* Recent projects */
@@ -205,4 +227,11 @@
   border: 1px solid var(--accent);
   border-radius: 4px;
   text-align: center;
+}
+
+/* An unreachable session must not wear the same info-blue as a healthy
+   one — a degraded state should read as degraded at a glance. */
+.welcome-remote-banner-warning {
+  background: color-mix(in srgb, var(--warning) 14%, transparent);
+  border-color: var(--warning);
 }

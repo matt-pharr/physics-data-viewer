@@ -7,7 +7,13 @@ import * as os from "os";
 import * as path from "path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { readSessionMeta, writeSessionMeta, type SessionMeta } from "./session-meta";
+import {
+  heartbeatAgeMs,
+  readSessionMeta,
+  touchHeartbeat,
+  writeSessionMeta,
+  type SessionMeta,
+} from "./session-meta";
 
 let workDir: string;
 let metaPath: string;
@@ -79,5 +85,33 @@ describe("session meta", () => {
   it("rejects a structurally wrong record", () => {
     fs.writeFileSync(metaPath, JSON.stringify({ sessionId: "abc" }));
     expect(readSessionMeta(metaPath)).toBeNull();
+  });
+});
+
+describe("heartbeat", () => {
+  it("reports no beacon as null, never as an age", () => {
+    expect(heartbeatAgeMs(path.join(workDir, "absent"))).toBeNull();
+  });
+
+  it("a fresh touch reads as young", () => {
+    const beacon = path.join(workDir, "heartbeat");
+    touchHeartbeat(beacon);
+    const age = heartbeatAgeMs(beacon);
+    expect(age).not.toBeNull();
+    expect(age!).toBeLessThan(10_000);
+  });
+
+  it("age tracks the file's mtime, so a stale beacon reads old", () => {
+    const beacon = path.join(workDir, "heartbeat");
+    touchHeartbeat(beacon);
+    const past = new Date(Date.now() - 30 * 60_000);
+    fs.utimesSync(beacon, past, past);
+    expect(heartbeatAgeMs(beacon)!).toBeGreaterThan(29 * 60_000);
+  });
+
+  it("a failed touch is swallowed — the beacon must never kill a session", () => {
+    expect(() =>
+      touchHeartbeat(path.join(workDir, "no", "such", "dir", "heartbeat")),
+    ).not.toThrow();
   });
 });

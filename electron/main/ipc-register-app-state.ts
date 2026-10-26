@@ -50,6 +50,8 @@ function buildWindowChromeInfo(win: BrowserWindow): WindowChromeInfo {
     showMenuBar: platform === "linux",
     showWindowControls: platform === "linux",
     isMaximized: win.isMaximized() || win.isFullScreen(),
+    // Same gate expression as the File-menu entry in menu.ts.
+    remoteEnabled: process.env.PDV_REMOTE === "1",
   };
 }
 

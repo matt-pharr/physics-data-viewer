@@ -34,12 +34,20 @@ import * as fs from "fs/promises";
 import * as os from "os";
 import * as path from "path";
 
+import { expectKernelReady } from "./helpers/kernel-status";
 import { launchPDV, type LaunchedApp } from "./helpers/launch";
 import { sendMenuAction } from "./helpers/menu-action";
+import { createNewPythonProject } from "./helpers/new-project";
 
 const REPO_ROOT = path.resolve(__dirname, "..");
 const FAKE_SSH = path.join(REPO_ROOT, "main", "remote", "__fixtures__", "fake-ssh.cjs");
 const SERVER_ENTRY = path.join(REPO_ROOT, "dist", "main", "server", "server-main.js");
+/** The real app version, read at runtime — the daemon's comm layer enforces it. */
+const APP_VERSION = (
+  JSON.parse(fsSync.readFileSync(path.join(REPO_ROOT, "package.json"), "utf8")) as {
+    version: string;
+  }
+).version;
 
 /** Runtime dirs created per launch; removed in afterEach. */
 const runtimeDirs: string[] = [];
@@ -60,8 +68,13 @@ function remoteEnv(): Record<string, string> {
     // the ssh binary directly rather than needing an interpreter prefix.
     PDV_SSH_PATH: FAKE_SSH,
     // The daemon and the attach proxy are the real pdv-server, run through
-    // the Electron binary as plain Node exactly as production does.
-    PDV_REMOTE_SERVER_COMMAND: `ELECTRON_RUN_AS_NODE=1 "${process.execPath}" "${SERVER_ENTRY}"`,
+    // the Electron binary as plain Node exactly as production does. The env
+    // contract mirrors the bootstrap-generated command (bootstrap.ts):
+    // PDV_APP_VERSION must ride along, or the daemon starts as version
+    // "unknown" and the comm router rejects every kernel message.
+    PDV_REMOTE_SERVER_COMMAND:
+      `PDV_APP_VERSION="${APP_VERSION}" ` +
+      `ELECTRON_RUN_AS_NODE=1 "${process.execPath}" "${SERVER_ENTRY}"`,
     FAKE_SSH_MASTER: "alive",
     FAKE_SSH_EXEC: "local",
   };
@@ -78,10 +91,36 @@ test.afterEach(async () => {
 });
 
 test("connects to a host and moves the session onto it", async () => {
+  test.setTimeout(240_000);
   launched = await launchPDV({ env: remoteEnv() });
-  const { app, window: page } = launched;
+  const { app, window: page, homeDir } = launched;
 
-  await sendMenuAction(app, { action: "remote:connect" });
+  // A per-host setup script configured before connecting — THROUGH THE UI,
+  // Settings → Remote Hosts, the same path a user takes. The assertions at
+  // the bottom prove the whole chain: editor → saved master copy → shipped
+  // to the session dir on the "host" → sourced by the daemon's login-env
+  // capture → applied to a kernel a user's code can see. Deliberately NOT a
+  // PDV_-prefixed name: that prefix is the daemon's reserved namespace and
+  // applyLoginEnv discards it (the first version of this spec fell into
+  // exactly that trap, asserting a marker that could never have been
+  // applied).
+  const setupContent = "export E2E_SETUP_MARKER='shipped and sourced'\n";
+  await sendMenuAction(app, { action: "settings:open" });
+  await page.getByRole("button", { name: "Remote", exact: true }).click();
+  // The temp HOME has no ssh config, so the host list starts empty and the
+  // free-typed destination path is what gets exercised.
+  const addHost = page.getByPlaceholder("user@host");
+  await addHost.fill("testhost");
+  await addHost.press("Enter");
+  await page.locator(".settings-remote-script").fill(setupContent);
+  await page.getByRole("button", { name: "Save testhost" }).click();
+  await expect(page.getByText(/^Saved\./)).toBeVisible({ timeout: 10_000 });
+  await page.getByRole("button", { name: "Close settings" }).click();
+
+  // Enter through the welcome screen's own button — the primary user path
+  // since the four-button welcome landed (the File menu remains an
+  // alternative route and is exercised by the other specs).
+  await page.getByRole("button", { name: "Connect to Host…" }).click();
 
   const dialog = page.locator(".remote-panel");
   await expect(dialog).toBeVisible();
@@ -89,20 +128,99 @@ test("connects to a host and moves the session onto it", async () => {
   await dialog.locator(".remote-host-input").fill("testhost");
   await dialog.getByRole("button", { name: "Connect" }).click();
 
-  // The connect itself must succeed before anything can be run on the host.
-  await expect(dialog.getByText(/Connected to/)).toBeVisible({ timeout: 30_000 });
-
-  await dialog.getByRole("button", { name: /Run session on/ }).click();
-
-  // The session is now served by a daemon reached over the (fake) channel.
-  await expect(dialog.getByText(/Your session is running on/)).toBeVisible({
-    timeout: 30_000,
-  });
+  // Connect chains straight into moving the session — no intermediate
+  // "Connected, now click Run" step — and the dialog closes itself,
+  // landing on the welcome screen. The flipped Disconnect button doubles
+  // as the "session is now remote" confirmation.
+  await expect(dialog).not.toBeVisible({ timeout: 60_000 });
+  await expect(
+    page.getByRole("button", { name: "Disconnect from ‘testhost’" }),
+  ).toBeVisible({ timeout: 30_000 });
   // And the status bar agrees — the renderer learned it from the session
   // state push rather than from the dialog that triggered it.
   await expect(page.locator(".status-bar")).toContainText(/testhost/i, {
     timeout: 10_000,
   });
+
+  // The setup script really shipped: byte-identical in the session dir on
+  // the "host" (the temp HOME the fake ssh executes under)...
+  const sessionDir = path.join(
+    homeDir,
+    ".pdv-server",
+    "run",
+    "sessions",
+    `pdv-${os.userInfo().username}`,
+  );
+  expect(await fs.readFile(path.join(sessionDir, "setup.sh"), "utf8")).toBe(setupContent);
+  // ...and the daemon really sourced it: this log suffix is derived from a
+  // sentinel the capture shell exports after the `.` line — evidence from
+  // inside the capture, not a stat of the file. Written before the socket
+  // binds, so reaching "running on" above guarantees it is on disk.
+  const daemonLog = await fs.readFile(path.join(sessionDir, "session.log"), "utf8");
+  expect(daemonLog).toMatch(/applied login environment .*setup script sourced/);
+  // session.json records the same verdict for later diagnostics.
+  const meta = JSON.parse(
+    await fs.readFile(path.join(sessionDir, "session.json"), "utf8"),
+  ) as { setupScriptApplied?: boolean };
+  expect(meta.setupScriptApplied).toBe(true);
+
+  // Finally, the part a user actually cares about: a kernel started in this
+  // session sees the variable. This closes the gap none of the file/log
+  // assertions can — that the captured environment was APPLIED to
+  // process.env and inherited by the kernel spawn. (The dialog already
+  // auto-closed on success; the welcome with the flipped button was
+  // asserted above.)
+  await createNewPythonProject(page);
+  // Remote path provisions a uv env before the kernel boots; generous but
+  // bounded (uv download cache is shared across specs).
+  await expectKernelReady(page, 150_000);
+  const editor = page.getByRole("textbox", { name: "Editor content" });
+  await editor.focus();
+  const modifier = process.platform === "darwin" ? "Meta" : "Control";
+  await page.keyboard.press(`${modifier}+a`);
+  await page.keyboard.press("Backspace");
+  await page.keyboard.type(
+    "import os; print('marker=' + os.environ.get('E2E_SETUP_MARKER', 'MISSING'))",
+  );
+  await page.getByRole("button", { name: "Execute" }).click();
+  // Not `.first()`: the session-move console marker ("── session moved to
+  // testhost ──") occupies the first stdout slot. Filter to the marker line
+  // so a "marker=MISSING" result still fails with the actual value shown.
+  await expect(
+    page.locator(".log-stdout").filter({ hasText: "marker=" }).first(),
+  ).toContainText("marker=shipped and sourced", { timeout: 30_000 });
+
+  // Launcher routing (B5a): with a remote session and a live kernel, the
+  // Open Terminal launcher targets the session's host, while the agent
+  // launcher is disabled with an explanation — MCP is local-only, and its
+  // `.pdv-mcp.json` write must never chase a cluster working dir.
+  await expect(page.getByTitle("Open terminal on testhost")).toBeEnabled();
+  await expect(
+    page.getByTitle(/AI agent launch isn't available in remote sessions/),
+  ).toBeDisabled();
+});
+
+test("welcome Disconnect returns the window to a local session", async () => {
+  // The full return trip the connect spec's label assertion cannot see:
+  // click the welcome screen's Disconnect, and the window lands back on a
+  // fresh local session while the daemon keeps running on the "host".
+  launched = await launchPDV({ env: remoteEnv() });
+  const { window: page } = launched;
+
+  await page.getByRole("button", { name: "Connect to Host…" }).click();
+  const dialog = page.locator(".remote-panel");
+  await dialog.locator(".remote-host-input").fill("testhost");
+  await dialog.getByRole("button", { name: "Connect" }).click();
+  await expect(dialog).not.toBeVisible({ timeout: 60_000 });
+
+  await page.getByRole("button", { name: "Disconnect from ‘testhost’" }).click();
+
+  // Back on a local session: the button flips back and the status bar no
+  // longer names the host.
+  await expect(page.getByRole("button", { name: "Connect to Host…" })).toBeVisible({
+    timeout: 30_000,
+  });
+  await expect(page.locator(".status-bar")).not.toContainText(/testhost/i);
 });
 
 test("keeps the local session working when the host cannot be reached", async () => {
@@ -151,7 +269,7 @@ test("surfaces a remote kernel-start failure instead of spinning", async () => {
     env: {
       ...remoteEnv(),
       PDV_REMOTE_SERVER_COMMAND:
-        `PDV_PDV_DIR="${remotePdvDir}" ` +
+        `PDV_APP_VERSION="${APP_VERSION}" PDV_PDV_DIR="${remotePdvDir}" ` +
         `ELECTRON_RUN_AS_NODE=1 "${process.execPath}" "${SERVER_ENTRY}"`,
     },
   });
@@ -161,12 +279,13 @@ test("surfaces a remote kernel-start failure instead of spinning", async () => {
   const dialog = page.locator(".remote-panel");
   await dialog.locator(".remote-host-input").fill("testhost");
   await dialog.getByRole("button", { name: "Connect" }).click();
-  await expect(dialog.getByText(/Connected to/)).toBeVisible({ timeout: 30_000 });
-  await dialog.getByRole("button", { name: /Run session on/ }).click();
-  await expect(dialog.getByText(/Your session is running on/)).toBeVisible({
-    timeout: 30_000,
-  });
-  await dialog.getByRole("button", { name: "Close" }).click();
+  // Connect chains into the session move and auto-closes; wait for the
+  // swap to be reflected on the welcome before driving the new-project
+  // flow against the host.
+  await expect(dialog).not.toBeVisible({ timeout: 60_000 });
+  await expect(
+    page.getByRole("button", { name: "Disconnect from ‘testhost’" }),
+  ).toBeVisible({ timeout: 30_000 });
 
   // The default new-project path (uv mode) against the poisoned config.
   await sendMenuAction(app, { action: "project:new" });
@@ -194,7 +313,7 @@ test("does not offer remote mode unless it is enabled", async () => {
   // has landed, so the gate is now a release toggle rather than a
   // correctness requirement.
   launched = await launchPDV({ env: { PDV_REMOTE: "0" } });
-  const { app } = launched;
+  const { app, window: page } = launched;
 
   const hasEntry = await app.evaluate(({ Menu }) => {
     const menu = Menu.getApplicationMenu();
@@ -202,4 +321,11 @@ test("does not offer remote mode unless it is enabled", async () => {
   });
 
   expect(hasEntry).toBe(false);
+  // The welcome screen's Connect to Host button honors the same gate.
+  await expect(page.locator(".welcome-overlay")).toBeVisible();
+  await expect(page.getByRole("button", { name: /Connect to Host/ })).toHaveCount(0);
+  // And so does the Settings → Remote Hosts tab.
+  await sendMenuAction(app, { action: "settings:open" });
+  await expect(page.getByRole("button", { name: "Close settings" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Remote", exact: true })).toHaveCount(0);
 });

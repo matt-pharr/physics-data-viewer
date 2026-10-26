@@ -30,6 +30,78 @@ describe("@slow KernelManager error paths", { timeout: 90_000 }, () => {
     await km.shutdownAll();
   }, 30_000);
 
+  it("interpreter that exits at startup -> start() rejects immediately", async () => {
+    // The ready-wait's idle allowance is deliberately generous (180 s) so a
+    // healthy kernel can import silently from a cold-NFS venv; a process
+    // that EXITS must therefore fail the wait at once rather than riding
+    // out the timer. Shim prints a traceback-ish line and dies like a
+    // broken interpreter does.
+    const os = await import("os");
+    const path = await import("path");
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "pdv-dead-python-"));
+    const shim = path.join(dir, "python3");
+    await fs.writeFile(shim, "#!/bin/sh\necho boom >&2\nexit 3\n", {
+      mode: 0o755,
+    });
+
+    const started = Date.now();
+    await expect(
+      km.start({ language: "python", env: { PYTHON_PATH: shim } })
+    ).rejects.toThrow(/exited during startup/);
+    // Well under the 180 s idle allowance — exit is what rejected us.
+    expect(Date.now() - started).toBeLessThan(20_000);
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  it("ready-wait rejects when the process is already dead at entry", async () => {
+    // The CI-caught ordering: the kernel process exits BEFORE
+    // waitForKernelReady even runs (slow runner), so the exit event fired
+    // pre-registration and only the exitCode check can see it. This used
+    // to reject through done() while idleTimer was still in its temporal
+    // dead zone ("Cannot access 'idleTimer' before initialization").
+    const { EventEmitter } = await import("events");
+    const proc = Object.assign(new EventEmitter(), { exitCode: 3 });
+    const fake = {
+      info: { id: "dead-at-entry" },
+      sessionId: "s",
+      process: proc,
+      shellSocket: { send: async () => {} },
+      connectionInfo: { key: "k" },
+      shellQueue: Promise.resolve(),
+    };
+    const wait = (
+      km as unknown as {
+        waitForKernelReady(m: unknown, a: number, b: number): Promise<void>;
+      }
+    ).waitForKernelReady(fake, 60_000, 120_000);
+    await expect(wait).rejects.toThrow(/exited during startup \(exit code 3\)/);
+  });
+
+  it("ready-wait rejects a signal-killed process at entry", async () => {
+    // A SIGKILLed child (e.g. an OOM kill) has exitCode null and
+    // signalCode set — it must reject immediately, not ride the idle
+    // timer for 180 s.
+    const { EventEmitter } = await import("events");
+    const proc = Object.assign(new EventEmitter(), {
+      exitCode: null,
+      signalCode: "SIGKILL",
+    });
+    const fake = {
+      info: { id: "sigkilled-at-entry" },
+      sessionId: "s",
+      process: proc,
+      shellSocket: { send: async () => {} },
+      connectionInfo: { key: "k" },
+      shellQueue: Promise.resolve(),
+    };
+    const wait = (
+      km as unknown as {
+        waitForKernelReady(m: unknown, a: number, b: number): Promise<void>;
+      }
+    ).waitForKernelReady(fake, 60_000, 120_000);
+    await expect(wait).rejects.toThrow(/killed by SIGKILL/);
+  });
+
   it("kernel crash -> kernel:crashed event emitted", async () => {
     const info = await startKernel();
     const managed = (

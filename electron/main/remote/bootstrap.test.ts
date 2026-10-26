@@ -211,6 +211,40 @@ describe("installBundle", () => {
     expect(fs.existsSync(path.join(home, ".pdv-server", TEST_PDV_VERSION, ".selfcheck.json"))).toBe(false);
   }, 60_000);
 
+  it("succeeds even when the replaced install cannot be deleted", async () => {
+    // A still-running old daemon on an NFS home keeps its files open, so
+    // removing the displaced install leaves .nfs* silly-rename ghosts and
+    // rm exits nonzero (seen live on feyn as "Unpacking failed" AFTER the
+    // new install was already in place). Simulated here with an
+    // undeletable directory: old-install cleanup must be best-effort,
+    // never part of the install's success.
+    const { tarball, sha256 } = makeBundle();
+    await installBundle(control, tarball, sha256, opts());
+    const target = path.join(home, ".pdv-server", TEST_PDV_VERSION);
+    const locked = path.join(target, "locked");
+    fs.mkdirSync(locked);
+    fs.writeFileSync(path.join(locked, "pin"), "");
+    fs.chmodSync(locked, 0o555);
+    try {
+      const second = await installBundle(control, tarball, sha256, opts());
+      expect(second.ok).toBe(true);
+      // The new install is whole and in place, without the old debris.
+      expect(fs.existsSync(path.join(target, "pdv-server.cjs"))).toBe(true);
+      expect(fs.existsSync(locked)).toBe(false);
+      // The undeletable old install was parked aside under a unique name.
+      const leftovers = fs
+        .readdirSync(path.join(home, ".pdv-server"))
+        .filter((n) => n.startsWith(`${TEST_PDV_VERSION}.old`));
+      expect(leftovers.length).toBe(1);
+    } finally {
+      // Unlock so afterEach teardown can delete the tree.
+      for (const n of fs.readdirSync(path.join(home, ".pdv-server"))) {
+        const p2 = path.join(home, ".pdv-server", n, "locked");
+        if (fs.existsSync(p2)) fs.chmodSync(p2, 0o755);
+      }
+    }
+  });
+
   it("replaces an existing install without leaving it half-written", async () => {
     const { tarball, sha256 } = makeBundle();
     await installBundle(control, tarball, sha256, opts());

@@ -78,6 +78,7 @@ function createState(overrides: Partial<State> = {}): {
 
   const setters: Parameters<typeof useProjectWorkflow>[0] = {
     kernelStatus: "ready",
+    activeLanguage: "python",
     currentProjectDir: state.currentProjectDir,
     cellTabs: state.cellTabs,
     activeCellTab: state.activeCellTab,
@@ -435,8 +436,13 @@ describe("useProjectWorkflow recent-projects bookkeeping", () => {
     const { recentProjects } = (pdv.config.set as ReturnType<typeof vi.fn>).mock
       .calls[0][0] as { recentProjects: RecentProjectEntry[] };
     // The newly saved dir is at the front, no duplicates, length capped.
-    // A local session records host: null.
-    expect(recentProjects[0]).toEqual({ host: null, path: "/projects/x" });
+    // A local session records host: null, plus the active kernel language
+    // (so remote entries can show a language badge with no connection).
+    expect(recentProjects[0]).toEqual({
+      host: null,
+      path: "/projects/x",
+      language: "python",
+    });
     // Legacy string entries survived the upgrade as local ones.
     expect(recentProjects[1]).toEqual({ host: null, path: "/projects/old-0" });
     const keys = recentProjects.map((e) => `${e.host ?? ""} ${e.path}`);

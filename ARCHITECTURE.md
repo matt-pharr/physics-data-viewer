@@ -553,6 +553,7 @@ pdv/
     query_server.py      # QueryServer: ZMQ REP daemon thread for read-only queries during execution
     namespace.py         # PDVNamespace (protected dict), pdv_namespace(), inspect_namespace()
     serialization.py     # Type detection, format writers (npy, pickle, json, module, gui, namelist, lib)
+    mpl_config.py        # Safe matplotlib backend selection (display probe, subprocess pre-flight, %matplotlib guard)
     environment.py       # Path utilities, working dir management, project root logic
     errors.py            # PDVError, PDVPathError, PDVKeyError, PDVProtectedNameError, PDVSerializationError, PDVScriptError, PDVVersionError
     modules.py           # Custom type handler registry and dispatch (@pdv.handle() decorator)
@@ -580,7 +581,7 @@ pdv/
 `pdv.bootstrap()` is called by a bootstrap snippet that the main process sends via `execute_request` (silent mode) from `kernel-session.ts` immediately after the kernel subprocess starts. It:
 1. Registers the `pdv.kernel` comm target with IPython
 2. Injects `pdv_tree` into the IPython user namespace via a custom namespace class that blocks reassignment
-3. Configures an interactive matplotlib backend (or patches `plt.show()` for inline emission when none is available)
+3. Configures a matplotlib backend via `pdv.mpl_config` through IPython's `enable_matplotlib` machinery (event-loop integration, so GUI windows actually work). macOS/Windows auto-enable a native backend (failures there are ordinary catchable exceptions). On Linux the handshake always runs on the inline backend, and when the display is live and a Qt binding pre-flights green, **qt is enabled one-shot just before the user's first execution** — so plots still default to native windows, but a GUI event loop can never start mid-handshake (ipykernel's `loop_tk` under Xvfb starved `pdv.init` on CI even after a green pre-flight; qt is the only auto candidate because its loop is the one with field mileage). tk/gtk are opt-in via the guarded `%matplotlib`. That guard runs a cheap `$DISPLAY` liveness probe (ssh forwards `localhost:N` as TCP `6000+N`) and a throwaway-subprocess pre-flight of the toolkit, because Qt's xcb plugin `abort()`s the whole process on a dead display — the common state when a remote kernel daemon outlives the ssh channel that set its `DISPLAY`. When both PyQt5 and PyQt6 are installed, `QT_API` steers matplotlib toward PyQt5 (Qt6's xcb plugin aborts even on live forwarded displays). Anything unsafe falls back to the `matplotlib-inline` backend, whose `show()` emits `display_data` immediately (so double-click plots from comm handlers render in the console too). `ip.enable_matplotlib` is wrapped so a user-invoked `%matplotlib <gui>` runs the same checks and prints a one-line refusal instead of crashing the kernel; direct `matplotlib.use()` calls in user code are documented as unguarded. A backend deliberately configured via `MPLBACKEND` is honored — but it is enabled through `enable_matplotlib` (so it gets the event loop) and still passes the same safety checks, falling back to inline with an explanation when refused. (matplotlibrc alone never reaches this path: ipykernel forces `MPLBACKEND` to the inline backend when unset, before the shell exists.) Because bootstrap prints land in the handshake boot tail the user never sees, the reason for an inline fallback is re-printed once, above the user's first `plt.show()` figure.
 4. Arranges the built-in double-click plot handlers to register **lazily**: the handler-registry lookups in `pdv.modules` (`has_handler_for`, `dispatch_handler`) call `pdv.default_handlers.register_defaults()`, which registers per-library defaults once numpy / pandas / xarray actually appear in `sys.modules`. Bootstrap itself imports none of them — eager imports cost real startup latency and undercut the never-import-xarray design in `serialization.py`, and a tree value can only *be* one of these types if its library is already imported. Per-type behavior: `np.ndarray` 1D → `ax.plot`, 2D → `ax.imshow` + colorbar, 0D/>2D → printed notice; complex arrays (any source) split into parts — 1D plots labeled `Re`/`Im` lines on one axes, 2D shows side-by-side `Re`/`Im` `imshow` panels each with its own colorbar (the parts routinely span different ranges); `h5py.Dataset` → materialized (under a 100 MB cap with a slice-it-in-code notice) and drawn with the same array logic; `pd.Series` and `pd.DataFrame` → their built-in `.plot()`; `xr.DataArray` → its built-in `.plot()` (which dispatches 1D → line, 2D → pcolormesh, >2D → histogram by ndim). A value that cannot actually be plotted (e.g. a non-numeric `pd.Series` or an object-dtype array) closes its half-built figure and prints a `[PDV]` notice rather than raising — a raised exception would reach the renderer as an opaque `internal.error`. `xr.Dataset` is intentionally not registered — users drill into a specific `data_var`
 5. Sends the `pdv.ready` comm message
 
@@ -1064,10 +1065,14 @@ invokes external applications:
   (`terminal-app` on macOS, `x-terminal-emulator` on Linux, `wt.exe` on
   Windows).
 
-- `launchers.editor` — `{ fileCommand?, dirCommand?, isTuiEditor? }`. The
-  command PDV uses to open a script (`fileCommand`) or a directory
-  (`dirCommand`); `{}` is the path placeholder. `isTuiEditor` forces terminal
-  wrapping on/off; when unset PDV auto-detects from the command basename.
+- `launchers.editor` — `{ fileCommand?, dirCommand?, isTuiEditor?,
+  remoteFileCommand?, remoteDirCommand? }`. The command PDV uses to open a
+  script (`fileCommand`) or a directory (`dirCommand`); `{}` is the path
+  placeholder. `isTuiEditor` forces terminal wrapping on/off; when unset PDV
+  auto-detects from the command basename. The two `remote*` keys are
+  optional overrides for remote sessions (`{host}`/`{path}` placeholders,
+  hand-edited config only — the built-in derivation covers
+  code/cursor/windsurf and TUI editors; see §11.7 launcher routing).
   This slot supersedes the legacy `pythonEditorCmd` / `juliaEditorCmd` keys —
   `ConfigStore` migrates a pre-existing `pythonEditorCmd` into
   `launchers.editor.fileCommand` once, at load, and drops the legacy keys.
@@ -1994,7 +1999,7 @@ The API surface:
 - `window.pdv.environment.*` — Python environment management: `list`, `check`, `install`, `refresh`, `activeInfo` (active kernel's environment metadata — mode, interpreter, Python version — for the Project Environment tab), plus the uv package UI: `listPackages`, `addPackage`, `removePackage`, `upgradePackage`; push: `onInstallOutput(cb) → unsub`, `onEnvActivity(cb) → unsub` (streaming uv output)
 - `window.pdv.chrome.*` — window chrome controls: `getInfo`, `minimize`, `toggleMaximize`, `close`; push: `onStateChanged(cb) → unsub`
 - `window.pdv.system.*` — constant host facts injected at preload time: `platform` (the main process's `process.platform`), `supportedPythonVersions` and `defaultPythonVersion` (the New Project dialog's version range, from `python-versions.ts`), and their Julia siblings `supportedJuliaVersions` and `defaultJuliaVersion` (from `julia-versions.ts`, §10.6.5). Exposed as plain values, not functions — they never change during a session, so they need no IPC channel
-- `window.pdv.launchers.*` — action-bar external-app launchers: `openAgent` (launch the configured AI agent in a terminal), `openWorkingDir` (open the active kernel's working directory in the configured editor/IDE), `checkAvailability` (probe whether a terminal/editor/file-manager is installed, without launching it — used to gate Settings Save)
+- `window.pdv.launchers.*` — action-bar external-app launchers: `openAgent` (launch the configured AI agent in a terminal; local sessions only), `openWorkingDir` (open the active kernel's working directory in the configured editor/IDE), `openTerminal` (open the user's terminal in the working directory — over `ssh -t` in remote sessions), `checkAvailability` (probe whether a terminal/editor/file-manager is installed, without launching it — used to gate Settings Save)
 - `window.pdv.progress.*` — operation progress: push only: `onProgress(cb) → unsub`
 - `window.pdv.menu.*` — menu bridge: `updateRecentProjects(paths)`, `onAction(cb) → unsub`
 - `window.pdv.autosave.*` — autosave lifecycle: `run`, `clear`, `check`, `scanWorkingDirs`, `recoverUnsaved`, `deleteOrphan`; push: `onTrigger(cb) → unsub`, `onInFlightChange(cb) → unsub`
@@ -2236,13 +2241,24 @@ clusters and AF_UNIX there is unreliable, so the socket resolves node-local
 root), rejecting any candidate that would blow the ~104-byte `sun_path`
 budget. `session.json` records the **concrete hostname**: `flux.pppl.gov`
 round-robins and the socket is node-local, so a reattach that follows the
-alias can land on a different login node. **Known limitation:** today
-nothing shell-side *reads* that hostname — a reconnect that lands on
-login2 finds no socket, judges the (NFS-shared) lock stale because the
-bootId belongs to another machine, and spawns a second daemon while the
-first strands its kernel on login1. Single-node hosts are unaffected; on
-round-robin aliases, pin a concrete `Host` entry until the reattach path
-learns to target the recorded node (tracked follow-up).
+alias can land on a different login node. Two complementary mechanisms make
+the recorded hostname effective. *Proactively*, the shell records the node a
+session starts on (per host, in `<userData>/remote-hosts.json`; cleared on
+shutdown) and pins the next PDV-created master there with `-o HostName=` —
+a command-line `-o` outranks the alias's config while its `ProxyCommand`,
+agent and user settings still apply; a pinned attempt that fails falls back
+to the bare alias with a visible explanation, so a drained node cannot
+brick the host. *As backstop*, `attach` refuses to create a daemon when
+`session.json` names a different machine and the recorded daemon's
+**heartbeat** is fresh (a beacon file in the NFS-shared session dir,
+touched every minute by the daemon — the one liveness signal another login
+node can read, since pids and sockets are node-local). The refusal carries
+a parseable `PDV_WRONG_NODE node=<hostname>` marker that the shell turns
+into an actionable message *and* a recorded pin for the next connect. A
+stale or absent beacon downgrades the refusal to a logged takeover, so a
+dead daemon never holds its session hostage. A master the user runs
+themselves is never re-pointed (PDV does not own it); the attach guard
+covers that case.
 
 **Detachment** (`server/daemonize.ts`) is `detached: true` (setsid),
 `unref()` plus the launcher exiting (orphaning), and
@@ -2284,6 +2300,105 @@ server is shut down rather than abandoned, since it holds a kernel and a
 working directory on this machine. The session id is stable per user, so
 reconnecting after a crash or an app restart finds the same session, kernel
 and Tree instead of stranding the previous daemon.
+
+**Login environment and the per-host setup script.** A daemon spawned over
+an ssh exec channel never ran a login shell, so PATH entries that every
+interactive shell on the cluster has — Lmod modules, juliaup, conda hooks —
+are invisible to it and to every kernel and probe it spawns. At startup the
+daemon therefore captures the login environment once (`server/login-env.ts`):
+`bash -lc '. setup.sh >/dev/null 2>&1; env -0 > <file>'`, parsed from the
+file (login shells *print*, and profile chatter interleaved with the capture
+— or with any per-spawn wrapper's stdout — would corrupt interpreter probes
+that regex their output) and applied to the daemon's own `process.env`,
+which every spawn call site builds from. One login shell per daemon, not per
+spawn; `PDV_*` and `ELECTRON_RUN_AS_NODE` are protected from profile
+override — that prefix is the daemon's reserved namespace, so a setup
+script's own exports must not use it. A failed capture degrades to the
+inherited environment, but never silently when a script was shipped: the
+capture reports *evidence* of sourcing (a sentinel exported by the capture
+shell, not a stat of the file), the verdict is recorded as
+`setupScriptApplied` in `session.json`, and a shipped-but-not-applied
+script logs loudly. The optional setup script is per host: its master copy
+lives on the laptop (`<userData>/remote-setup/<host>.sh`, edited in
+Settings → Remote Hosts, CRLF normalized at ship time) and
+`remote/setup-script.ts` ships it at every `startSession`, before any path
+that could spawn a daemon, since it is sourced only during that startup
+capture — script edits apply from the next session start, and a daemon
+resurrected by the handle's internal reconnect loop sources the
+last-shipped copy. A configured script that cannot be delivered fails the
+session start loudly; silently missing interpreters are the harder bug.
+When no script is configured the remote copy is removed, so at each
+session start the host reflects the local master copy, present or absent.
+The `setupScriptApplied` verdict does not stop at `session.json`: the
+attach result reports it (optional field; old daemons stay silent), and
+when a script was shipped but is not in effect — the capture failed, or
+the daemon booted before the script existed — the shell composes a warning
+that rides every session-state push for that handle and renders in the
+welcome banner and the connect dialog. The Remote Hosts tab's **Test
+button** (`remote.testSetupScript` → `remote/setup-script-test.ts`) is the
+debugging surface the capture deliberately is not: it sources the
+*editor's current text* in a real `bash -l` on the connected host,
+captures the script's own output verbatim (marker-framed, so login-shell
+chatter cannot corrupt it), and reports a before/after interpreter probe
+diff. All server-side tool spawns are funnelled through one seam
+(`server/spawn.ts`, enforced by an import guard) — the future hook for
+Slurm-launched kernels, which is also why environment does not ride there
+as a wrapper.
+
+**Per-host settings** (`remote/host-config.ts`, Settings → Remote Hosts)
+live on the laptop in `<userData>/remote-hosts.json`, keyed by host alias:
+directory settings (`workingDirBase`, `defaultSaveLocation`), the kernel
+launch configuration the Slurm work will consume (mode, account,
+partition, allocation command — stored now, honestly labeled until the
+launch path exists), and the PDV-recorded session node used by the
+reconnect pinning above. User-edited settings and recorded state are kept
+on separate write paths so a tab save cannot clobber the pin and vice
+versa. The directory settings are master copies of *server-side* config
+keys: at `startSession` the configured values are pushed into the host's
+`~/.PDV/preferences.json` over the freshly started handle, before the
+swap — a failure declines the move loudly and leaves the window on its
+working local session, because a kernel quietly writing to the NFS home
+the user pointed at scratch is the harder bug to notice.
+
+The per-host **Forward X11** toggle (issue #377) requests `ForwardX11=yes`
+in two places, because they answer different questions: on a master PDV
+creates (so forwarding is *allowed* on the connection at all), and on the
+session-attach channel (whose environment the `--create`-spawned daemon
+inherits — that DISPLAY, captured once at daemon boot, is what the
+kernels' matplotlib sees). A master borrowed from the user's own ssh
+config is never reconfigured; there the channel-level request succeeds
+exactly when the user's config permits forwarding. Toggling the setting
+while connected takes effect on the next session for real: the connect
+path compares the toggle against the state PDV's live master was
+established with and tears a mismatched master down rather than reusing
+it (a borrowed master is never rebuilt — it is the user's). The known
+limitation stands: a DISPLAY rots if the forwarding channel dies while
+the daemon lives — the comm-carried plot window (issue #369) is the
+structural fix.
+
+**Launcher routing** (`remote/remote-launchers.ts`, consumed by
+`ipc-register-launchers.ts`) routes the shell-side external-app launchers
+by session kind, read synchronously from the session router + connection
+manager — never from connection *state* alone, so a remote session
+mid-reconnect refuses ssh-carried launches rather than falling back to
+spawning cluster paths locally. `script.edit` / `openWorkingDir`: a
+Remote-SSH-capable editor (code/cursor/windsurf basenames, or an explicit
+`launchers.editor.remoteFileCommand`/`remoteDirCommand` template with
+`{host}`/`{path}` placeholders) spawns locally with
+`--remote ssh-remote+<host>` and makes its own connection via the user's
+ssh config; a TUI editor runs *on the host* inside the user's terminal
+preset wrapping `ssh -t` over PDV's ControlMaster (no re-auth while the
+master lives) with an `-o HostName=` pin to the recorded session node —
+so even a fresh connection after a master death lands beside the
+session's working dir, which matters for node-local scratch, where a
+round-robin alias can land a Remote-SSH editor on the wrong node;
+anything else refuses with the alternatives named. `launchers.openTerminal` (the Open Terminal button) opens the
+terminal preset around a local login shell in the working dir, or
+remotely around `ssh -t <host> 'cd <wd>; exec "${SHELL:-sh}" -l'`.
+`launchers.openAgent` refuses in remote sessions before doing any work —
+MCP is local-only (§15.9), and the refusal is also what makes the
+`.pdv-mcp.json` write (which targets the kernel's working directory, a
+cluster path when remote) unreachable cross-host.
 
 `shell/remote-server.ts` is the remote `ServerHandle`. The transport is
 unchanged — an ssh channel is a stream pair and `RpcClient` already takes one
@@ -2954,7 +3069,7 @@ PDV does not ship a static API reference, which would drift. Instead:
 The following features are acknowledged as future work and must not influence the current architecture in ways that complicate the above design:
 
 - **Modules ecosystem hardening** — core module lifecycle is implemented (install from disk/GitHub, import, uninstall, update, bundled examples, project-local storage); deeper registry/trust features are deferred
-- **Remote session completeness** — remote sessions work end to end (§11.7 area above: connect, bootstrap, session daemon, environment provisioning via the bundled uv, path picking); still deferred are the per-host setup script and Slurm-aware kernel launch (interactive analysis on a login node is the sanctioned beta scope), remote Julia sessions (need juliaup on the host), remote→local file export, remote launchers, and the VS Code-style command palette that will replace the placeholder path picker
+- **Remote session completeness** — remote sessions work end to end (§11.7 area above: connect, bootstrap, session daemon, environment provisioning via the bundled uv, path picking, launcher routing incl. the Open Terminal launcher and the per-host Forward X11 toggle); still deferred are Slurm-aware kernel launch (interactive analysis on a login node is the sanctioned beta scope; the per-host setup script, login-environment capture, Remote Hosts settings tab and per-host launch-config schema have landed), remote Julia sessions (need juliaup on the host), remote→local file export, and the VS Code-style command palette that will replace the placeholder path picker
 - **Local→remote upload import and remote MCP** — explicitly excluded from remote v1
 - **Multiple simultaneous kernels** — architecture supports it (kernels have IDs) but UI exposes only one at a time
 - **R kernel support** — deferred; would follow the `pdv-julia` pattern (a kernel-side package implementing the language-agnostic protocol of §3)

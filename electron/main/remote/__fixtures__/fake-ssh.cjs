@@ -176,6 +176,7 @@ if (controlCommand) {
 //   duo     — like `prompt`, but with Duo's two-stage menu, to prove a
 //             stateful multi-prompt exchange works.
 //   fail    — refuse immediately, the way a rejected key does.
+//   unreachable — die with a connection-level error, the way a down node does.
 //   hang    — never exit and never authenticate, for deadline tests.
 if (createMaster) {
   const authMode = process.env.FAKE_SSH_AUTH || "hold";
@@ -200,6 +201,13 @@ if (createMaster) {
   if (authMode === "hang") { hold(); return; }
   if (authMode === "fail") {
     die("Permission denied (publickey,keyboard-interactive).", 255);
+  }
+  if (authMode === "unreachable") {
+    // A node that is down or drained — a CONNECTION-level failure, as
+    // opposed to `fail`'s reachable-but-refusing-credentials. The two must
+    // stay distinguishable: the pinned-master fallback retries on this one
+    // and must NOT retry on `fail`.
+    die("ssh: connect to host fakehost port 22: Connection refused", 255);
   }
 
   // Read one line at a time from the terminal.

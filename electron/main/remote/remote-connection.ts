@@ -54,9 +54,44 @@ import {
   establishMasterInteractive,
   isSecretPrompt,
   looksLikePrompt,
+  type PtyAuthResult,
   type PtyMasterSession,
   type PtyModule,
 } from "./ssh-pty";
+
+/**
+ * ssh's connection-level complaints — the node itself is unreachable, as
+ * opposed to reachable-but-refusing-credentials.
+ *
+ * Matched against the pty transcript to decide whether a failed PINNED
+ * attempt is worth retrying against the bare alias. This is stderr pattern
+ * matching, normally forbidden here ("the -O check ladder gets it right") —
+ * but no exit-code signal distinguishes a drained node from a mistyped
+ * password (both end in a nonzero ssh exit), and the stakes are asymmetric:
+ * a missed match means no retry (the user reconnects by hand), while
+ * matching a credential failure would fire a surprise second password/Duo
+ * prompt. So the match gates only the retry, and not matching is the safe
+ * default. `timeout` never falls back either — it means a prompt sat
+ * unanswered for the full budget, and a retry would silently double it.
+ */
+const CONNECTION_LEVEL_FAILURE = new RegExp(
+  [
+    "Could not resolve hostname",
+    "Connection refused",
+    "Connection timed out",
+    "No route to host",
+    "Network is unreachable",
+    "Connection closed by remote host",
+  ].join("|"),
+  "i",
+);
+
+/** Whether a failed pinned attempt should be retried against the alias. */
+function pinFallbackWorthwhile(result: PtyAuthResult): boolean {
+  if (result.failure === "cancelled" || result.failure === "pty-unavailable") return false;
+  if (result.failure === "timeout") return false;
+  return CONNECTION_LEVEL_FAILURE.test(result.transcript);
+}
 
 /** Options for {@link RemoteConnectionManager}. */
 export interface RemoteConnectionOptions {
@@ -87,6 +122,24 @@ export interface RemoteConnectionOptions {
    * honest behaviour when no bundle has been built.
    */
   bundleDir?: string;
+  /**
+   * The concrete login node a host's session daemon was last seen on, or
+   * null when none is recorded. When set, a master PDV creates for that
+   * host is pinned there with `-o HostName=` — a load-balanced alias
+   * round-robins while the session socket is node-local, so an unpinned
+   * reconnect can land beside a session it cannot reach. A master the user
+   * already runs is never re-pointed (PDV does not own it); the attach
+   * guard on the host is the backstop for that case.
+   */
+  sessionNodeFor?: (host: string) => string | null;
+  /**
+   * Whether the per-host "Forward X11" toggle is on for a host (issue
+   * #377). Applied to masters PDV creates; a master the user already runs
+   * is not PDV's to reconfigure (the channel-level request in
+   * `remote-channel.ts` still applies there, and succeeds exactly when the
+   * user's own config enabled forwarding on it).
+   */
+  forwardX11For?: (host: string) => boolean;
 }
 
 /**
@@ -108,7 +161,33 @@ export class RemoteConnectionManager {
    */
   private master: PtyMasterSession | null = null;
 
+  /**
+   * Whether the held PDV-created master was established with X11
+   * forwarding. Meaningless while {@link master} is null. Compared against
+   * the per-host toggle on reconnect so a toggle flip rebuilds the master
+   * instead of being silently ignored.
+   */
+  private masterForwardX11 = false;
+
   constructor(private readonly options: RemoteConnectionOptions) {}
+
+  /**
+   * Stop and reap PDV's own master, leaving state ready for a fresh
+   * establish. No-op when PDV holds no master (borrowed connections are
+   * never PDV's to stop).
+   *
+   * @returns Nothing.
+   */
+  private async teardownOwnMaster(): Promise<void> {
+    const control = this.activeControl;
+    const master = this.master;
+    this.activeControl = null;
+    this.master = null;
+    if (master) {
+      if (control?.controlPath) await stopMaster(control, this.muxOptions());
+      master.close();
+    }
+  }
 
   /** The control socket of the live connection, or null when disconnected. */
   get control(): SshControl | null {
@@ -290,13 +369,25 @@ export class RemoteConnectionManager {
         message: "A connection attempt is already in progress.",
       };
     }
+    const wantX11 = this.options.forwardX11For?.(host) ?? false;
     if (this.status.phase === "connected" && this.status.host === host && this.activeControl) {
       const state = await checkMaster(this.activeControl, this.muxOptions());
       if (state === "alive") {
-        return { ok: true, failure: null, message: `Already connected to ${host}.` };
+        if (this.master && this.masterForwardX11 !== wantX11) {
+          // The per-host Forward X11 toggle changed since this master was
+          // established. X11 forwarding is a property of the master's
+          // connection, so reusing it would silently ignore the toggle —
+          // the "applies to the next session" promise in the settings copy
+          // depends on tearing the old master down here. Only PDV's own
+          // master is rebuilt; a borrowed one is the user's to configure.
+          await this.teardownOwnMaster();
+        } else {
+          return { ok: true, failure: null, message: `Already connected to ${host}.` };
+        }
       }
-      // The master died while PDV believed it was connected. Fall through
-      // and reconnect rather than reporting a connection that is not there.
+      // The master died while PDV believed it was connected (or was torn
+      // down above). Fall through and reconnect rather than reporting a
+      // connection that is not there.
     }
 
     const attemptId = crypto.randomBytes(8).toString("hex");
@@ -317,6 +408,15 @@ export class RemoteConnectionManager {
       this.options.controlDir,
       this.muxOptions(),
     );
+    if (masterState === "alive" && wantX11 && control.controlPath && !this.master) {
+      // An alive master at PDV's own socket path that THIS manager does
+      // not hold (a previous instance's leftover) has unknowable X11
+      // state. With the toggle on, guessing wrong silently produces
+      // sessions with no DISPLAY — stop it and establish fresh; it is
+      // PDV's socket, never the user's.
+      await stopMaster(control, this.muxOptions());
+      return await this.authenticate(host, attemptId, control);
+    }
     if (masterState === "alive") {
       this.activeControl = control;
       const node = await this.resolveNode(control);
@@ -349,11 +449,61 @@ export class RemoteConnectionManager {
     control: SshControl,
   ): Promise<RemoteConnectResult> {
     const controlPath = control.controlPath ?? controlPathFor(host, this.options.controlDir);
-    let seen = "";
 
+    // Aim at the recorded session node when there is one (see the option's
+    // JSDoc). The pin is best-effort: a node that stopped answering must
+    // not brick the alias, so a pinned attempt that failed AT THE
+    // CONNECTION LEVEL falls back to the alias below — where the
+    // wrong-node attach guard keeps a live session from being forked, and
+    // a dead one is simply recreated wherever the alias lands.
+    const pin = this.options.sessionNodeFor?.(host) ?? null;
+    let result = await this.runAuthAttempt(host, attemptId, controlPath, pin);
+    if (!result.ok && pin && pinFallbackWorthwhile(result)) {
+      this.emit({
+        phase: "connecting",
+        host,
+        attemptId,
+        output: `\r\nCould not reach ${pin} (where your session was running); trying ${host} directly…\r\n`,
+        message: `Connecting to ${host}…`,
+      });
+      result = await this.runAuthAttempt(host, attemptId, controlPath, null);
+    }
+
+    if (!result.ok) {
+      return this.fail(host, attemptId, result.failure ?? "unknown", result.message);
+    }
+    this.activeControl = { host, controlPath };
+    this.master = result.session;
+    this.masterForwardX11 = this.options.forwardX11For?.(host) ?? false;
+    const node = await this.resolveNode(this.activeControl);
+    const problem = await this.prepareHost(host, attemptId, this.activeControl);
+    if (problem) return this.fail(host, attemptId, "bootstrap", problem);
+    this.emit({ phase: "connected", host, attemptId, node, message: result.message });
+    return { ok: true, failure: null, message: result.message };
+  }
+
+  /**
+   * One interactive establishment attempt, optionally pinned to a node.
+   *
+   * @param host - ssh destination.
+   * @param attemptId - Identifier for this attempt.
+   * @param controlPath - Control socket the new master must listen on.
+   * @param pin - Concrete node to pass as `-o HostName=`, or null.
+   * @returns The pty outcome plus the live session (already closed when the
+   *   attempt failed, so callers only manage the successful one).
+   */
+  private async runAuthAttempt(
+    host: string,
+    attemptId: string,
+    controlPath: string,
+    pin: string | null,
+  ): Promise<PtyAuthResult & { session: PtyMasterSession }> {
+    let seen = "";
     const session = establishMasterInteractive({
       host,
       controlPath,
+      hostNameOverride: pin ?? undefined,
+      forwardX11: this.options.forwardX11For?.(host) ?? false,
       sshPath: this.options.sshPath,
       ptyModule: this.options.ptyModule,
       overallTimeoutMs: this.options.overallTimeoutMs,
@@ -372,21 +522,10 @@ export class RemoteConnectionManager {
       },
     });
     this.attempt = session;
-
     const result = await session.result;
     this.attempt = null;
-
-    if (!result.ok) {
-      session.close();
-      return this.fail(host, attemptId, result.failure ?? "unknown", result.message);
-    }
-    this.activeControl = { host, controlPath };
-    this.master = session;
-    const node = await this.resolveNode(this.activeControl);
-    const problem = await this.prepareHost(host, attemptId, this.activeControl);
-    if (problem) return this.fail(host, attemptId, "bootstrap", problem);
-    this.emit({ phase: "connected", host, attemptId, node, message: result.message });
-    return { ok: true, failure: null, message: result.message };
+    if (!result.ok) session.close();
+    return { ...result, session };
   }
 
   /**
@@ -404,7 +543,12 @@ export class RemoteConnectionManager {
    * @returns The remote hostname, or null when it cannot be determined.
    */
   private async resolveNode(control: SshControl): Promise<string | null> {
-    const result = await execViaSsh(control, "hostname", {
+    // `-f` first: the recorded node becomes an `-o HostName=` target on the
+    // NEXT connect, and a short name (`flux-login1`) that only resolves
+    // inside the cluster makes every pinned attempt DNS-fail from the
+    // laptop. Clusters whose `hostname` has no `-f` fall back to the short
+    // form — the pin ladder tolerates it, just less efficiently.
+    const result = await execViaSsh(control, "hostname -f 2>/dev/null || hostname", {
       ...this.muxOptions(),
       timeoutMs: 15_000,
     });
@@ -451,19 +595,12 @@ export class RemoteConnectionManager {
    */
   async disconnect(): Promise<void> {
     this.cancel();
-    const control = this.activeControl;
-    const master = this.master;
-    this.activeControl = null;
-    this.master = null;
-    if (master) {
-      // PDV holds this master's process, so ask ssh to stop first (clean
-      // channel shutdown) and then reap the process, which also takes any
-      // ProxyCommand helper with it.
-      if (control?.controlPath) await stopMaster(control, this.muxOptions());
-      master.close();
-    }
-    // A master PDV merely borrowed is left running: other terminals may be
-    // using it, and stopping it would be a surprising side effect.
+    // PDV holds its own master's process: ask ssh to stop first (clean
+    // channel shutdown), then reap the process, which also takes any
+    // ProxyCommand helper with it. A master PDV merely borrowed is left
+    // running: other terminals may be using it, and stopping it would be
+    // a surprising side effect.
+    await this.teardownOwnMaster();
     this.emit({ phase: "idle", host: null, attemptId: null, node: null, message: "Disconnected." });
   }
 }
