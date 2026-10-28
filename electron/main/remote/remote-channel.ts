@@ -59,6 +59,15 @@ export interface OpenSessionChannelOptions {
   muxOptions?: SshMuxOptions;
   /** Receives ssh stderr lines, for the connection log. */
   onStderr?: (chunk: string) => void;
+  /**
+   * Request X11 forwarding on this channel (per-host toggle, issue #377).
+   * The session daemon inherits the CHANNEL's environment when it is
+   * spawned (`--create`), so this — not the master's own forwarding — is
+   * what puts a DISPLAY in the daemon's env for kernels to use. Forwarding
+   * requested here succeeds when the master (PDV's, with the same toggle,
+   * or the user's own config) allows it.
+   */
+  forwardX11?: boolean;
 }
 
 /**
@@ -74,6 +83,7 @@ export function openSessionChannel(
   const muxOptions: SshMuxOptions = { batchMode: true, ...opts.muxOptions };
   const args = [
     ...baseSshArgs(opts.control, muxOptions),
+    ...(opts.forwardX11 ? ["-o", "ForwardX11=yes"] : []),
     opts.control.host,
     // Double quotes so the remote shell expands $HOME in the install path;
     // single quotes would pass it through literally and the command would

@@ -32,7 +32,13 @@ export type { ScriptParameter } from '../../../main/ipc';
 export type {
   RemoteConnectResult,
   RemoteHostAlias,
+  RemoteHostConfigPayload,
+  RemoteHostConfigUpdate,
+  RemoteHostLaunchConfig,
+  RemoteHostSettings,
   RemotePhase,
+  RemoteSetupTestInterpreter,
+  RemoteSetupTestResult,
   RemoteStatus,
 } from '../../../main/ipc';
 
@@ -193,6 +199,10 @@ export interface RecentProjectEntry {
   host: string | null;
   /** Absolute project directory path, interpreted on `host`. */
   path: string;
+  /** Kernel language the project was last opened with (recorded at
+   *  remember-time — the only channel that works offline for remote
+   *  entries). Absent on entries from before the field existed. */
+  language?: "python" | "julia";
 }
 
 /** File-menu action event payload emitted by `menu.onAction`. */
@@ -232,6 +242,8 @@ export interface WindowChromeInfo {
   showMenuBar: boolean;
   showWindowControls: boolean;
   isMaximized: boolean;
+  /** True when remote sessions are enabled (the PDV_REMOTE release gate). */
+  remoteEnabled: boolean;
 }
 
 /** Progress update payload pushed during save/load operations. */
@@ -1332,6 +1344,24 @@ export interface PDVApi {
     onStatus(
       callback: (status: import('../../../main/ipc').RemoteStatus) => void,
     ): () => void;
+    /** Everything configured for one host, for the Remote Hosts tab. */
+    getHostConfig(
+      host: string,
+    ): Promise<import('../../../main/ipc').RemoteHostConfigPayload>;
+    /** Persist a host's settings and setup script (a full replace). */
+    setHostConfig(
+      host: string,
+      update: import('../../../main/ipc').RemoteHostConfigUpdate,
+    ): Promise<void>;
+    /** Hosts with anything configured, to seed the tab's host list. */
+    listConfiguredHosts(): Promise<string[]>;
+    /** Forget a host: delete its settings, script and recorded state here. */
+    forgetHost(host: string): Promise<void>;
+    /** Source a candidate script on the connected host and report on it. */
+    testSetupScript(
+      host: string,
+      script: string,
+    ): Promise<import('../../../main/ipc').RemoteSetupTestResult>;
   };
   updater: {
     checkForUpdates(): Promise<void>;
@@ -1402,6 +1432,8 @@ export interface PDVApi {
     openAgent(): Promise<{ success: boolean; error?: string }>;
     /** Open the active kernel's working directory in the configured editor/IDE. */
     openWorkingDir(): Promise<{ success: boolean; error?: string }>;
+    /** Open the user's terminal in the working directory (remote: over ssh). */
+    openTerminal(): Promise<{ success: boolean; error?: string }>;
     /** Check whether a launcher is installed (no launch), to gate Settings Save. */
     checkAvailability(check: LauncherCheck): Promise<boolean>;
   };

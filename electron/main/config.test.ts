@@ -262,7 +262,15 @@ describe("ConfigStore", () => {
         showCallableVariables: false,
         launchers: {
           terminal: { preset: "alacritty" },
-          editor: { fileCommand: "nvim {}", isTuiEditor: true },
+          editor: {
+            fileCommand: "nvim {}",
+            isTuiEditor: true,
+            // The remote-session template overrides ride the same
+            // validation loop — parseConfig drops any key its tables don't
+            // cover, so this round trip is what keeps them loadable.
+            remoteFileCommand: "myeditor --open ssh://{host}{path}",
+            remoteDirCommand: "myeditor --open-dir ssh://{host}{path}",
+          },
           agent: { command: "claude --mcp-config {mcpConfig}", cwd: "working" },
         },
       }),
@@ -272,7 +280,12 @@ describe("ConfigStore", () => {
     const store = new ConfigStore(appDataDir);
     expect(store.getAll().launchers).toEqual({
       terminal: { preset: "alacritty" },
-      editor: { fileCommand: "nvim {}", isTuiEditor: true },
+      editor: {
+        fileCommand: "nvim {}",
+        isTuiEditor: true,
+        remoteFileCommand: "myeditor --open ssh://{host}{path}",
+        remoteDirCommand: "myeditor --open-dir ssh://{host}{path}",
+      },
       agent: { command: "claude --mcp-config {mcpConfig}", cwd: "working" },
     });
   });

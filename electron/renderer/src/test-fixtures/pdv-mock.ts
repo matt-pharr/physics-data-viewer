@@ -207,6 +207,22 @@ function buildBase() {
       })),
       onStatus: subStub<PDVApi["remote"]["onStatus"]>(),
       onSessionState: subStub<PDVApi["remote"]["onSessionState"]>(),
+      getHostConfig: stub<PDVApi["remote"]["getHostConfig"]>(async () => ({
+        settings: {},
+        setupScript: "",
+        sessionNode: null,
+      })),
+      setHostConfig: stub<PDVApi["remote"]["setHostConfig"]>(async () => undefined),
+      listConfiguredHosts: stub<PDVApi["remote"]["listConfiguredHosts"]>(async () => []),
+      forgetHost: stub<PDVApi["remote"]["forgetHost"]>(async () => undefined),
+      testSetupScript: stub<PDVApi["remote"]["testSetupScript"]>(async () => ({
+        ok: false,
+        exitCode: null,
+        output: "",
+        before: [],
+        after: [],
+        message: "not-mocked",
+      })),
     },
     updater: {
       checkForUpdates: stub<PDVApi["updater"]["checkForUpdates"]>(async () => undefined),
@@ -269,6 +285,7 @@ function buildBase() {
     launchers: {
       openAgent: stub<PDVApi["launchers"]["openAgent"]>(async () => ({ success: true })),
       openWorkingDir: stub<PDVApi["launchers"]["openWorkingDir"]>(async () => ({ success: true })),
+      openTerminal: stub<PDVApi["launchers"]["openTerminal"]>(async () => ({ success: true })),
       checkAvailability: stub<PDVApi["launchers"]["checkAvailability"]>(async () => true),
     },
     chrome: {

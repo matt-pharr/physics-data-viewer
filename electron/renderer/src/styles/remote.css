@@ -90,6 +90,18 @@
   white-space: pre-wrap;
 }
 
+/* Degraded-but-working, e.g. a session running without its setup script —
+   must read as a caution, not the failure red of .remote-error. */
+.remote-warning {
+  padding: 8px 12px;
+  font-size: 12px;
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--warning) 14%, transparent);
+  border: 1px solid var(--warning);
+  border-radius: 4px;
+  white-space: pre-wrap;
+}
+
 .remote-connected-host {
   color: var(--text-primary);
   font-size: 13px;

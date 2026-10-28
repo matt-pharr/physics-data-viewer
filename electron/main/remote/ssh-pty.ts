@@ -154,6 +154,22 @@ export interface EstablishMasterOptions {
   connectTimeoutSeconds?: number;
   /** Milliseconds for the whole attempt, including human response time. */
   overallTimeoutMs?: number;
+  /**
+   * Concrete node to connect to, overriding whatever `HostName` the alias
+   * resolves to. This is how a reconnect reaches the login node a session
+   * daemon actually lives on when the alias round-robins across several —
+   * a command-line `-o` outranks the config, while every OTHER option of
+   * the alias (ProxyCommand, IdentityAgent, User) still applies.
+   */
+  hostNameOverride?: string;
+  /**
+   * Request X11 forwarding on the master (`-o ForwardX11=yes`), from the
+   * per-host toggle (issue #377). The master's forwarding alone is not
+   * enough for a session daemon to inherit a DISPLAY — the channel that
+   * spawns it must request forwarding too (see `remote-channel.ts`) — but
+   * an un-forwarded master would refuse the channel's request outright.
+   */
+  forwardX11?: boolean;
   /** Called with each chunk of ssh output, for live display. */
   onOutput?: (chunk: string) => void;
   /** Injected `node-pty` replacement. Tests pass a fake; production omits it. */
@@ -276,6 +292,13 @@ function buildMasterArgs(options: EstablishMasterOptions): string[] {
     controlPathOption(options.controlPath),
     "-o",
     "ControlPersist=no",
+    // The node pin, when the caller has one (see hostNameOverride's JSDoc).
+    ...(options.hostNameOverride
+      ? ["-o", `HostName=${options.hostNameOverride}`]
+      : []),
+    // Per-host X11 toggle (see forwardX11's JSDoc). `ForwardX11=yes` rather
+    // than `-X` so it reads uniformly beside the other -o options.
+    ...(options.forwardX11 ? ["-o", "ForwardX11=yes"] : []),
     "-o",
     `ConnectTimeout=${options.connectTimeoutSeconds ?? DEFAULT_CONNECT_TIMEOUT_SECONDS}`,
     // A host whose config sets RemoteCommand would otherwise conflict with

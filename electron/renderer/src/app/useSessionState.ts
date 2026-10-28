@@ -30,6 +30,7 @@ interface SessionStatePush {
   state: 'connected' | 'reconnecting' | 'auth-required' | 'disconnected';
   resync?: boolean;
   cause?: 'moved' | 'recovered';
+  setupScriptWarning?: string;
 }
 
 /** Map a pushed session state onto the store's connection state. */
@@ -52,7 +53,10 @@ function toConnectionState(push: SessionStatePush): ConnectionState {
  * Subscribe to session-state pushes for the lifetime of the app.
  *
  * @param currentKernelId - Kernel to invalidate on a resync, or null.
- * @param onResync - Called on every resync AFTER the query cache is reset.
+ * @param onResync - Called on every resync AFTER the query cache is reset,
+ *   with the push's cause: 'moved' (the server behind this window changed —
+ *   any previous kernel id is meaningless) or 'recovered' (same session,
+ *   view rebuilt).
  *   App uses it to reload state that lives outside React Query — its
  *   `config` useState in particular, whose `pythonPath`/`defaultPackages`
  *   would otherwise still be the previous machine's (clearing the query
@@ -62,16 +66,21 @@ function toConnectionState(push: SessionStatePush): ConnectionState {
  */
 export function useSessionState(
   currentKernelId: string | null,
-  onResync?: () => void,
+  onResync?: (cause?: 'moved' | 'recovered') => void,
 ): void {
   const setConnectionState = useStore((s) => s.setConnectionState);
   const setRemoteHost = useStore((s) => s.setRemoteHost);
+  const setRemoteSetupWarning = useStore((s) => s.setRemoteSetupWarning);
 
   useEffect(() => {
     const unsubscribe = window.pdv.remote.onSessionState((push) => {
       const state = push as SessionStatePush;
       setConnectionState(toConnectionState(state));
       setRemoteHost(state.kind === 'remote' ? state.host : null);
+      // Every push restates (or clears) the warning, so a session that
+      // moves back to local — or to a daemon that DID source the script —
+      // stops warning without a separate clear path.
+      setRemoteSetupWarning(state.setupScriptWarning ?? null);
 
       if (!state.resync) return;
       // Rebuild everything: the server backing this window either changed or
@@ -83,7 +92,7 @@ export function useSessionState(
       if (currentKernelId) {
         invalidateAllKernelState(currentKernelId, 'reconnect');
       }
-      onResync?.();
+      onResync?.(state.cause);
       // A deliberate move is not an outage — "output may be missing" after
       // clicking "Run session on <host>" read as data loss to a real user.
       const marker =
@@ -103,5 +112,5 @@ export function useSessionState(
       ]);
     });
     return unsubscribe;
-  }, [currentKernelId, onResync, setConnectionState, setRemoteHost]);
+  }, [currentKernelId, onResync, setConnectionState, setRemoteHost, setRemoteSetupWarning]);
 }

@@ -14,7 +14,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { attachToSession, tryConnect } from "./attach-cli";
 import { acquireSpawnLock } from "./session-lock";
-import { readSessionMeta } from "./session-meta";
+import { readSessionMeta, touchHeartbeat, type SessionMeta } from "./session-meta";
 import { resolveSessionPaths } from "./session-paths";
 
 const SESSION = "aaaabbbb-cccc-dddd-eeee-ffff00001111";
@@ -113,6 +113,75 @@ describe("attachToSession", () => {
 
     // Joined the other daemon; did not create a second one.
     expect(result.created).toBe(false);
+  });
+
+  describe("wrong-node guard", () => {
+    /** session.json for a daemon that lives on `login1`. */
+    function metaOnLogin1(sockPath: string): SessionMeta {
+      return {
+        sessionId: SESSION,
+        version: "9.9.9-test",
+        protocol: 2,
+        pid: 999999,
+        bootId: null,
+        hostname: "login1",
+        sockPath,
+        runtimeSource: "test",
+        startedAt: new Date().toISOString(),
+      };
+    }
+
+    it("refuses to touch a session whose daemon lives on another node", async () => {
+      // The daemon on login1 is alive (fresh heartbeat) but unreachable from
+      // here: its socket is node-local, so tryConnect fails and — without
+      // the guard — `--create` would fork a second daemon for the session.
+      const paths = resolveSessionPaths({ sessionId: SESSION, root, hostname: "login2" });
+      fs.writeFileSync(paths.metaPath, JSON.stringify(metaOnLogin1(paths.sockPath)));
+      touchHeartbeat(paths.heartbeatPath);
+
+      await expect(
+        attachToSession({ sessionId: SESSION, root, create: true, hostname: "login2" }),
+      ).rejects.toThrow(/PDV_WRONG_NODE node=login1/);
+      // No-create attaches get the same actionable refusal, not "pass
+      // --create" advice that would fork the session if followed.
+      await expect(
+        attachToSession({ sessionId: SESSION, root, create: false, hostname: "login2" }),
+      ).rejects.toThrow(/PDV_WRONG_NODE node=login1/);
+    });
+
+    it("stands down when the recorded daemon's heartbeat is stale", async () => {
+      const paths = resolveSessionPaths({ sessionId: SESSION, root, hostname: "login2" });
+      fs.writeFileSync(paths.metaPath, JSON.stringify(metaOnLogin1(paths.sockPath)));
+      touchHeartbeat(paths.heartbeatPath);
+      const past = new Date(Date.now() - 30 * 60_000);
+      fs.utimesSync(paths.heartbeatPath, past, past);
+
+      // The no-daemon error, not the wrong-node one: the guard concluded the
+      // login1 daemon is dead, so creating here would be recovery, not a
+      // fork — this attach just didn't ask to create.
+      await expect(
+        attachToSession({ sessionId: SESSION, root, create: false, hostname: "login2" }),
+      ).rejects.toThrow(/no daemon is serving/);
+    });
+
+    it("stands down when there is no heartbeat at all", async () => {
+      const paths = resolveSessionPaths({ sessionId: SESSION, root, hostname: "login2" });
+      fs.writeFileSync(paths.metaPath, JSON.stringify(metaOnLogin1(paths.sockPath)));
+
+      await expect(
+        attachToSession({ sessionId: SESSION, root, create: false, hostname: "login2" }),
+      ).rejects.toThrow(/no daemon is serving/);
+    });
+
+    it("does not fire on the daemon's own node", async () => {
+      const paths = resolveSessionPaths({ sessionId: SESSION, root, hostname: "login1" });
+      fs.writeFileSync(paths.metaPath, JSON.stringify(metaOnLogin1(paths.sockPath)));
+      touchHeartbeat(paths.heartbeatPath);
+
+      await expect(
+        attachToSession({ sessionId: SESSION, root, create: false, hostname: "login1" }),
+      ).rejects.toThrow(/no daemon is serving/);
+    });
   });
 
   it("gives up with an actionable error when a spawn never binds", async () => {

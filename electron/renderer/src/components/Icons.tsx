@@ -80,6 +80,15 @@ export const AgentIcon: React.FC<IconProps> = (props) => (
   </svg>
 );
 
+/** Terminal-prompt icon for the "open terminal" launcher button. */
+export const TerminalIcon: React.FC<IconProps> = (props) => (
+  <svg {...defaults} {...props}>
+    <rect x="3" y="4" width="14" height="12" rx="1.5" />
+    <polyline points="6,8 8.5,10 6,12" />
+    <line x1="10.5" y1="12.5" x2="14" y2="12.5" />
+  </svg>
+);
+
 /** Folder-with-code-caret icon for the "open working directory" button. */
 export const FolderCodeIcon: React.FC<IconProps> = (props) => (
   <svg {...defaults} {...props}>

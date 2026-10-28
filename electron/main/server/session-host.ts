@@ -77,6 +77,12 @@ export interface SessionHostOptions {
    * ignores it, leaving `kill` as the only way to end a session.
    */
   onShutdown?: () => void | Promise<void>;
+  /**
+   * Whether this daemon's startup capture sourced a setup script, reported
+   * to every attaching client (`RpcAttachResult.setupScriptApplied`) so the
+   * shell can warn when a configured environment is not in effect.
+   */
+  setupScriptApplied?: boolean;
 }
 
 /** One live connection and the state the host tracks for it. */
@@ -274,6 +280,12 @@ export class SessionHost {
     });
 
     if (plan.outcome === "rejected") return plan;
+
+    // Stamped here rather than in planAttach: it is daemon state, not
+    // journal arithmetic, and only this class knows it.
+    if (this.opts.setupScriptApplied !== undefined) {
+      plan.result.setupScriptApplied = this.opts.setupScriptApplied;
+    }
 
     conn.attached = true;
     if (conn.deadline) {

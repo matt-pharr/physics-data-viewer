@@ -1470,6 +1470,8 @@ describe("Step 5 IPC handlers", () => {
       showMenuBar: platform === "linux",
       showWindowControls: platform === "linux",
       isMaximized: false,
+      // Mirrors the PDV_REMOTE gate; unset in the test environment.
+      remoteEnabled: false,
     });
   });
 

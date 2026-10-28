@@ -26,14 +26,37 @@ import * as net from "net";
 
 import { daemonize } from "./daemonize";
 import { acquireSpawnLock } from "./session-lock";
-import { readSessionMeta } from "./session-meta";
+import { heartbeatAgeMs, readSessionMeta } from "./session-meta";
 import { resolveSessionPaths, type SessionPaths } from "./session-paths";
 
-/** How long to wait for a freshly spawned daemon to bind its socket. */
-export const SPAWN_WAIT_MS = 10_000;
+/**
+ * How long to wait for a freshly spawned daemon to bind its socket. Sized
+ * to contain the daemon's startup login-environment capture — up to 15 s
+ * when a setup script full of `module load` lines exists
+ * (`login-env.ts`'s SETUP_CAPTURE_TIMEOUT_MS) — plus bundle require and
+ * bind overhead on a contended login node. A successful start never waits
+ * this long (the poll returns as soon as the socket answers); the budget
+ * only delays the failure verdict.
+ */
+export const SPAWN_WAIT_MS = 25_000;
 
 /** Poll interval while waiting for the socket to appear. */
 const SPAWN_POLL_MS = 50;
+
+/**
+ * Machine-parseable token in the wrong-node refusal, scraped from the ssh
+ * channel's stderr by the shell so it can pin the next connection to the
+ * right node. Format: `PDV_WRONG_NODE node=<hostname>`.
+ */
+export const WRONG_NODE_MARKER = "PDV_WRONG_NODE";
+
+/**
+ * How fresh the recorded daemon's heartbeat must be for a WRONG-node attach
+ * to refuse creation. The daemon touches its beacon every minute
+ * (`server-main.ts`), so five minutes absorbs NFS attribute-cache lag and a
+ * paused daemon without leaving a dead session unrecoverable for long.
+ */
+export const WRONG_NODE_HEARTBEAT_FRESH_MS = 5 * 60_000;
 
 /** Options for {@link attachToSession}. */
 export interface AttachToSessionOptions {
@@ -51,6 +74,8 @@ export interface AttachToSessionOptions {
   env?: NodeJS.ProcessEnv;
   /** Spawn wait budget. Defaults to {@link SPAWN_WAIT_MS}. */
   spawnWaitMs?: number;
+  /** This machine's hostname, for the wrong-node guard. Injected by tests. */
+  hostname?: string;
 }
 
 /** A socket connected to a live session. */
@@ -98,7 +123,11 @@ export function tryConnect(sockPath: string): Promise<net.Socket | null> {
 export async function attachToSession(
   opts: AttachToSessionOptions,
 ): Promise<AttachedSession> {
-  const paths = resolveSessionPaths({ sessionId: opts.sessionId, root: opts.root });
+  const paths = resolveSessionPaths({
+    sessionId: opts.sessionId,
+    root: opts.root,
+    hostname: opts.hostname,
+  });
 
   // Prefer the recorded socket over the recomputed one: the daemon is the
   // authority on where it actually listens, and resolution could differ.
@@ -107,6 +136,34 @@ export async function attachToSession(
 
   const existing = await tryConnect(sockPath);
   if (existing) return { socket: existing, paths, created: false };
+
+  // The wrong-node guard. The session directory is on a shared home, so an
+  // attach that round-robined onto a different login node finds the
+  // session.json of a daemon it can never reach (the socket is node-local)
+  // — and with `--create` it would happily fork a second daemon for the
+  // same session, stranding the first with the user's kernel and Tree.
+  // Refuse instead, loudly enough for the shell to aim its next connection
+  // at the right node. A stale heartbeat means the daemon is plausibly dead
+  // (a node reboot, a purge) — then creation here is recovery, not a fork.
+  if (meta?.hostname && meta.hostname !== paths.hostname) {
+    const age = heartbeatAgeMs(paths.heartbeatPath);
+    if (age !== null && age < WRONG_NODE_HEARTBEAT_FRESH_MS) {
+      throw new Error(
+        `${WRONG_NODE_MARKER} node=${meta.hostname} — session ` +
+          `${opts.sessionId} is running on ${meta.hostname}, but this ` +
+          `connection landed on ${paths.hostname}. Reconnect to ` +
+          `${meta.hostname}.`,
+      );
+    }
+    if (opts.create) {
+      console.error(
+        `[attach] session ${opts.sessionId} was last served on ` +
+          `${meta.hostname} but its heartbeat is ` +
+          `${age === null ? "absent" : `${String(Math.round(age / 1000))}s old`}; ` +
+          `treating that daemon as dead and serving from ${paths.hostname}.`,
+      );
+    }
+  }
 
   if (!opts.create) {
     throw new Error(

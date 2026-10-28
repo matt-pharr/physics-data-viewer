@@ -103,6 +103,23 @@ export interface RemoteServerHandleOptions {
   reconnectDelaysMs?: readonly number[];
   /** Injected clock for tests; monotonic in production. */
   now?: () => number;
+  /**
+   * The session's ssh identity, for shell-side launcher routing (open a
+   * terminal / TUI editor on the session's host). Carried ON the handle —
+   * not read from the per-window connection manager — because handles
+   * outlive window registrations: after a macOS window reopen the fresh
+   * registration builds a fresh manager with no connection state, while
+   * the router keeps serving this handle. Deriving launcher targets from
+   * the manager there would refuse launches on a healthy session (or,
+   * worse, aim them at a host the manager later connected to while this
+   * handle's session stayed elsewhere).
+   */
+  launcherTarget?: {
+    /** The ssh alias/destination this session was started against. */
+    host: string;
+    /** The control socket its channels ride (null = user-config master). */
+    control: { host: string; controlPath: string | null };
+  };
 }
 
 /** Where a remote session's connection stands. */
@@ -143,6 +160,8 @@ export class RemoteServerHandle implements ServerHandle {
   private lastSeq = -1;
   private sessionEpoch: string | null = null;
   private state: RemoteSessionState = "disconnected";
+  /** From the latest attach result; null before any attach or from old daemons. */
+  private scriptApplied: boolean | null = null;
   private stopped = false;
   private reconnecting = false;
   /** True while this handle is closing its own client (not a real loss). */
@@ -159,12 +178,35 @@ export class RemoteServerHandle implements ServerHandle {
   }
 
   /**
+   * The session's ssh identity for launcher routing, or null when the
+   * creator supplied none. See {@link RemoteServerHandleOptions.launcherTarget}
+   * for why this lives on the handle rather than the connection manager.
+   *
+   * @returns Host + control socket, or null.
+   */
+  get launcherTarget(): RemoteServerHandleOptions["launcherTarget"] | null {
+    return this.opts.launcherTarget ?? null;
+  }
+
+  /**
    * Connection state, for the status bar and reconnect UX.
    *
    * @returns The current state.
    */
   get connectionState(): RemoteSessionState {
     return this.state;
+  }
+
+  /**
+   * Whether the daemon's startup capture sourced a setup script, from the
+   * latest attach result.
+   *
+   * @returns True/false as the daemon reported it; null before any attach
+   *   or when the daemon predates the field. The caller decides whether
+   *   `false` matters — only a host with a script configured should warn.
+   */
+  get setupScriptApplied(): boolean | null {
+    return this.scriptApplied;
   }
 
   /**
@@ -388,6 +430,7 @@ export class RemoteServerHandle implements ServerHandle {
     ])) as RpcAttachResult;
 
     this.sessionEpoch = result.sessionEpoch;
+    this.scriptApplied = result.setupScriptApplied ?? null;
     if (result.status === "stale") {
       // A stale attach means the old cursor is meaningless — usually a NEW
       // epoch whose seq restarts near zero. `Math.max` here kept the old
