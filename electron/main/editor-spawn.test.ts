@@ -2,6 +2,11 @@
  * editor-spawn.test.ts — Tests for terminal-preset expansion and editor wrap.
  */
 
+import { spawnSync } from "child_process";
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
+
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 
 import {
@@ -9,12 +14,112 @@ import {
   defaultTerminalPreset,
   escapeForAppleScriptString,
   expandTerminalTemplate,
+  findOnWindowsPath,
   isTerminalEditorCommand,
   loginShellCommand,
   resolveEditorSpawn,
+  toPlatformSpawn,
   tokenizeShellLike,
   wrapInTerminalPreset,
 } from "./editor-spawn";
+
+describe("toPlatformSpawn (Windows)", () => {
+  let binDir: string;
+  let env: NodeJS.ProcessEnv;
+
+  beforeEach(() => {
+    binDir = fs.mkdtempSync(path.join(os.tmpdir(), "pdv spawn & bin-"));
+    fs.writeFileSync(path.join(binDir, "code.cmd"), "@echo off\r\n");
+    fs.writeFileSync(path.join(binDir, "wt.exe"), "");
+    env = {
+      PATH: binDir,
+      // Lowercase so the probe matches the fixture names on case-sensitive
+      // (Linux CI) and case-insensitive (Windows) filesystems alike.
+      PATHEXT: ".com;.exe;.bat;.cmd",
+      ComSpec: "C:\\Windows\\System32\\cmd.exe",
+    };
+  });
+
+  afterEach(() => {
+    fs.rmSync(binDir, { recursive: true, force: true });
+  });
+
+  it("passes POSIX specs through unchanged", () => {
+    const spec = { file: "code", args: ["/tmp/a.py"] };
+    expect(toPlatformSpawn(spec, "linux", env)).toBe(spec);
+  });
+
+  it("resolves a bare name through PATHEXT", () => {
+    expect(findOnWindowsPath("code", env)).toBe(path.join(binDir, "code.cmd"));
+    expect(findOnWindowsPath("wt.exe", env)).toBe(path.join(binDir, "wt.exe"));
+    expect(findOnWindowsPath("missing", env)).toBeNull();
+  });
+
+  it("accepts double-quoted PATH entries", () => {
+    const quoted = { ...env, PATH: `"${binDir}"` };
+    expect(findOnWindowsPath("code", quoted)).toBe(path.join(binDir, "code.cmd"));
+  });
+
+  it("runs an .exe directly", () => {
+    expect(toPlatformSpawn({ file: "wt.exe", args: ["new-tab"] }, "win32", env)).toEqual({
+      file: path.join(binDir, "wt.exe"),
+      args: ["new-tab"],
+    });
+  });
+
+  it("routes a .cmd shim through cmd.exe with metacharacters escaped", () => {
+    const spec = toPlatformSpawn(
+      { file: "code", args: ["C:\\a b\\x&y.py"] },
+      "win32",
+      env,
+    );
+    expect(spec.file).toBe("C:\\Windows\\System32\\cmd.exe");
+    expect(spec.windowsVerbatimArguments).toBe(true);
+    expect(spec.windowsHide).toBe(true);
+    expect(spec.args.slice(0, 3)).toEqual(["/d", "/s", "/c"]);
+    const line = spec.args[3];
+    expect(line).toContain('^"C:\\a^ b\\x^&y.py^"');
+    // The resolved shim path is escaped too (it contains a space and `&`).
+    expect(line).toContain("pdv^ spawn^ ^&^ bin-");
+  });
+
+  it("leaves an unresolvable command for spawn to report ENOENT", () => {
+    const spec = { file: "missing", args: [] };
+    expect(toPlatformSpawn(spec, "win32", env)).toBe(spec);
+  });
+
+  // The string assertions above can't tell whether cmd.exe actually parses
+  // the line back into the original argv, so on Windows run it for real:
+  // a shim forwarding %* the way code.cmd and npm cmd-shims do.
+  it.skipIf(process.platform !== "win32")(
+    "round-trips argv through a real .cmd shim",
+    () => {
+      const out = path.join(binDir, "argv.json");
+      fs.writeFileSync(
+        path.join(binDir, "probe.cmd"),
+        `@echo off\r\n"${process.execPath}" -e ` +
+          `"require('fs').writeFileSync(process.argv[1], JSON.stringify(process.argv.slice(2)))" ` +
+          `"${out}" %*\r\n`,
+      );
+      const realEnv = { ...process.env, PATH: binDir, PATHEXT: env.PATHEXT };
+      const cases = [
+        ["C:\\a b\\x&y.py"],
+        ["C:\\100% done\\(v2)\\f^g!.py", "--flag=a,b;c"],
+        ["%PATH%", "trailing\\"],
+      ];
+      for (const args of cases) {
+        fs.rmSync(out, { force: true });
+        const spec = toPlatformSpawn({ file: "probe", args }, "win32", realEnv);
+        spawnSync(spec.file, spec.args, {
+          env: realEnv,
+          windowsVerbatimArguments: spec.windowsVerbatimArguments,
+          windowsHide: true,
+        });
+        expect(JSON.parse(fs.readFileSync(out, "utf8"))).toEqual(args);
+      }
+    },
+  );
+});
 
 describe("buildEditorSpawn", () => {
   it("uses VS Code default when command is undefined", () => {

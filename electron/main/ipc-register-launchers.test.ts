@@ -27,6 +27,12 @@ vi.mock("electron", () => ({
   ipcMain: { handle: ipcRegistry.ipcHandle, removeHandler: vi.fn() },
 }));
 vi.mock("child_process", () => childProcessMocks);
+// The Windows PATHEXT/cmd.exe adaptation is covered in editor-spawn.test.ts;
+// identity here keeps these assertions independent of the host's PATH.
+vi.mock("./editor-spawn", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./editor-spawn")>()),
+  toPlatformSpawn: (spec: { file: string; args: string[] }) => spec,
+}));
 
 import type { PDVConfig } from "./config";
 import { IPC } from "./ipc";

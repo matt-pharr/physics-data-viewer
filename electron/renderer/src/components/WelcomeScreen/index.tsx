@@ -10,6 +10,7 @@
  */
 
 import React from 'react';
+import { baseName, dirName } from '../../utils/path';
 
 /** Entry in the recent projects list with optional language and name metadata. */
 export interface RecentProject {
@@ -100,16 +101,10 @@ function languageBadge(language?: "python" | "julia"): string {
 }
 
 /** Extracts the project folder name from an absolute path. */
-function projectName(path: string): string {
-  return path.split('/').filter(Boolean).pop() ?? path;
-}
+const projectName = baseName;
 
 /** Formats the parent directory for display beneath the project name. */
-function projectDir(path: string): string {
-  const parts = path.split('/').filter(Boolean);
-  if (parts.length <= 1) return path;
-  return '/' + parts.slice(0, -1).join('/');
-}
+const projectDir = dirName;
 
 /** Coarse-grained "X ago" label suitable for autosave timestamps. */
 function relativeTimeLabel(iso: string): string {
