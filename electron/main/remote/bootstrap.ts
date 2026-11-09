@@ -411,12 +411,21 @@ export async function installBundle(
   // a ghost-laden leftover from an earlier attempt can never absorb the
   // mv; once the old daemon exits the ghosts become deletable and the
   // parked dir is swept by the next install's best-effort pass.
+  //
+  // The executables are chmod'ed here rather than trusted from the tarball:
+  // a bundle built on Windows carries every file as 0644 (NTFS has no exec
+  // bit, so the build's own chmod is a no-op), and the self-check would
+  // then fail with "Permission denied" on the host.
+  const executables = [`${staging}/node/bin/node`, `${staging}/resources/uv/uv`]
+    .map((f) => `"${f}"`)
+    .join(" ");
   const install = await execViaSsh(
     control,
     [
       `rm -rf "${staging}"`,
       `mkdir -p "${staging}"`,
       `tar -xzf "${archive}" -C "${staging}"`,
+      `for f in ${executables}; do if [ -f "$f" ]; then chmod 755 "$f"; fi; done`,
       `rm -f "${archive}"`,
       `(rm -rf "${target}.old" "${target}".old.* 2>/dev/null || true)`,
       `if [ -d "${target}" ]; then mv "${target}" "${target}.old.$$"; fi`,
