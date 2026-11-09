@@ -45,6 +45,16 @@
   border-color: var(--warning-hover);
 }
 
+/* Destructive confirmations (armed "Yes, Shut It Down"): the color carries
+   what the label says, matching the platform convention for actions that
+   discard work. */
+.btn-danger {
+  background-color: var(--danger);
+  border-color: var(--danger);
+  color: var(--text-on-danger);
+  font-weight: 600;
+}
+
 .btn:disabled {
   opacity: 0.6;
   cursor: not-allowed;

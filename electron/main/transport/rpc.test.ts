@@ -18,7 +18,12 @@ import {
   removeAllInvokeHandlers,
   type InvokeContext,
 } from "../server/invoke-registry";
-import { RPC_CHANNELS, RPC_PROTOCOL_VERSION } from "./protocol";
+import {
+  RPC_CHANNELS,
+  RPC_PROTOCOL_MIN,
+  RPC_PROTOCOL_VERSION,
+} from "./protocol";
+import { PushJournal } from "./push-journal";
 import { RpcClient, type RpcClientOptions } from "./rpc-client";
 import { RpcServer, type RpcServerOptions } from "./rpc-server";
 
@@ -59,6 +64,30 @@ function createPair(
 const delay = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
 
+/**
+ * Record request ids as they go over the wire.
+ *
+ * Ids are epoch-prefixed and deliberately unguessable from outside, so a
+ * test that needs one reads it from the stream rather than assuming a
+ * counter — which is also what stops these tests from silently pinning the
+ * id format.
+ */
+function recordRequestIds(c2s: PassThrough): string[] {
+  const ids: string[] = [];
+  c2s.on("data", (chunk: Buffer) => {
+    for (const line of chunk.toString("utf8").split("\n")) {
+      if (!line.trim()) continue;
+      try {
+        const msg = JSON.parse(line) as { id?: string; channel?: string };
+        if (msg.id && msg.channel) ids.push(msg.id);
+      } catch {
+        // Partial frame; the next chunk completes it.
+      }
+    }
+  });
+  return ids;
+}
+
 describe("RpcClient ⇄ RpcServer", () => {
   beforeEach(() => {
     removeAllInvokeHandlers();
@@ -70,17 +99,21 @@ describe("RpcClient ⇄ RpcServer", () => {
     vi.restoreAllMocks();
   });
 
-  it("delivers the hello push (seq 0) with version, pid, and protocol", async () => {
-    const { client } = createPair();
+  it("delivers the hello push unsequenced, with version, pid, and protocol range", async () => {
+    const { client, server } = createPair();
     const hello = await client.waitForHello(1000);
     expect(hello).toEqual({
       version: "9.9.9-test",
       pid: process.pid,
       protocol: RPC_PROTOCOL_VERSION,
+      protocolMin: RPC_PROTOCOL_MIN,
       session: null,
+      sessionEpoch: server.journal.sessionEpoch,
     });
-    // Hello is reserved: it must not reach the renderer-push callback.
-    expect(client.lastSeq).toBe(0);
+    // Hello is per-connection but seq belongs to the session, so hello must
+    // not consume one: the client's cursor stays at −1 until a real push.
+    expect(client.lastSeq).toBe(-1);
+    expect(server.journal.lastSeq).toBe(-1);
   });
 
   it("times out waitForHello when no hello arrives", async () => {
@@ -177,8 +210,8 @@ describe("RpcClient ⇄ RpcServer", () => {
     });
     await expect(client.invoke("test:stream")).resolves.toBe("done");
     expect(pushes).toEqual([
-      { event: "push:chunk", payload: { part: 1 }, seq: 1 },
-      { event: "push:chunk", payload: { part: 2 }, seq: 2 },
+      { event: "push:chunk", payload: { part: 1 }, seq: 0 },
+      { event: "push:chunk", payload: { part: 2 }, seq: 1 },
     ]);
   });
 
@@ -205,9 +238,10 @@ describe("RpcClient ⇄ RpcServer", () => {
       ts: number;
       seq: number;
     };
-    expect(pushes.map((p) => p.seq)).toEqual([1, 2, 3]);
-    expect(ping.seq).toBe(3);
-    expect(client.lastSeq).toBe(3);
+    // The session's first real push is seq 0 — hello no longer consumes it.
+    expect(pushes.map((p) => p.seq)).toEqual([0, 1, 2]);
+    expect(ping.seq).toBe(2);
+    expect(client.lastSeq).toBe(2);
     expect(typeof ping.ts).toBe("number");
   });
 
@@ -301,9 +335,177 @@ describe("RpcClient ⇄ RpcServer", () => {
       {
         event: RPC_CHANNELS.confirmRequest,
         payload: { id: 1, message: "sure?" },
-        seq: 1,
+        // Sequenced like any other push: a parked confirm is session state
+        // and must survive a reconnect, so it is journalled.
+        seq: 0,
       },
     ]);
+  });
+
+  describe("session-owned push seq", () => {
+    it("continues numbering across connections that share a journal", async () => {
+      // The point of the whole design: a session outlives the connection
+      // carrying it, so a second connection must not restart at 0 — a client
+      // reattaching at seq 1 would otherwise be handed a different push
+      // wearing seq 2 and never notice.
+      const journal = new PushJournal();
+
+      const first = createPair({ journal });
+      await first.client.waitForHello(1000);
+      first.server.push("push:a", 1);
+      first.server.push("push:b", 2);
+      await delay(10);
+      expect(first.pushes.map((p) => p.seq)).toEqual([0, 1]);
+      first.client.close();
+
+      const second = createPair({ journal });
+      await second.client.waitForHello(1000);
+      second.server.push("push:c", 3);
+      await delay(10);
+      expect(second.pushes.map((p) => p.seq)).toEqual([2]);
+      second.client.close();
+    });
+
+    it("advertises the same session epoch to every connection", async () => {
+      const journal = new PushJournal();
+      const first = createPair({ journal });
+      const second = createPair({ journal });
+
+      const helloA = await first.client.waitForHello(1000);
+      const helloB = await second.client.waitForHello(1000);
+
+      expect(helloA.sessionEpoch).toBe(journal.sessionEpoch);
+      expect(helloB.sessionEpoch).toBe(journal.sessionEpoch);
+      first.client.close();
+      second.client.close();
+    });
+
+    it("retains pushes for replay, addressed by the client's cursor", async () => {
+      const journal = new PushJournal();
+      const { client, server } = createPair({ journal });
+      await client.waitForHello(1000);
+      server.push("push:a", 1);
+      server.push("push:b", 2);
+      await delay(10);
+
+      // What a client that saw seq 0 and dropped would be sent on reattach.
+      const missed = journal.framesSince(client.lastSeq - 1);
+      expect(missed).toHaveLength(1);
+      expect(JSON.parse(String(missed?.[0])).event).toBe("push:b");
+      client.close();
+    });
+
+    it("refuses to send a session-state push unsequenced", () => {
+      const { client, server } = createPair();
+      expect(() =>
+        // Cast past the compile-time guard to prove the runtime one holds:
+        // the type alone would not stop a channel computed at runtime.
+        server.writeUnsequenced(
+          RPC_CHANNELS.confirmRequest as never,
+          { requestId: "1" },
+        ),
+      ).toThrow(/only hello\/attachError\/superseded/);
+      client.close();
+    });
+
+    it("does not let an unsequenced frame rewind the client's cursor", async () => {
+      const { client, server, reserved } = createPair();
+      await client.waitForHello(1000);
+      server.push("push:a", 1);
+      server.push("push:b", 2);
+      await delay(10);
+      expect(client.lastSeq).toBe(1);
+
+      // A supersede notice arrives on a connection that is mid-session. If
+      // its seq −1 were recorded, the next reattach would ask to replay the
+      // whole session — or be told it cannot be, forcing a needless resync.
+      server.writeUnsequenced(RPC_CHANNELS.superseded, { bySameClientId: true });
+      await delay(10);
+
+      expect(client.lastSeq).toBe(1);
+      expect(reserved.at(-1)?.event).toBe(RPC_CHANNELS.superseded);
+      client.close();
+    });
+  });
+
+  describe("retained settlements", () => {
+    it("retains every settlement it writes", async () => {
+      const { client, server } = createPair();
+      handleInvoke("test:ok", () => ({ done: true }));
+      await client.waitForHello(1000);
+      await client.invoke("test:ok");
+
+      // The client's id generator is private, but there has been exactly one
+      // invoke, so the store holds exactly one settlement.
+      expect(server.responses.size).toBe(1);
+      client.close();
+    });
+
+    it("classifies an id three ways, not two", async () => {
+      let release: (() => void) | undefined;
+      const blocked = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      handleInvoke("test:slow", async () => {
+        await blocked;
+        return "finished";
+      });
+      handleInvoke("test:fast", () => "quick");
+
+      const { client, server, c2s } = createPair();
+      const ids = recordRequestIds(c2s);
+      await client.waitForHello(1000);
+
+      const slow = client.invoke("test:slow");
+      await client.invoke("test:fast");
+      await delay(10);
+
+      const [slowId, fastId] = ids;
+      expect(server.reconcile(slowId)).toBe("in-flight");
+      expect(server.reconcile(fastId)).toBe("completed");
+      // Treating this as "not in-flight ⇒ failed" would reject work that
+      // actually completed — the failure mode three states exist to avoid.
+      expect(server.reconcile("never-issued")).toBe("unknown");
+
+      release?.();
+      await expect(slow).resolves.toBe("finished");
+      expect(server.reconcile(slowId)).toBe("completed");
+      client.close();
+    });
+
+    it("retains a settlement produced after the connection dropped", async () => {
+      // The whole reason the store exists: a script that finishes while the
+      // laptop is asleep has still really run.
+      let release: (() => void) | undefined;
+      const blocked = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      handleInvoke("test:slow", async () => {
+        await blocked;
+        return { rows: 3 };
+      });
+
+      const { client, server, s2c, c2s } = createPair();
+      const ids = recordRequestIds(c2s);
+      await client.waitForHello(1000);
+      const pending = client.invoke("test:slow");
+      await delay(10);
+
+      // Kill the connection out from under the running handler.
+      s2c.destroy();
+      client.close("connection dropped");
+      await expect(pending).rejects.toThrow(/connection dropped/);
+
+      release?.();
+      await delay(20);
+
+      const [slowId] = ids;
+      expect(server.reconcile(slowId)).toBe("completed");
+      expect(JSON.parse(String(server.responses.get(slowId)?.frame))).toEqual({
+        id: slowId,
+        result: { rows: 3 },
+      });
+    });
   });
 
   describe("ping liveness (fake timers)", () => {

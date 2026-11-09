@@ -76,7 +76,36 @@ describe("normalizeRecentProjects", () => {
   it("trims, dedupes, and preserves order", () => {
     expect(
       normalizeRecentProjects([" /a ", "/b", "/a", "/b", " /c "]),
-    ).toEqual(["/a", "/b", "/c"]);
+    ).toEqual([
+      { host: null, path: "/a" },
+      { host: null, path: "/b" },
+      { host: null, path: "/c" },
+    ]);
+  });
+
+  it("treats legacy string entries as local", () => {
+    expect(normalizeRecentProjects(["/a"])).toEqual([{ host: null, path: "/a" }]);
+  });
+
+  it("keeps the same path on different hosts as distinct entries", () => {
+    // The whole point of host-qualifying: /scratch/run on a cluster and the
+    // same path locally are different projects.
+    expect(
+      normalizeRecentProjects([
+        { host: "flux", path: "/scratch/run" },
+        { host: null, path: "/scratch/run" },
+        { host: "flux", path: "/scratch/run" },
+      ]),
+    ).toEqual([
+      { host: "flux", path: "/scratch/run" },
+      { host: null, path: "/scratch/run" },
+    ]);
+  });
+
+  it("treats a blank host as local", () => {
+    expect(normalizeRecentProjects([{ host: "  ", path: "/a" }])).toEqual([
+      { host: null, path: "/a" },
+    ]);
   });
 
   it("caps the result at MAX_RECENT_PROJECTS", () => {
@@ -84,8 +113,10 @@ describe("normalizeRecentProjects", () => {
     expect(normalizeRecentProjects(input).length).toBe(MAX_RECENT_PROJECTS);
   });
 
-  it("skips empty / whitespace-only / non-string entries", () => {
-    expect(normalizeRecentProjects(["", "   ", null, 5, "/ok"])).toEqual(["/ok"]);
+  it("skips empty / whitespace-only / malformed entries", () => {
+    expect(
+      normalizeRecentProjects(["", "   ", null, 5, { host: "flux" }, "/ok"]),
+    ).toEqual([{ host: null, path: "/ok" }]);
   });
 });
 

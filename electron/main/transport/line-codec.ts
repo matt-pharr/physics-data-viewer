@@ -208,6 +208,23 @@ export class LineWriter {
   }
 
   /**
+   * Enqueue an already-encoded frame, bypassing serialization.
+   *
+   * Used for replay: the push journal encodes each frame once when it is
+   * assigned its seq, so re-sending it to a reattaching client is a byte
+   * copy. Re-serializing would also risk a *different* byte sequence for a
+   * frame the client has partly seen.
+   *
+   * @param frame - A complete newline-terminated frame from `encodeMessage`.
+   * @returns Nothing.
+   */
+  writeFrame(frame: Buffer): void {
+    if (this.dead || this.stream.destroyed) return;
+    this.queue.push(frame);
+    void this.pump();
+  }
+
+  /**
    * Resolve once every message enqueued so far has been handed to the
    * stream (or the stream died). Used by tests and graceful shutdown.
    *

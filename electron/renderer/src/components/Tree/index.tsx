@@ -67,6 +67,13 @@ const VirtualRow = React.memo(VirtualRowImpl) as unknown as typeof VirtualRowImp
 interface TreeProps {
   kernelId: string | null;
   disabled?: boolean;
+  /**
+   * True while a kernel start is actually in flight. Distinguishes the
+   * placeholder's "Starting kernel…" (something is happening) from
+   * "No active session" (nothing is; the id alone cannot tell, because it
+   * stays null until the start resolves).
+   */
+  startingKernel?: boolean;
   onAction?: (action: string, node: TreeNodeData) => void;
   shortcuts: Shortcuts;
   /**
@@ -148,7 +155,7 @@ function useDeferredLoadingPaths(pendingPaths: string[], delayMs: number): Reado
 }
 
 /** Tree browser component for node navigation and node actions. */
-export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, onAction, shortcuts, projectKey }) => {
+export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, startingKernel = false, onAction, shortcuts, projectKey }) => {
   const [expandedPaths, setExpandedPaths] = useState<ReadonlySet<string>>(() => new Set());
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   // Selection persistence is scoped per project so switching projects
@@ -422,7 +429,15 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, onAction
       </div>
 
       <div className="tree-content">
-        {disabled && <div className="tree-loading">Starting kernel...</div>}
+        {/* "Starting kernel…" is only honest while a kernel is actually
+            starting. With no kernel at all (fresh window, or a session
+            swap that left none) the same text read as "PDV is doing
+            something" when nothing was — a real user was misled by it. */}
+        {disabled && (
+          <div className="tree-loading">
+            {startingKernel ? 'Starting kernel...' : 'No active session'}
+          </div>
+        )}
         {!disabled && loading && (
           <div className="tree-loading">
             <span className="spinner" role="status" aria-label="Loading">

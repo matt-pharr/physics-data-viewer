@@ -10,7 +10,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { PDVConfig } from "./config";
-import { IPC } from "./ipc";
+import { INTERNAL_CHANNELS } from "./ipc";
 import { registerConfigIpcHandlers } from "./ipc-register-config";
 import {
   createConfigStoreMock,
@@ -56,13 +56,13 @@ describe("config:get / config:set", () => {
   it("config:get returns a fresh snapshot from the store", async () => {
     const { config } = setup();
     config.state.showPrivateVariables = true;
-    const result = await getInvokeHandler(IPC.config.get)({});
+    const result = await getInvokeHandler(INTERNAL_CHANNELS.serverConfigGet)({});
     expect(result).toMatchObject({ showPrivateVariables: true });
   });
 
   it("config:set merges partial updates and triggers onConfigChanged with prev/next", async () => {
     const { onConfigChanged } = setup();
-    await getInvokeHandler(IPC.config.set)({}, { autoRefreshNamespace: true });
+    await getInvokeHandler(INTERNAL_CHANNELS.serverConfigSet)({}, { autoRefreshNamespace: true });
     expect(onConfigChanged).toHaveBeenCalledTimes(1);
     const [prev, next] = onConfigChanged.mock.calls[0] as [PDVConfig, PDVConfig];
     expect(prev.autoRefreshNamespace).toBe(false);
@@ -71,7 +71,7 @@ describe("config:get / config:set", () => {
 
   it("config:set skips undefined keys and only writes defined ones", async () => {
     const { config } = setup();
-    await getInvokeHandler(IPC.config.set)({}, {
+    await getInvokeHandler(INTERNAL_CHANNELS.serverConfigSet)({}, {
       autoRefreshNamespace: true,
       pythonPath: undefined,
     });
@@ -91,7 +91,7 @@ describe("config:get / config:set", () => {
       defaultPort: 7391,
     };
 
-    await getInvokeHandler(IPC.config.set)({}, {
+    await getInvokeHandler(INTERNAL_CHANNELS.serverConfigSet)({}, {
       mcp: { mutatingToolsEnabled: true },
     } as Partial<PDVConfig>);
 
@@ -102,23 +102,7 @@ describe("config:get / config:set", () => {
     });
   });
 
-  it("config:set deep-merges the `launchers` subtree to preserve sibling slots", async () => {
-    // A partial `launchers` update (just the agent slot) must not wipe the
-    // previously-saved `terminal` / `editor` slots.
-    const { config } = setup();
-    (config.state as unknown as Record<string, unknown>).launchers = {
-      terminal: { preset: "alacritty" },
-      editor: { fileCommand: "nvim {}" },
-    };
-
-    await getInvokeHandler(IPC.config.set)({}, {
-      launchers: { agent: { command: "claude" } },
-    } as Partial<PDVConfig>);
-
-    expect((config.state as unknown as Record<string, unknown>).launchers).toMatchObject({
-      terminal: { preset: "alacritty" },
-      editor: { fileCommand: "nvim {}" },
-      agent: { command: "claude" },
-    });
-  });
+  // The `launchers` sibling-slot merge used to be asserted here. `launchers`
+  // is now shell-owned and never reaches this handler, so the equivalent
+  // assertion lives in `shell/local-config-store.test.ts` instead.
 });

@@ -29,7 +29,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { build } from "esbuild";
+import { bundleServer } from "./lib/bundle-server.mjs";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const electronRoot = path.resolve(scriptDir, "..");
@@ -37,13 +37,6 @@ const electronRoot = path.resolve(scriptDir, "..");
 const entry = path.join(electronRoot, "dist", "main", "server", "server-main.js");
 const outDir = path.join(electronRoot, "dist", "server-bundle");
 const outfile = path.join(outDir, "pdv-server.cjs");
-
-if (!fs.existsSync(entry)) {
-  console.error(
-    `[build-server] ${path.relative(electronRoot, entry)} not found — run \`npm run build:main\` first.`,
-  );
-  process.exit(1);
-}
 
 const { version } = JSON.parse(
   fs.readFileSync(path.join(electronRoot, "package.json"), "utf8"),
@@ -53,24 +46,14 @@ if (!version) {
   process.exit(1);
 }
 
-// A stale bundle is invisible once electron-builder has copied it, so never
-// build on top of a previous one.
-fs.rmSync(outDir, { recursive: true, force: true });
+let bytes;
+try {
+  bytes = await bundleServer({ entry, outfile, version });
+} catch (error) {
+  console.error(`[build-server] ${error.message}`);
+  process.exit(1);
+}
 
-await build({
-  entryPoints: [entry],
-  outfile,
-  bundle: true,
-  platform: "node",
-  format: "cjs",
-  external: ["zeromq"],
-  define: {
-    "process.env.PDV_BUILD_VERSION": JSON.stringify(version),
-  },
-  logLevel: "warning",
-});
-
-const bytes = fs.statSync(outfile).size;
 console.log(
   `[build-server] pdv-server.cjs ${(bytes / 1024 / 1024).toFixed(1)} MB (version ${version})`,
 );

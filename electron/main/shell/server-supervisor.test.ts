@@ -28,18 +28,18 @@ vi.mock("electron", () => ({
 }));
 
 import type { BrowserWindow } from "electron";
-import { ServerSupervisor, type ServerSupervisorOptions } from "./server-supervisor";
+import { LocalServerSupervisor, type LocalServerSupervisorOptions } from "./server-supervisor";
 
 const FIXTURE = path.join(__dirname, "__fixtures__", "fake-pdv-server.cjs");
 const VERSION = "1.2.3-test";
 
 /** Supervisors created in a test, torn down afterwards. */
-let supervisors: ServerSupervisor[] = [];
+let supervisors: LocalServerSupervisor[] = [];
 
 function makeSupervisor(
-  overrides: Partial<ServerSupervisorOptions> = {}
-): ServerSupervisor {
-  const supervisor = new ServerSupervisor({
+  overrides: Partial<LocalServerSupervisorOptions> = {}
+): LocalServerSupervisor {
+  const supervisor = new LocalServerSupervisor({
     version: VERSION,
     userDataDir: "/tmp/pdv-supervisor-test-userdata",
     pdvDir: "/tmp/pdv-supervisor-test-pdv",
@@ -80,7 +80,7 @@ afterEach(async () => {
   delete process.env.FAKE_VERSION;
 });
 
-describe("ServerSupervisor", () => {
+describe("LocalServerSupervisor", () => {
   it("starts, round-trips an invoke, and preserves server error messages", async () => {
     const supervisor = makeSupervisor();
     await supervisor.start();

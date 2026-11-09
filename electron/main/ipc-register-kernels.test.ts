@@ -272,6 +272,72 @@ describe("kernels:start", () => {
     ).rejects.toThrow(/missing the PDVKernel package/);
   });
 
+  it("stops kernels left by a previous client, preserving their working dirs", async () => {
+    // A fresh client attaching to a long-lived session daemon has no idea
+    // what a previous client left running — without the sweep every
+    // reconnect that starts fresh stacks another ipykernel on the host
+    // (three were found accumulated on a real cluster's login node). The
+    // working dir must survive: it holds the survivor's `.autosave`.
+    const harness = setup();
+    const survivor = makeKernelInfo({ id: "leftover" });
+    harness.kernelManager.list = vi.fn(() => [survivor]);
+    harness.kernelWorkingDirs.set("leftover", "/tmp/leftover-wd");
+    harness.setActiveKernelId("leftover");
+    harness.setActiveKernelId.mockClear();
+
+    await getHandler(IPC.kernels.start)({}, {
+      language: "python",
+      env: { PYTHON_PATH: "/usr/bin/python3" },
+    });
+
+    expect(harness.kernelManager.stop).toHaveBeenCalledWith("leftover");
+    expect(harness.projectManager.deleteWorkingDir).not.toHaveBeenCalled();
+    expect(harness.kernelWorkingDirs.has("leftover")).toBe(false);
+    // The survivor's session state must go with it: routers detached from
+    // the dead kernel, the stale active id cleared, and — data integrity —
+    // the save_completed cache purged, or the new session's first save
+    // would skip serialization and silently commit the OLD kernel's tree.
+    expect(harness.commRouter.detach).toHaveBeenCalled();
+    expect(harness.projectManager.clearCachedKernelResults).toHaveBeenCalled();
+    expect(harness.setActiveKernelId).toHaveBeenCalledWith(null);
+  });
+
+  it("an ordinary start (no survivors) does not purge session caches", async () => {
+    // The sweep hygiene is conditional on there being something to sweep —
+    // unconditionally nuking the kernel-results cache on every start would
+    // throw away legitimate state.
+    const harness = setup();
+
+    await getHandler(IPC.kernels.start)({}, {
+      language: "python",
+      env: { PYTHON_PATH: "/usr/bin/python3" },
+    });
+
+    expect(harness.projectManager.clearCachedKernelResults).not.toHaveBeenCalled();
+  });
+
+  it("stops the spawned kernel when the handshake fails, preserving the working dir", async () => {
+    // A spawn whose handshake failed never became a session and nothing
+    // tracks it afterwards — under a daemon it survives as an orphan
+    // holding memory on the host.
+    const harness = setup();
+    harness.kernelManager.start = vi.fn(async () => makeKernelInfo({ id: "doomed" }));
+    kernelSessionMocks.initializeKernelSession.mockRejectedValueOnce(
+      new Error("Kernel handshake failed at step 'ready'"),
+    );
+
+    await expect(
+      getHandler(IPC.kernels.start)({}, {
+        language: "python",
+        env: { PYTHON_PATH: "/usr/bin/python3" },
+      }),
+    ).rejects.toThrow(/handshake failed/);
+
+    expect(harness.kernelManager.stop).toHaveBeenCalledWith("doomed");
+    expect(harness.projectManager.deleteWorkingDir).not.toHaveBeenCalled();
+    expect(harness.commRouter.detach).toHaveBeenCalled();
+  });
+
   it("crash handler preserves the working dir and pushes kernelCrashed to renderer", async () => {
     // Regression (§11.6): the crash handler used to delete the working dir,
     // destroying the uv env spec (pyproject.toml/uv.lock/.python-version)

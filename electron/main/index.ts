@@ -25,19 +25,20 @@ import * as path from "path";
 import type { UpdateCheckStamp } from "./auto-updater";
 import { GuiEditorWindowManager } from "./gui-editor-window-manager";
 import { GuiViewerWindowManager } from "./gui-viewer-window-manager";
-import {
-  INTERNAL_CHANNELS,
-  IPC,
-  type McpStatus,
-  type PDVConfig,
-} from "./ipc";
+import { INTERNAL_CHANNELS, IPC, type McpStatus } from "./ipc";
 import { registerAppStateIpcHandlers } from "./ipc-register-app-state";
 import type { LauncherContext } from "./ipc-register-launchers";
 import { registerGuiEditorIpcHandlers } from "./ipc-register-gui-editor";
 import { registerLaunchersIpcHandlers } from "./ipc-register-launchers";
+import { registerRemoteIpcHandlers } from "./ipc-register-remote";
 import { registerModuleWindowIpcHandlers } from "./ipc-register-module-windows";
 import { removeAllIpcHandlers } from "./ipc-registry";
 import { ModuleWindowManager } from "./module-window-manager";
+import { RemoteHostStore } from "./remote/host-config";
+import { RemoteServerHandle } from "./shell/remote-server";
+import { readMergedConfig, registerConfigBridge } from "./shell/config-bridge";
+import { SessionRouter } from "./shell/session-router";
+import type { LocalConfigStore } from "./shell/local-config-store";
 import { registerServerBridge } from "./shell/server-bridge";
 import type { ServerHandle } from "./shell/server-supervisor";
 
@@ -55,17 +56,26 @@ import type { ServerHandle } from "./shell/server-supervisor";
  * macOS window re-creation.
  *
  * @param win - Main browser window used for push forwarding.
- * @param server - Handle to the supervised pdv-server process.
+ * @param server - Handle to the session's pdv-server.
+ * @param localConfig - This machine's half of the config (theme, launchers, …).
  * @param pdvDir - `~/.PDV` root for themes/state paths.
+ * @param userDataDir - Electron `userData` root, for shell-owned runtime
+ *   artifacts that must not live in the server-owned `~/.PDV`.
  * @param setAllowClose - Flips the close-guard flag in `app.ts`.
+ * @param createLocalServer - Starts a fresh local pdv-server, used when a
+ *   remote session ends or disconnects and the window returns to local mode.
+ *   Omitted in builds/tests without session swapping.
  * @returns The light session-reset callback, called on renderer reloads.
  * @throws {Error} When the server is not running (session reset fails).
  */
 export async function registerIpcHandlers(
   win: BrowserWindow,
   server: ServerHandle,
+  localConfig: LocalConfigStore,
   pdvDir: string,
-  setAllowClose: (allow: boolean) => void
+  userDataDir: string,
+  setAllowClose: (allow: boolean) => void,
+  createLocalServer?: () => Promise<ServerHandle>
 ): Promise<() => void> {
   unregisterIpcHandlers();
 
@@ -97,13 +107,15 @@ export async function registerIpcHandlers(
   // must not touch the ConfigStore directly — it lives with the server.
   const serverInvoke = (channel: string, ...args: unknown[]): Promise<unknown> =>
     server.invoke(channel, args);
+  // Purely shell-owned, so this no longer costs a round trip to the server.
   const updateCheckStamp: UpdateCheckStamp = {
-    get: async () =>
-      ((await serverInvoke(IPC.config.get)) as PDVConfig).lastUpdateCheck,
+    get: async () => localConfig.getAll().lastUpdateCheck,
     set: async () => {
-      await serverInvoke(IPC.config.set, { lastUpdateCheck: Date.now() });
+      localConfig.apply({ lastUpdateCheck: Date.now() });
     },
   };
+
+  registerConfigBridge({ server, localConfig });
 
   registerAppStateIpcHandlers({
     win,
@@ -111,6 +123,31 @@ export async function registerIpcHandlers(
     stateDir,
     setAllowClose,
     updateCheckStamp,
+  });
+
+  // Per-host settings (directories, launch config, X11 toggle, recorded
+  // session node). Constructed per registration: a macOS window reopen
+  // builds a fresh one, which simply re-reads the file.
+  const hostStore = new RemoteHostStore(userDataDir);
+
+  // Connection control only. Establishing an ssh connection and running a
+  // session over it are separate steps: nothing here swaps the active
+  // ServerHandle, so local mode is unaffected by its presence.
+  registerRemoteIpcHandlers({
+    win,
+    controlDir: path.join(userDataDir, "ssh-control"),
+    // Built by `npm run build:server-bundle`. Absent in a checkout that has
+    // not built them, which simply skips the bootstrap.
+    bundleDir: path.join(__dirname, "..", "remote-bundles"),
+    // Per-host setup-script master copies (one `<host>.sh` per alias),
+    // edited in Settings → Remote Hosts.
+    setupScriptDir: path.join(userDataDir, "remote-setup"),
+    hostStore,
+    // Only a router can move the session; anything else (a bare handle in a
+    // test) gets connection control without session swapping rather than a
+    // menu item that fails when used.
+    router: server instanceof SessionRouter ? server : undefined,
+    createLocalServer,
   });
 
   registerModuleWindowIpcHandlers({
@@ -126,7 +163,7 @@ export async function registerIpcHandlers(
   registerLaunchersIpcHandlers({
     getLauncherContext: async () =>
       (await serverInvoke(INTERNAL_CHANNELS.launcherContext)) as LauncherContext,
-    getConfig: async () => (await serverInvoke(IPC.config.get)) as PDVConfig,
+    getConfig: async () => readMergedConfig(server, localConfig),
     getMcpStatus: async () =>
       (await serverInvoke(IPC.mcp.getStatus)) as McpStatus,
     resolveTreeFile: async (treePath) =>
@@ -134,6 +171,30 @@ export async function registerIpcHandlers(
         INTERNAL_CHANNELS.resolveTreeFile,
         treePath
       )) as string | null,
+    // Remote identity comes from the ROUTER'S ACTIVE HANDLE, never from
+    // the per-window connection manager: handles outlive window
+    // registrations (a macOS reopen builds a fresh manager with no
+    // connection), and the manager can be connected to a DIFFERENT host
+    // than the one serving the session (connect and startSession are
+    // separate steps). The handle carries the session's own host/control,
+    // and its connectionState gates ssh-carried launches — a session
+    // mid-reconnect refuses them rather than falling back to spawning
+    // against cluster paths locally.
+    getRemoteContext: () => {
+      const active = server instanceof SessionRouter ? server.active : null;
+      if (!(active instanceof RemoteServerHandle)) return null;
+      const target = active.launcherTarget;
+      if (!target) return { host: "", control: null, hostNameOverride: null };
+      const usable = active.connectionState === "connected";
+      return {
+        host: target.host,
+        control: usable ? target.control : null,
+        // Pin ssh-carried launches to the login node the session daemon
+        // lives on — a round-robin alias would otherwise land the
+        // terminal/editor beside a working dir it cannot see.
+        hostNameOverride: hostStore.get(target.host).sessionNode ?? null,
+      };
+    },
   });
 
   // Light session reset on renderer load/reload: clears in-session server

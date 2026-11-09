@@ -553,6 +553,7 @@ pdv/
     query_server.py      # QueryServer: ZMQ REP daemon thread for read-only queries during execution
     namespace.py         # PDVNamespace (protected dict), pdv_namespace(), inspect_namespace()
     serialization.py     # Type detection, format writers (npy, pickle, json, module, gui, namelist, lib)
+    mpl_config.py        # Safe matplotlib backend selection (display probe, subprocess pre-flight, %matplotlib guard)
     environment.py       # Path utilities, working dir management, project root logic
     errors.py            # PDVError, PDVPathError, PDVKeyError, PDVProtectedNameError, PDVSerializationError, PDVScriptError, PDVVersionError
     modules.py           # Custom type handler registry and dispatch (@pdv.handle() decorator)
@@ -580,7 +581,7 @@ pdv/
 `pdv.bootstrap()` is called by a bootstrap snippet that the main process sends via `execute_request` (silent mode) from `kernel-session.ts` immediately after the kernel subprocess starts. It:
 1. Registers the `pdv.kernel` comm target with IPython
 2. Injects `pdv_tree` into the IPython user namespace via a custom namespace class that blocks reassignment
-3. Configures an interactive matplotlib backend (or patches `plt.show()` for inline emission when none is available)
+3. Configures a matplotlib backend via `pdv.mpl_config` through IPython's `enable_matplotlib` machinery (event-loop integration, so GUI windows actually work). macOS/Windows auto-enable a native backend (failures there are ordinary catchable exceptions). On Linux the handshake always runs on the inline backend, and when the display is live and a Qt binding pre-flights green, **qt is enabled one-shot just before the user's first execution** — so plots still default to native windows, but a GUI event loop can never start mid-handshake (ipykernel's `loop_tk` under Xvfb starved `pdv.init` on CI even after a green pre-flight; qt is the only auto candidate because its loop is the one with field mileage). tk/gtk are opt-in via the guarded `%matplotlib`. That guard runs a cheap `$DISPLAY` liveness probe (ssh forwards `localhost:N` as TCP `6000+N`) and a throwaway-subprocess pre-flight of the toolkit, because Qt's xcb plugin `abort()`s the whole process on a dead display — the common state when a remote kernel daemon outlives the ssh channel that set its `DISPLAY`. When both PyQt5 and PyQt6 are installed, `QT_API` steers matplotlib toward PyQt5 (Qt6's xcb plugin aborts even on live forwarded displays). Anything unsafe falls back to the `matplotlib-inline` backend, whose `show()` emits `display_data` immediately (so double-click plots from comm handlers render in the console too). `ip.enable_matplotlib` is wrapped so a user-invoked `%matplotlib <gui>` runs the same checks and prints a one-line refusal instead of crashing the kernel; direct `matplotlib.use()` calls in user code are documented as unguarded. A backend deliberately configured via `MPLBACKEND` is honored — but it is enabled through `enable_matplotlib` (so it gets the event loop) and still passes the same safety checks, falling back to inline with an explanation when refused. (matplotlibrc alone never reaches this path: ipykernel forces `MPLBACKEND` to the inline backend when unset, before the shell exists.) Because bootstrap prints land in the handshake boot tail the user never sees, the reason for an inline fallback is re-printed once, above the user's first `plt.show()` figure.
 4. Arranges the built-in double-click plot handlers to register **lazily**: the handler-registry lookups in `pdv.modules` (`has_handler_for`, `dispatch_handler`) call `pdv.default_handlers.register_defaults()`, which registers per-library defaults once numpy / pandas / xarray actually appear in `sys.modules`. Bootstrap itself imports none of them — eager imports cost real startup latency and undercut the never-import-xarray design in `serialization.py`, and a tree value can only *be* one of these types if its library is already imported. Per-type behavior: `np.ndarray` 1D → `ax.plot`, 2D → `ax.imshow` + colorbar, 0D/>2D → printed notice; complex arrays (any source) split into parts — 1D plots labeled `Re`/`Im` lines on one axes, 2D shows side-by-side `Re`/`Im` `imshow` panels each with its own colorbar (the parts routinely span different ranges); `h5py.Dataset` → materialized (under a 100 MB cap with a slice-it-in-code notice) and drawn with the same array logic; `pd.Series` and `pd.DataFrame` → their built-in `.plot()`; `xr.DataArray` → its built-in `.plot()` (which dispatches 1D → line, 2D → pcolormesh, >2D → histogram by ndim). A value that cannot actually be plotted (e.g. a non-numeric `pd.Series` or an object-dtype array) closes its half-built figure and prints a `[PDV]` notice rather than raising — a raised exception would reach the renderer as an opaque `internal.error`. `xr.Dataset` is intentionally not registered — users drill into a specific `data_var`
 5. Sends the `pdv.ready` comm message
 
@@ -1064,10 +1065,14 @@ invokes external applications:
   (`terminal-app` on macOS, `x-terminal-emulator` on Linux, `wt.exe` on
   Windows).
 
-- `launchers.editor` — `{ fileCommand?, dirCommand?, isTuiEditor? }`. The
-  command PDV uses to open a script (`fileCommand`) or a directory
-  (`dirCommand`); `{}` is the path placeholder. `isTuiEditor` forces terminal
-  wrapping on/off; when unset PDV auto-detects from the command basename.
+- `launchers.editor` — `{ fileCommand?, dirCommand?, isTuiEditor?,
+  remoteFileCommand?, remoteDirCommand? }`. The command PDV uses to open a
+  script (`fileCommand`) or a directory (`dirCommand`); `{}` is the path
+  placeholder. `isTuiEditor` forces terminal wrapping on/off; when unset PDV
+  auto-detects from the command basename. The two `remote*` keys are
+  optional overrides for remote sessions (`{host}`/`{path}` placeholders,
+  hand-edited config only — the built-in derivation covers
+  code/cursor/windsurf and TUI editors; see §11.7 launcher routing).
   This slot supersedes the legacy `pythonEditorCmd` / `juliaEditorCmd` keys —
   `ConfigStore` migrates a pre-existing `pythonEditorCmd` into
   `launchers.editor.fileCommand` once, at load, and drops the legacy keys.
@@ -1994,7 +1999,7 @@ The API surface:
 - `window.pdv.environment.*` — Python environment management: `list`, `check`, `install`, `refresh`, `activeInfo` (active kernel's environment metadata — mode, interpreter, Python version — for the Project Environment tab), plus the uv package UI: `listPackages`, `addPackage`, `removePackage`, `upgradePackage`; push: `onInstallOutput(cb) → unsub`, `onEnvActivity(cb) → unsub` (streaming uv output)
 - `window.pdv.chrome.*` — window chrome controls: `getInfo`, `minimize`, `toggleMaximize`, `close`; push: `onStateChanged(cb) → unsub`
 - `window.pdv.system.*` — constant host facts injected at preload time: `platform` (the main process's `process.platform`), `supportedPythonVersions` and `defaultPythonVersion` (the New Project dialog's version range, from `python-versions.ts`), and their Julia siblings `supportedJuliaVersions` and `defaultJuliaVersion` (from `julia-versions.ts`, §10.6.5). Exposed as plain values, not functions — they never change during a session, so they need no IPC channel
-- `window.pdv.launchers.*` — action-bar external-app launchers: `openAgent` (launch the configured AI agent in a terminal), `openWorkingDir` (open the active kernel's working directory in the configured editor/IDE), `checkAvailability` (probe whether a terminal/editor/file-manager is installed, without launching it — used to gate Settings Save)
+- `window.pdv.launchers.*` — action-bar external-app launchers: `openAgent` (launch the configured AI agent in a terminal; local sessions only), `openWorkingDir` (open the active kernel's working directory in the configured editor/IDE), `openTerminal` (open the user's terminal in the working directory — over `ssh -t` in remote sessions), `checkAvailability` (probe whether a terminal/editor/file-manager is installed, without launching it — used to gate Settings Save)
 - `window.pdv.progress.*` — operation progress: push only: `onProgress(cb) → unsub`
 - `window.pdv.menu.*` — menu bridge: `updateRecentProjects(paths)`, `onAction(cb) → unsub`
 - `window.pdv.autosave.*` — autosave lifecycle: `run`, `clear`, `check`, `scanWorkingDirs`, `recoverUnsaved`, `deleteOrphan`; push: `onTrigger(cb) → unsub`, `onInFlightChange(cb) → unsub`
@@ -2133,7 +2138,7 @@ Rules:
 - **Round-trip discipline**: Server state is cached by React Query and refreshed by push-driven invalidation; common interactions cost at most one round trip, and idle traffic is O(1) per tick (the §7.4.3 version-check poll), never proportional to how much of the tree is expanded. No new refresh tokens or ad-hoc polling.
 - **Hook composition**: See `electron/renderer/src/app/HOOKS.md` for the full hook dependency graph and data flow documentation.
 
-### 11.5 Custom Title Bar and Window Chrome
+### 11.5.1 Custom Title Bar and Window Chrome
 
 PDV uses a custom renderer-drawn title bar on all platforms:
 - **macOS**: `titleBarStyle: "hiddenInset"` — the native title bar is hidden but traffic-light buttons remain. A drag region and app title are rendered by the `TitleBar` component.
@@ -2163,6 +2168,332 @@ This ensures the project venv, tree state, module bindings, and `sys.path` confi
 
 ---
 
+### 11.7 Remote Sessions (SSH)
+
+Everything below concerns a session whose pdv-server runs on a remote
+host reached over SSH (issue #132). Local mode is untouched by all of it:
+the machinery activates only when a session is moved onto a host.
+
+**Push seq and retained settlements belong to the session, not the
+connection** (`transport/push-journal.ts`, `transport/response-store.ts`).
+A remote session outlives the channel carrying it, so a client that drops
+and reattaches must be able to say "I last saw seq N" and receive exactly
+what it missed — which only means anything if the numbering survives the
+connection. `PushJournal` assigns every seq and retains the encoded frames
+in one bounded ring per session (5000 messages / 32 MB) with a cursor per
+client, so replay is a byte copy rather than a per-client buffer. A cursor
+that has fallen off the back of the ring is told so explicitly; it is never
+advanced silently, which would leave a client believing it had seen pushes
+that were dropped.
+
+Consequently `hello` is **unsequenced** (seq −1): it describes the
+connection, and consuming a seq would renumber the session's stream on
+every reconnect. Exactly three channels bypass the journal — `hello`,
+`attachError`, `superseded` — a closed allowlist enforced by type and at
+runtime. `confirmRequest` is deliberately not among them: a parked native
+confirm is session state and must survive a reconnect. `RPC_PROTOCOL_VERSION`
+is therefore 2, and the hello advertises `protocolMin` so peers see a
+*range*; a range cannot be retrofitted once long-lived daemons exist, and a
+client that learns only an exact version must refuse an older-but-compatible
+server, stranding a live kernel on every app upgrade.
+
+`ResponseStore` retains recent invoke settlements (200 entries / 10 minutes,
+on a monotonic clock so a lid-close or NTP step cannot expire one early) and
+the server **records a settlement before writing it**. A `script.run` that
+finishes while the connection is down has still really run, so its result
+must exist somewhere findable before it goes to a writer that may be gone.
+Reconciliation is three-state — in-flight, completed, unknown — because two
+states are silently wrong: "not running, therefore failed" rejects work that
+in fact completed.
+
+In local mode all of this is inert by construction: one connection for the
+process lifetime means the session and the connection are the same thing.
+
+**Session daemon.** On a remote host the server runs as a detached daemon
+(`server/session-host.ts`) serving one session over a Unix socket, and
+`pdv-server attach --session <id> --stdio` is what the SSH channel runs — a
+*proxy*, not a server. The channel may die at any moment; all that dies with
+it is the proxy, while the daemon holding the kernel, the journal and the
+settlements carries on. The next channel attaches and is replayed what it
+missed.
+
+Every fresh connection is **gated until it attaches**: between accept and
+attach the client has not said where its cursor is, so a kernel streaming
+output in that window would hand it an unpredictable seq — a gap on the
+first frame of a reconnect. Gated pushes are journalled but withheld, and
+arrive through the replay instead. A new attach **supersedes** the previous
+connection (the reverse-RPC confirm would otherwise pop two native dialogs
+for one question); the notice carries `bySameClientId`, without which a
+displaced shell that auto-reconnects would ping-pong a session between two
+laptops.
+
+**Daemon creation is gated by an `O_EXCL` lock, never by the socket**
+(`server/session-lock.ts`). Two channels arriving together both find a stale
+socket and both get `ECONNREFUSED`; without the lock both would spawn a
+daemon, and one would end up serving a kernel and a Tree nobody ever
+connects to. `bootId` closes the pid-reuse hole — after a reboot,
+`kill(pid, 0)` on a recycled pid would report a stranger as the daemon.
+
+**Metadata lives under `~/.pdv-server/`; the socket does not**
+(`server/session-paths.ts`). That root is a shared NFS home on the target
+clusters and AF_UNIX there is unreliable, so the socket resolves node-local
+(`$PDV_SERVER_RUNTIME_DIR` → `$XDG_RUNTIME_DIR` → `/tmp/pdv-server-<uid>` →
+root), rejecting any candidate that would blow the ~104-byte `sun_path`
+budget. `session.json` records the **concrete hostname**: `flux.pppl.gov`
+round-robins and the socket is node-local, so a reattach that follows the
+alias can land on a different login node. Two complementary mechanisms make
+the recorded hostname effective. *Proactively*, the shell records the node a
+session starts on (per host, in `<userData>/remote-hosts.json`; cleared on
+shutdown) and pins the next PDV-created master there with `-o HostName=` —
+a command-line `-o` outranks the alias's config while its `ProxyCommand`,
+agent and user settings still apply; a pinned attempt that fails falls back
+to the bare alias with a visible explanation, so a drained node cannot
+brick the host. *As backstop*, `attach` refuses to create a daemon when
+`session.json` names a different machine and the recorded daemon's
+**heartbeat** is fresh (a beacon file in the NFS-shared session dir,
+touched every minute by the daemon — the one liveness signal another login
+node can read, since pids and sockets are node-local). The refusal carries
+a parseable `PDV_WRONG_NODE node=<hostname>` marker that the shell turns
+into an actionable message *and* a recorded pin for the next connect. A
+stale or absent beacon downgrades the refusal to a logged takeover, so a
+dead daemon never holds its session hostage. A master the user runs
+themselves is never re-pointed (PDV does not own it); the attach guard
+covers that case.
+
+**Detachment** (`server/daemonize.ts`) is `detached: true` (setsid),
+`unref()` plus the launcher exiting (orphaning), and
+`stdio: ["ignore", logFd, logFd]` — the last is mandatory, because a daemon
+inheriting the SSH channel's stdout keeps its write end open, so sshd never
+sees EOF and the launching command hangs forever. Measured on a PPPL login
+node: a detached daemon survived a full logout and the site's 45-minute idle
+timeout with an unbroken heartbeat. Log rotation is copytruncate, since
+renaming a file the daemon holds an `O_APPEND` fd on leaves it writing to
+the rotated inode.
+
+**Idle policy** (`server/session-idle.ts`): no clients and no kernel exits
+after 30 minutes; an idle kernel survives up to `idleCapHours` (default 12,
+0 = forever). A reattach within a 90-second grace window is not a detach at
+all. The cap measures *idle* time, not elapsed time — a literal reading
+would SIGKILL a 20-hour simulation with the laptop shut, the exact loss this
+feature exists to prevent (`idleCapCountsExecution` restores it). The policy
+is only as good as what drives it, so `wireSessionIdle` (`server-main.ts`)
+owns the coupling: the kernel manager's `kernel:executionState` events
+suspend the cap on busy and re-arm it — full length — on idle, and a final
+`isExecuting` check before the shutdown catches a timer that fired in the
+race window. Before stopping, the daemon takes a real snapshot through the
+same `performAutosave` core the timer and pre-restart paths use
+(`autosaveForShutdown` in `ipc-register-autosave.ts`), with code cells from
+the working dir's `code-cells.json` mirror since no client is attached to
+supply live ones. A failed snapshot blocks the shutdown and retries,
+because exiting then destroys the work the autosave protects; a session
+with no kernel, or a dead one, has nothing preservable left and shuts down
+without blocking — a dead kernel must not pin a login node forever.
+
+**Moving a session onto a host.** Connecting and *running the session there*
+are separate steps (`IPC.remote.connect` then `IPC.remote.startSession`) with
+different failure modes: a failed attach leaves the user with a working local
+session and a live connection rather than neither. `startSession` attaches to
+(or creates) a daemon on the host and calls `SessionRouter.swap()`, after
+which every existing invoke and push travels to the cluster with no caller
+changes — the payoff for the seam work in §11.4's router. The outgoing local
+server is shut down rather than abandoned, since it holds a kernel and a
+working directory on this machine. The session id is stable per user, so
+reconnecting after a crash or an app restart finds the same session, kernel
+and Tree instead of stranding the previous daemon.
+
+**Login environment and the per-host setup script.** A daemon spawned over
+an ssh exec channel never ran a login shell, so PATH entries that every
+interactive shell on the cluster has — Lmod modules, juliaup, conda hooks —
+are invisible to it and to every kernel and probe it spawns. At startup the
+daemon therefore captures the login environment once (`server/login-env.ts`):
+`bash -lc '. setup.sh >/dev/null 2>&1; env -0 > <file>'`, parsed from the
+file (login shells *print*, and profile chatter interleaved with the capture
+— or with any per-spawn wrapper's stdout — would corrupt interpreter probes
+that regex their output) and applied to the daemon's own `process.env`,
+which every spawn call site builds from. One login shell per daemon, not per
+spawn; `PDV_*` and `ELECTRON_RUN_AS_NODE` are protected from profile
+override — that prefix is the daemon's reserved namespace, so a setup
+script's own exports must not use it. A failed capture degrades to the
+inherited environment, but never silently when a script was shipped: the
+capture reports *evidence* of sourcing (a sentinel exported by the capture
+shell, not a stat of the file), the verdict is recorded as
+`setupScriptApplied` in `session.json`, and a shipped-but-not-applied
+script logs loudly. The optional setup script is per host: its master copy
+lives on the laptop (`<userData>/remote-setup/<host>.sh`, edited in
+Settings → Remote Hosts, CRLF normalized at ship time) and
+`remote/setup-script.ts` ships it at every `startSession`, before any path
+that could spawn a daemon, since it is sourced only during that startup
+capture — script edits apply from the next session start, and a daemon
+resurrected by the handle's internal reconnect loop sources the
+last-shipped copy. A configured script that cannot be delivered fails the
+session start loudly; silently missing interpreters are the harder bug.
+When no script is configured the remote copy is removed, so at each
+session start the host reflects the local master copy, present or absent.
+The `setupScriptApplied` verdict does not stop at `session.json`: the
+attach result reports it (optional field; old daemons stay silent), and
+when a script was shipped but is not in effect — the capture failed, or
+the daemon booted before the script existed — the shell composes a warning
+that rides every session-state push for that handle and renders in the
+welcome banner and the connect dialog. The Remote Hosts tab's **Test
+button** (`remote.testSetupScript` → `remote/setup-script-test.ts`) is the
+debugging surface the capture deliberately is not: it sources the
+*editor's current text* in a real `bash -l` on the connected host,
+captures the script's own output verbatim (marker-framed, so login-shell
+chatter cannot corrupt it), and reports a before/after interpreter probe
+diff. All server-side tool spawns are funnelled through one seam
+(`server/spawn.ts`, enforced by an import guard) — the future hook for
+Slurm-launched kernels, which is also why environment does not ride there
+as a wrapper.
+
+**Per-host settings** (`remote/host-config.ts`, Settings → Remote Hosts)
+live on the laptop in `<userData>/remote-hosts.json`, keyed by host alias:
+directory settings (`workingDirBase`, `defaultSaveLocation`), the kernel
+launch configuration the Slurm work will consume (mode, account,
+partition, allocation command — stored now, honestly labeled until the
+launch path exists), and the PDV-recorded session node used by the
+reconnect pinning above. User-edited settings and recorded state are kept
+on separate write paths so a tab save cannot clobber the pin and vice
+versa. The directory settings are master copies of *server-side* config
+keys: at `startSession` the configured values are pushed into the host's
+`~/.PDV/preferences.json` over the freshly started handle, before the
+swap — a failure declines the move loudly and leaves the window on its
+working local session, because a kernel quietly writing to the NFS home
+the user pointed at scratch is the harder bug to notice.
+
+The per-host **Forward X11** toggle (issue #377) requests `ForwardX11=yes`
+in two places, because they answer different questions: on a master PDV
+creates (so forwarding is *allowed* on the connection at all), and on the
+session-attach channel (whose environment the `--create`-spawned daemon
+inherits — that DISPLAY, captured once at daemon boot, is what the
+kernels' matplotlib sees). A master borrowed from the user's own ssh
+config is never reconfigured; there the channel-level request succeeds
+exactly when the user's config permits forwarding. Toggling the setting
+while connected takes effect on the next session for real: the connect
+path compares the toggle against the state PDV's live master was
+established with and tears a mismatched master down rather than reusing
+it (a borrowed master is never rebuilt — it is the user's). The known
+limitation stands: a DISPLAY rots if the forwarding channel dies while
+the daemon lives — the comm-carried plot window (issue #369) is the
+structural fix.
+
+**Launcher routing** (`remote/remote-launchers.ts`, consumed by
+`ipc-register-launchers.ts`) routes the shell-side external-app launchers
+by session kind, read synchronously from the session router + connection
+manager — never from connection *state* alone, so a remote session
+mid-reconnect refuses ssh-carried launches rather than falling back to
+spawning cluster paths locally. `script.edit` / `openWorkingDir`: a
+Remote-SSH-capable editor (code/cursor/windsurf basenames, or an explicit
+`launchers.editor.remoteFileCommand`/`remoteDirCommand` template with
+`{host}`/`{path}` placeholders) spawns locally with
+`--remote ssh-remote+<host>` and makes its own connection via the user's
+ssh config; a TUI editor runs *on the host* inside the user's terminal
+preset wrapping `ssh -t` over PDV's ControlMaster (no re-auth while the
+master lives) with an `-o HostName=` pin to the recorded session node —
+so even a fresh connection after a master death lands beside the
+session's working dir, which matters for node-local scratch, where a
+round-robin alias can land a Remote-SSH editor on the wrong node;
+anything else refuses with the alternatives named. `launchers.openTerminal` (the Open Terminal button) opens the
+terminal preset around a local login shell in the working dir, or
+remotely around `ssh -t <host> 'cd <wd>; exec "${SHELL:-sh}" -l'`.
+`launchers.openAgent` refuses in remote sessions before doing any work —
+MCP is local-only (§15.9), and the refusal is also what makes the
+`.pdv-mcp.json` write (which targets the kernel's working directory, a
+cluster path when remote) unreachable cross-host.
+
+`shell/remote-server.ts` is the remote `ServerHandle`. The transport is
+unchanged — an ssh channel is a stream pair and `RpcClient` already takes one
+— but the *lifetime* differs, which is why it is a separate implementation:
+`RpcClient` is disposable here and the pending map lives one level above it,
+so invokes survive the connection that carried them. Unknown outcomes are
+classified by channel (`IDEMPOTENT_CHANNELS`): reads may be re-issued,
+mutations may not, because running the same script twice against one kernel
+writes to the Tree twice. An unaccountable mutation rejects with
+`RpcRequestLostError` so the renderer can say "check the Tree" rather than
+report a plain failure for something that may have succeeded.
+
+Reconnects use `BatchMode=yes` — a retry must succeed from the existing
+master or fail at once, never silently trigger a Duo push — and a `superseded`
+notice from a *different* client stops the reconnect loop dead, since two
+laptops chasing one session would ping-pong it forever.
+
+**When the backoff gives up** the handle parks in `auth-required`. Owed
+invokes are not failed wholesale: within their TTL they survive, because a
+manual reconnect minutes later reconciles them against the daemon and a
+completed `script.run` still resolves with its result — worth more than a
+fast rejection. A sweep keeps that from decaying into "hang forever":
+every owed promise settles within one TTL of its creation, reconnect or
+not (idempotent reads with a plain error, mutations with
+`RpcRequestLostError`). Nothing automatic runs after that, because the
+missing ingredient is interactive re-authentication. Recovery is
+`RemoteServerHandle.retryNow()`: the connect dialog's "Reconnect to *host*"
+(which is `IPC.remote.startSession` — on a window already fronting a remote
+session that call *means* reattach) after the user re-authenticates, and a
+`powerMonitor` resume kick in batch mode (succeed silently off a live master
+or fail fast — a wake must never fire an auth prompt; locally the resume
+still forwards `systemResumed` to the server instead, since a remote server
+never slept). A handle that can never reattach — superseded, or closed —
+makes `startSession` fall through to a *fresh* handle against the same
+stable session id, so "reconnect" works even after another client visited.
+
+**Three ways out of a remote session, deliberately distinct.**
+*Disconnect* closes the channel and returns the window to a freshly started
+local server; the daemon and its kernel keep running for a later reconnect.
+*Shut Down Remote Session* (`IPC.remote.endSession`) starts the local server
+FIRST — a failure leaves the remote session untouched rather than the window
+with neither — then swaps and tells the daemon to stop (the `SessionHost`
+honors the shutdown invoke: graceful kernel shutdown, socket unlinked). It
+declines while the session is unreachable, because a shutdown invoke on a
+dead channel silently does nothing and "success" would leave the daemon
+running on a login node. *Quitting the app* is disconnect-only for remote
+sessions (`closingForQuit`, `app.ts`): the daemon outliving the client is
+the feature, and Cmd+Q must never end a 20-hour run on the cluster. In all
+three cases the retired handle's state callbacks are gated on it still being
+`SessionRouter.active`, so a farewell "disconnected" push can never
+overwrite the renderer's freshly-landed local state.
+
+**One kernel per session, enforced at the authority.** A fresh client
+attaching to a long-lived daemon has no idea what a previous client left
+running, so `kernels:start` first retires any surviving kernels (their
+working directories are preserved — they hold `.autosave` snapshots the
+welcome screen can recover — and the kernel-results cache is purged so the
+new session's first save cannot silently commit the old kernel's tree). A
+spawn whose handshake fails is likewise stopped rather than leaked.
+
+**Host-qualified recents reconnect.** A recent project carries the host it
+lives on; opening one that lives elsewhere moves the session first (connect
+— with any auth riding the dialog — then `startSession`, then the open
+completes when the connection state says the session arrived). A pending
+open is a click, not a standing order: it expires after two minutes, dies
+with the dialog if the user closes it mid-flow, and is identity-tracked so
+a second click cannot be killed by the first flow's failure.
+
+**The remote path picker.** Every path PDV asks the user for is interpreted
+by the *server*, so in a remote session a native dialog would browse the
+wrong machine. `renderer/src/services/pick-path.ts` routes: local sessions
+keep the native dialogs byte-for-byte; remote sessions (including
+unreachable ones — the session's filesystem is still the remote one) get a
+minimal in-app picker fed by `files:listDir`, the one new server channel
+(`ipc-register-file-browse.ts`: read-only, `~` expansion, dirs-first,
+symlinks reported as their target's kind). The picker is deliberately bare
+— a typed-path field doubling as navigation, an entry list, Home — because
+it is a placeholder for the planned command-palette UI, not a foundation.
+The `SHELL_CHANNELS` partition now enumerates the native `files.*` pickers
+explicitly rather than spreading the namespace, precisely so a new
+`files.*` channel can never again be silently auto-assigned to the shell.
+
+The renderer learns where its session lives from the `sessionState` push,
+distinct from `remoteStatus` (which describes a connection *attempt*). On a
+resync it rebuilds query-backed state, reloads App-held config (component
+state that a query-cache reset cannot reach — without it a kernel start
+after a swap used the previous machine's interpreter path), lands on the
+welcome screen when the new server has no kernel, and marks the console.
+The marker wording follows the push's `cause`: a deliberate move says
+"session moved to *host*", while a reattach that could not resume says
+output may be missing — that text after an intentional swap read as data
+loss to a real user. Console output is append-only and genuinely
+unrecoverable, so real gaps are made legible rather than papered over.
+
+
 ## 12. File and Module Structure
 
 ### 12.1 Electron (TypeScript)
@@ -2180,19 +2511,42 @@ electron/
         shell/
             server-supervisor.ts ← Spawns/supervises the pdv-server child (hello, ping, crash, shutdown)
             server-bridge.ts     ← Forwards SERVER_CHANNELS invokes over the transport; push fan-out; reverse-RPC confirm dialog
+            session-router.ts    ← Stable ServerHandle delegating to the active server; swap() moves the session
+            remote-server.ts     ← Remote ServerHandle (disposable RpcClients, reconnect, reconciliation)
+            config-bridge.ts     ← config.get/set merge across the local store + server store
+            local-config-store.ts ← Shell-owned config half (theme, shortcuts, launchers, recents)
         server/
-            server-main.ts      ← pdv-server CLI entry (`serve --stdio`, plain Node)
+            server-main.ts      ← pdv-server CLI entry (serve / self-check / attach /
+                                    session-host, plain Node); wireSessionIdle
             wire.ts             ← pdv-server core assembly: session state + server registrars + MCP
             invoke-registry.ts  ← Electron-free invoke handler registry (server channels)
             shell-confirm.ts    ← Reverse-RPC confirm broker (server side)
             confirm.ts          ← Injected ConfirmFn/ConfirmOptions contract
             server-paths.ts     ← userData/resources roots from env (extracted process) or injection
             server-files.ts     ← List of server-destined files (electron-import guard test)
+            self-check.ts       ← On-host bundle verification (zeromq dlopen, tcp bind, temp dir)
+            session-host.ts     ← Session daemon: attach gate, replay, supersede
+            session-paths.ts    ← Socket/metadata placement (node-local, path budget)
+            session-lock.ts     ← O_EXCL spawn lock + bootId staleness
+            session-meta.ts     ← session.json (concrete host, resolved sockPath)
+            session-idle.ts     ← Idle policy (grace, kernel cap, autosave gate)
+            daemonize.ts        ← setsid detachment + copytruncate log rotation
+            attach-cli.ts       ← attach proxy: stdio ⇄ session socket
+        remote/
+            ssh-config.ts       ← ~/.ssh/config alias harvesting for the host picker
+            ssh-mux.ts          ← Multiplexed exec over a ControlMaster; exit sentinel + failure ladder
+            ssh-pty.ts          ← node-pty interactive auth (Duo/passphrase); secret echo stripping
+            remote-connection.ts ← Connection state machine: reuse-or-create master, probe, bootstrap
+            remote-channel.ts   ← ssh channel → stream pair for one attach
+            bootstrap.ts        ← Probe / upload / verify / atomic install / self-check on the host
         transport/
             protocol.ts         ← RPC envelope types + reserved pdv.rpc.* channels
             line-codec.ts       ← Newline-delimited JSON encoder/decoder with backpressure
+            push-journal.ts     ← Session-owned push seq + bounded replay ring
+            attach.ts           ← Reattach decision: replay, resync, or refuse
+            response-store.ts   ← Retained invoke settlements (survive a dropped connection)
             rpc-client.ts       ← Shell-side transport client (correlation, hello, ping)
-            rpc-server.ts       ← Server-side transport endpoint (dispatch, push seq)
+            rpc-server.ts       ← Server-side transport endpoint (dispatch, journal, settlements)
         kernel-manager.ts       ← Kernel process lifecycle, ZeroMQ socket management
         kernel-session.ts       ← Kernel bootstrap/init handshake helpers (pdv.ready → pdv.init)
         kernel-error-parser.ts  ← Traceback/error parsing for execution errors
@@ -2221,6 +2575,8 @@ electron/
         ipc-register-tree-namespace-script.ts ← IPC handlers: tree, namespace, script
         ipc-register-app-state.ts         ← IPC handlers: config, themes, code cells, files, about
         ipc-register-launchers.ts         ← IPC handlers: external editor/terminal launch + availability
+        ipc-register-remote.ts            ← IPC handlers: remote connect/auth + session start/end/disconnect
+        ipc-register-file-browse.ts       ← IPC handler: files:listDir (remote path picker source)
         ipc-registry.ts                   ← handleIpc wrapper (logs + normalizes handler errors)
         agent-launcher.ts       ← Spawn external AI agent CLIs against the MCP server
         auto-updater.ts         ← electron-updater integration and update-check throttle
@@ -2712,10 +3068,9 @@ PDV does not ship a static API reference, which would drift. Instead:
 
 The following features are acknowledged as future work and must not influence the current architecture in ways that complicate the above design:
 
-- **Crash recovery** — working directory is deleted on close; future discussion required
-- **Remote execution** (SSH, HPC clusters) — no remote connector architecture in this version
-- **Autosave** — `.pdv-work/autosave/` directory is created but not used
 - **Modules ecosystem hardening** — core module lifecycle is implemented (install from disk/GitHub, import, uninstall, update, bundled examples, project-local storage); deeper registry/trust features are deferred
+- **Remote session completeness** — remote sessions work end to end (§11.7 area above: connect, bootstrap, session daemon, environment provisioning via the bundled uv, path picking, launcher routing incl. the Open Terminal launcher and the per-host Forward X11 toggle); still deferred are Slurm-aware kernel launch (interactive analysis on a login node is the sanctioned beta scope; the per-host setup script, login-environment capture, Remote Hosts settings tab and per-host launch-config schema have landed), remote Julia sessions (need juliaup on the host), remote→local file export, and the VS Code-style command palette that will replace the placeholder path picker
+- **Local→remote upload import and remote MCP** — explicitly excluded from remote v1
 - **Multiple simultaneous kernels** — architecture supports it (kernels have IDs) but UI exposes only one at a time
 - **R kernel support** — deferred; would follow the `pdv-julia` pattern (a kernel-side package implementing the language-agnostic protocol of §3)
 

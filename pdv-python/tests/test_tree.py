@@ -597,3 +597,54 @@ class TestPDVScript:
         invalid_file = tmp_path / "invalid.py"
         invalid_file.write_text("def run(pdv_tree,\n")
         assert _extract_script_params(str(invalid_file)) == []
+
+
+class TestDebounceHygiene:
+    """Regression tests for debounce-timer thread leaks (the sweep flake).
+
+    A leaked ``Timer(0.1, _flush_global)`` fires ~100 ms after its test
+    ends, sending a stray ``pdv.tree.changed`` into whatever comm patch a
+    *later* test has open. Two layers close it: ``_flush_changes`` cancels
+    the in-flight instance timer, and the autouse ``_reset_global_debounce``
+    conftest fixture disarms the class-level machinery after every test.
+    """
+
+    def test_flush_changes_cancels_pending_timer(self, tree_with_comm, monkeypatch):
+        """A manual flush must stop the timer thread, not orphan it."""
+        # Long interval so the timer cannot fire on its own mid-test on a
+        # loaded machine; cancel() below keeps teardown instant.
+        monkeypatch.setattr(PDVTree, "_DEBOUNCE_INTERVAL", 60.0)
+        tree_with_comm["x"] = 1
+        timer = tree_with_comm._debounce_timer
+        assert timer is not None
+        tree_with_comm._flush_changes()
+        # Timer.cancel() sets the internal finished event; without the
+        # cancel, the thread stays live for the full debounce interval.
+        assert timer.finished.is_set()
+        assert tree_with_comm._debounce_timer is None
+
+    def test_disarm_global_debounce_clears_leaked_state(self, mock_send, monkeypatch):
+        """The disarm the autouse conftest fixture relies on works.
+
+        Reproduces the historical leak in-test (attach without detach, then
+        a non-root mutation arming the class-level timer) and asserts
+        ``_disarm_global_debounce`` — the exact call the fixture makes —
+        cancels and clears everything. Long debounce interval so the timer
+        cannot fire on its own mid-test.
+        """
+        monkeypatch.setattr(PDVTree, "_DEBOUNCE_INTERVAL", 60.0)
+        tree = PDVTree()
+        tree._attach_comm(mock_send)
+        scratch = PDVTree()
+        scratch["x"] = 1  # arms the class-level global timer
+        assert PDVTree._global_send_fn is not None
+        timer = PDVTree._global_timer
+        assert timer is not None
+
+        PDVTree._disarm_global_debounce()
+
+        assert timer.finished.is_set()  # cancelled, not just dereferenced
+        assert PDVTree._global_timer is None
+        assert PDVTree._global_pending is False
+        assert PDVTree._global_send_fn is None
+        assert PDVTree._root_tree is None

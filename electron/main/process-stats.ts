@@ -18,10 +18,7 @@
  * scheduling is the caller's responsibility (see kernel-manager.ts).
  */
 
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
-
-const execFileAsync = promisify(execFile);
+import { serverExecFile } from "./server/spawn";
 
 /**
  * Read the resident-set-size (RSS) of a process by PID, in bytes.
@@ -36,7 +33,7 @@ export async function getProcessRssBytes(pid: number): Promise<number | null> {
 
   try {
     if (process.platform === "darwin" || process.platform === "linux") {
-      const { stdout } = await execFileAsync("ps", ["-o", "rss=", "-p", String(pid)], {
+      const { stdout } = await serverExecFile("ps", ["-o", "rss=", "-p", String(pid)], {
         timeout: 2000,
       });
       const kb = parseInt(stdout.trim(), 10);
@@ -45,7 +42,7 @@ export async function getProcessRssBytes(pid: number): Promise<number | null> {
     }
 
     if (process.platform === "win32") {
-      const { stdout } = await execFileAsync(
+      const { stdout } = await serverExecFile(
         "tasklist",
         ["/FI", `PID eq ${pid}`, "/NH", "/FO", "CSV"],
         { timeout: 2000 },

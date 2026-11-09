@@ -17,18 +17,15 @@
  * config.ts — source of user-configured paths
  */
 
-import { execFile, spawn } from "child_process";
-import { promisify } from "util";
 import * as path from "path";
 import * as os from "os";
 import * as fs from "fs";
 import type { PushSender } from "./server/invoke-registry";
 import { getResourcesRoot } from "./server/server-paths";
+import { serverExecFile, serverSpawn } from "./server/spawn";
 import { sanitizedJuliaEnv } from "./julia-discovery";
 import { coreVersion, getAppVersion } from "./pdv-protocol";
 import { parseMajorMinor } from "./python-versions";
-
-const execFileAsync = promisify(execFile);
 
 // ---------------------------------------------------------------------------
 // Types
@@ -281,7 +278,7 @@ export class EnvironmentDetector {
     pythonPath: string
   ): Promise<string | undefined> {
     try {
-      const { stdout, stderr } = await execFileAsync(
+      const { stdout, stderr } = await serverExecFile(
         pythonPath,
         ["--version"],
         { timeout: PROBE_TIMEOUT_MS }
@@ -307,7 +304,7 @@ export class EnvironmentDetector {
     pythonPath: string
   ): Promise<PDVInstallStatus> {
     try {
-      const { stdout } = await execFileAsync(
+      const { stdout } = await serverExecFile(
         pythonPath,
         ["-c", "import pdv; print(pdv.__version__)"],
         { timeout: PROBE_TIMEOUT_MS }
@@ -369,7 +366,7 @@ export class EnvironmentDetector {
       // sanitizedJuliaEnv: probe the runtime's DEFAULT environment — a
       // shell-exported JULIA_PROJECT would resolve PDVKernel from the
       // user's own project instead (review M8).
-      const { stdout } = await execFileAsync(
+      const { stdout } = await serverExecFile(
         juliaPath,
         ["--startup-file=no", "-e", probe],
         { timeout: PROBE_TIMEOUT_MS, env: sanitizedJuliaEnv() }
@@ -396,7 +393,7 @@ export class EnvironmentDetector {
    */
   static async checkIpykernelInstalled(pythonPath: string): Promise<boolean> {
     try {
-      await execFileAsync(
+      await serverExecFile(
         pythonPath,
         ["-c", "import ipykernel"],
         { timeout: PROBE_TIMEOUT_MS }
@@ -420,7 +417,7 @@ export class EnvironmentDetector {
    */
   static async checkIsFreeThreaded(pythonPath: string): Promise<boolean> {
     try {
-      const { stdout } = await execFileAsync(
+      const { stdout } = await serverExecFile(
         pythonPath,
         [
           "-c",
@@ -478,7 +475,13 @@ export class EnvironmentDetector {
   static resolveBundledPDVWheelPath(): string | null {
     const findWheel = (dir: string): string | null => {
       try {
-        const wheel = fs.readdirSync(dir).find((name) => name.endsWith(".whl"));
+        // Skip dotfiles: macOS bsdtar writes AppleDouble metadata entries
+        // ("._pdv_python-….whl") into tarballs, and on a Linux host those
+        // extract as real files that match a bare `endsWith(".whl")` — uv
+        // then dies on "invalid package name" (observed on a real cluster).
+        const wheel = fs
+          .readdirSync(dir)
+          .find((name) => name.endsWith(".whl") && !name.startsWith("."));
         return wheel ? path.join(dir, wheel) : null;
       } catch {
         return null;
@@ -640,7 +643,7 @@ export class EnvironmentDetector {
 
     return new Promise((resolve) => {
       const chunks: string[] = [];
-      const proc = spawn(pythonPath, ["-m", "pip", "install", "--no-color", installPath], {
+      const proc = serverSpawn(pythonPath, ["-m", "pip", "install", "--no-color", installPath], {
         stdio: ["ignore", "pipe", "pipe"],
         timeout: 120_000,
       });
@@ -736,7 +739,7 @@ async function _probeEnv(
   kind: EnvironmentKind
 ): Promise<DetectedEnvironment | null> {
   try {
-    const { stdout, stderr } = await execFileAsync(
+    const { stdout, stderr } = await serverExecFile(
       pythonPath,
       ["--version"],
       { timeout: PROBE_TIMEOUT_MS }
@@ -789,7 +792,7 @@ async function _listCondaEnvs(): Promise<string[]> {
  */
 async function _listCondaEnvsViaCommand(): Promise<string[]> {
   try {
-    const { stdout } = await execFileAsync(
+    const { stdout } = await serverExecFile(
       "conda",
       ["env", "list", "--json"],
       { timeout: CONDA_TIMEOUT_MS }

@@ -36,7 +36,9 @@ export type ActiveDialog =
   | { kind: 'importModule' }
   | { kind: 'saveAs' }
   | { kind: 'newProject' }
-  | { kind: 'newJuliaProject' };
+  | { kind: 'newJuliaProject' }
+  // Connects to a host; it does NOT move the session there. See remoteSlice.
+  | { kind: 'remoteConnect' };
 
 export type SettingsTab = 'general' | 'shortcuts' | 'appearance' | 'runtime' | 'about';
 

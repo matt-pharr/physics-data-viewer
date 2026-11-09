@@ -3,14 +3,15 @@
  *
  * Owns BrowserWindow creation/loading and high-level Electron app events.
  * Session/kernel logic lives in the pdv-server process; this module only
- * needs its supervisor handle (async config reads before the window
- * exists, graceful shutdown on quit).
+ * needs a {@link ServerHandle} (async config reads before the window
+ * exists, graceful shutdown on quit) — and never needs to know whether the
+ * server behind it is local or remote.
  *
  * See Also
  * --------
  * ARCHITECTURE.md §4.1, §11.1
  * index.ts — IPC handler registration and push forwarding
- * shell/server-supervisor.ts — pdv-server process lifecycle
+ * shell/server-supervisor.ts — the ServerHandle contract and local implementation
  */
 
 import { BrowserWindow, app, nativeTheme, type BrowserWindowConstructorOptions } from "electron";
@@ -20,8 +21,12 @@ import * as fsSync from "fs";
 
 import { registerIpcHandlers } from "./index";
 import { initializeAppMenu } from "./menu";
-import { IPC, type PDVConfig } from "./ipc";
-import type { ServerSupervisor } from "./shell/server-supervisor";
+import { IPC } from "./ipc";
+import { readMergedConfig } from "./shell/config-bridge";
+import type { LocalConfigStore } from "./shell/local-config-store";
+import type { ServerHandle } from "./shell/server-supervisor";
+import { RemoteServerHandle } from "./shell/remote-server";
+import { SessionRouter } from "./shell/session-router";
 
 /**
  * Check whether a process with the given PID is currently running.
@@ -123,19 +128,56 @@ async function loadDevUrlWithRetry(
 /**
  * Create and initialize the main BrowserWindow.
  *
- * @param server - Supervised pdv-server handle (already started); used for
+ * @param server - The session's server handle (already started); used for
  *   the pre-window config read and the IPC bridge registration.
+ * @param localConfig - This machine's config half; supplies the appearance
+ *   settings that decide the window's initial background colour.
  * @returns Created BrowserWindow.
  * @throws {Error} When renderer content cannot be loaded or the server is
  *   unreachable for the initial config read.
  */
+/**
+ * The server-closing action for app quit.
+ *
+ * Quitting must never end a REMOTE session: the daemon and its kernel
+ * outliving the client is the whole feature, and the daemon honors the
+ * shutdown invoke — sending it on quit would gracefully kill a 20-hour run
+ * on the cluster because the user pressed Cmd+Q. Local servers are still
+ * shut down (their kernel dies with this machine anyway); remote handles
+ * just close the channel.
+ *
+ * Exported as a unit so the branch is testable without an Electron app.
+ *
+ * @param server - The handle (usually the SessionRouter) fronting the session.
+ * @returns Resolves when the appropriate close has completed.
+ * @throws {Error} Whatever the underlying disconnect/shutdown throws.
+ */
+export function closingForQuit(server: ServerHandle): Promise<void> {
+  const active = server instanceof SessionRouter ? server.active : server;
+  return active instanceof RemoteServerHandle ? active.disconnect() : server.shutdown();
+}
+
+/**
+ * Create the main window and register its IPC surface.
+ *
+ * @param server - Handle fronting the active session (the SessionRouter).
+ * @param localConfig - This machine's half of the config store.
+ * @param createLocalServer - Starts a fresh local pdv-server; used when a
+ *   remote session ends/disconnects and the window returns to local mode.
+ * @returns The created BrowserWindow.
+ * @throws {Error} When the initial config read or window setup fails.
+ */
 export async function createWindow(
-  server: ServerSupervisor
+  server: ServerHandle,
+  localConfig: LocalConfigStore,
+  createLocalServer?: () => Promise<ServerHandle>
 ): Promise<BrowserWindow> {
   // One config snapshot before any window exists: initial background color
-  // and the custom working-dir base for the orphan scan below. The config
-  // lives with the server — the shell holds no ConfigStore.
-  const config = (await server.invoke(IPC.config.get)) as PDVConfig;
+  // (shell-owned — appearance follows the user, not the session's host) and
+  // the custom working-dir base for the orphan scan below (server-owned).
+  // Goes through the same merge the renderer sees; `IPC.config.get` is a
+  // shell channel and is NOT registered on the server.
+  const config = await readMergedConfig(server, localConfig);
 
   const win = new BrowserWindow({
     width: 1440,
@@ -202,8 +244,11 @@ export async function createWindow(
   const resetSessionState = await registerIpcHandlers(
     win,
     server,
+    localConfig,
     path.join(os.homedir(), ".PDV"),
+    app.getPath("userData"),
     setAllowClose,
+    createLocalServer,
   );
 
   // Intercept window close (title-bar X, OS close) so the renderer can
@@ -250,7 +295,19 @@ export async function createWindow(
   // otherwise every macOS close → activate → re-create cycle stacks another
   // handler whose destroyed-window branch flips isQuittingGlobal before the
   // live window's guard has decided whether to block the quit.
+  // A dying renderer is indistinguishable from a user-closed window without
+  // this: on Linux `window-all-closed` then quits the whole app, and the
+  // only trace is a silent exit. Name the killer in the log.
+  win.webContents.on("render-process-gone", (_event, details) => {
+    console.error(
+      `[PDV] renderer process gone: reason=${details.reason} exitCode=${String(details.exitCode)}`
+    );
+  });
+  win.webContents.on("unresponsive", () => {
+    console.error("[PDV] renderer unresponsive");
+  });
   win.on("closed", () => {
+    console.error("[PDV] main window closed");
     app.removeListener("before-quit", beforeQuitGuard);
     // Detach the bridge with the window it belongs to. The handlers close
     // over this BrowserWindow; leaving them attached means a server-side
@@ -337,18 +394,56 @@ export function clearQuitRequestPending(): void {
 /**
  * Register core Electron app events.
  *
- * @param getServer - Lazy getter for the pdv-server supervisor; drives the
+ * @param getServer - Lazy getter for the session's server handle; drives the
  *   graceful shutdown chain (server stops kernels and MCP) during quit.
  * @returns Nothing.
  */
 export function wireAppEvents(
-  getServer: () => ServerSupervisor | null
+  getServer: () => ServerHandle | null
 ): void {
+  // E2E-only quit forensics. CI-Linux showed the app entering a full quit
+  // cycle (before-quit → will-quit) seconds into a remote spec with no code
+  // path of ours calling quit. The initiator is invisible in the event
+  // markers alone, so name it directly: a stack trace for any JS-level
+  // quit/exit (including Playwright's inspector-evaluated `app.quit()`),
+  // and a log line for a POSIX signal, which Chromium otherwise translates
+  // into the same quit cycle without any JS trace.
+  if (process.env.PDV_E2E === "1") {
+    const originalQuit = app.quit.bind(app);
+    const originalExit = app.exit.bind(app);
+    app.quit = (): void => {
+      console.error(
+        `[PDV] app.quit() called:\n${new Error("app.quit tracer").stack ?? "<no stack>"}`
+      );
+      originalQuit();
+    };
+    app.exit = (exitCode?: number): void => {
+      console.error(
+        `[PDV] app.exit(${String(exitCode ?? 0)}) called:\n${new Error("app.exit tracer").stack ?? "<no stack>"}`
+      );
+      originalExit(exitCode);
+    };
+    for (const sig of ["SIGTERM", "SIGINT", "SIGHUP"] as const) {
+      process.on(sig, () => {
+        console.error(`[PDV] received ${sig}; quitting`);
+        originalQuit();
+      });
+    }
+  }
   app.on("before-quit", () => {
+    console.error("[PDV] before-quit");
     isQuittingGlobal = true;
+  });
+  // A GPU or utility process dying can take the window down with no
+  // renderer-level trace — name it, same rationale as render-process-gone.
+  app.on("child-process-gone", (_event, details) => {
+    console.error(
+      `[PDV] child process gone: type=${details.type} reason=${details.reason} exitCode=${String(details.exitCode)}`
+    );
   });
 
   app.on("window-all-closed", () => {
+    console.error("[PDV] window-all-closed");
     // On darwin we normally keep the app alive after the window closes (so
     // Cmd+W behaves like a typical mac app). But if a real quit is in
     // progress, we must actually exit so `will-quit` runs and the server
@@ -364,14 +459,14 @@ export function wireAppEvents(
   // kernel. The server owns kernel shutdown, MCP stop, and working-dir
   // cleanup; the supervisor escalates if it hangs.
   app.on("will-quit", (event) => {
+    console.error("[PDV] will-quit");
     const server = getServer();
     if (!server || isShuttingDownGlobal) {
       return;
     }
     event.preventDefault();
     isShuttingDownGlobal = true;
-    server
-      .shutdown()
+    closingForQuit(server)
       .catch((error: unknown) => {
         console.error("[PDV] Failed to shutdown pdv-server during quit:", error);
       })

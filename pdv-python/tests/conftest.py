@@ -44,6 +44,25 @@ def _reset_autosave_cache() -> Generator[None, None, None]:
     clear_autosave_cache()
 
 
+@pytest.fixture(autouse=True)
+def _reset_global_debounce() -> Generator[None, None, None]:
+    """Clear PDVTree's class-level debounce state between tests.
+
+    ``PDVTree._attach_comm`` installs a class-level ``_global_send_fn``;
+    tests that attach without detaching leave it armed, and any later
+    mutation of a *non-root* tree then spawns a real
+    ``Timer(0.1, _flush_global)`` whose send fires ~100 ms later — into
+    whatever ``comms_mod._comm`` patch window happens to be open at that
+    moment. That stray ``pdv.tree.changed`` envelope is the dependency-sweep
+    flake. Cancelling and clearing here makes every test start and end with
+    the debounce machinery disarmed, regardless of test hygiene.
+    """
+    from pdv.tree import PDVTree
+
+    yield
+    PDVTree._disarm_global_debounce()
+
+
 @pytest.fixture()
 def tmp_working_dir() -> Generator[str, None, None]:
     """Yield a freshly created temporary working directory.

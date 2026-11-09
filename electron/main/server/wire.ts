@@ -43,6 +43,7 @@ import {
 import { registerAutosaveIpcHandlers } from "../ipc-register-autosave";
 import { readConfig, registerConfigIpcHandlers } from "../ipc-register-config";
 import { registerEnvironmentIpcHandlers } from "../ipc-register-environment";
+import { registerFileBrowseIpcHandlers } from "../ipc-register-file-browse";
 import { registerGuiFilesIpcHandlers } from "../ipc-register-gui-files";
 import {
   registerKernelIpcHandlers,
@@ -458,6 +459,15 @@ export interface WireHandle {
   /** Live MCP server status (valid before start: `running` is false). */
   getMcpStatus: () => McpStatus;
   /**
+   * Persist everything preservable before an idle shutdown (the session
+   * daemon's autosave gate). Delegates to the autosave registrar's
+   * `autosaveForShutdown`: a fresh `.autosave` snapshot with code cells
+   * from the working-dir mirror, true with nothing to save (no kernel, or
+   * a dead one), false — blocking the shutdown — when a live kernel's
+   * snapshot failed.
+   */
+  autosaveForShutdown: () => Promise<boolean>;
+  /**
    * Resolve a tree path to its backing file via the kernel (query socket
    * first, comm fallback). Returns null when the node has no backing file.
    */
@@ -823,6 +833,7 @@ export function wireServer(ctx: ServerContext): WireHandle {
   });
 
   registerGuiFilesIpcHandlers({ commRouter });
+  registerFileBrowseIpcHandlers();
 
   // When kernel goes idle and an autosave was deferred, trigger it now.
   // Tracked in `trackedExecutionStateListener` so unwireServer can detach
@@ -963,6 +974,7 @@ export function wireServer(ctx: ServerContext): WireHandle {
       projectDir: activeProjectDir,
     }),
     getMcpStatus: () => mcp.status,
+    autosaveForShutdown: autosave.autosaveForShutdown,
     resolveTreeFile: async (treePath: string): Promise<string | null> => {
       const response = await queryRequest(PDVMessageType.TREE_RESOLVE_FILE, {
         path: treePath,

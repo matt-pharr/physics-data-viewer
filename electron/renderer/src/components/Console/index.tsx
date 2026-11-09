@@ -59,15 +59,30 @@ const PIN_THRESHOLD_PX = 4;
 export const Console: React.FC<ConsoleProps> = ({ onClear, onInstallPackage }) => {
   const logs = useStore((s) => s.logs);
   const contentRef = useRef<HTMLDivElement>(null);
+  const innerRef = useRef<HTMLDivElement>(null);
   // True when the viewport is at (or within PIN_THRESHOLD_PX of) the
   // bottom. Initialized true so the first batch of output scrolls into
   // view; updated on every user scroll. Stored in a ref because it's
   // read inside a layout effect and shouldn't trigger re-render.
   const pinnedToBottomRef = useRef(true);
+  // Last scrollHeight this component has accounted for. A scroll event that
+  // arrives with a *different* scrollHeight is content growth (an inline
+  // image decoding, ANSI reflow), not the user scrolling: Chrome's scroll
+  // anchoring adjusts scrollTop when content grows and fires a scroll event
+  // that used to latch the pin off — so the first inline plot permanently
+  // broke auto-scroll (found by the B4 simulated-user audit).
+  const knownScrollHeightRef = useRef(0);
 
   const handleScroll = useCallback(() => {
     const el = contentRef.current;
     if (!el) return;
+    if (el.scrollHeight !== knownScrollHeightRef.current) {
+      knownScrollHeightRef.current = el.scrollHeight;
+      if (pinnedToBottomRef.current) {
+        el.scrollTop = el.scrollHeight;
+      }
+      return;
+    }
     const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
     pinnedToBottomRef.current = distance <= PIN_THRESHOLD_PX;
   }, []);
@@ -83,7 +98,27 @@ export const Console: React.FC<ConsoleProps> = ({ onClear, onInstallPackage }) =
     if (pinnedToBottomRef.current) {
       el.scrollTop = el.scrollHeight;
     }
+    knownScrollHeightRef.current = el.scrollHeight;
   }, [logs]);
+
+  // Content can also grow without any scroll event (no anchoring candidate
+  // above the viewport — e.g. an image decoding at the very bottom). Watch
+  // the log list itself and re-pin, so a plot landing while pinned always
+  // scrolls into view instead of appearing off-screen.
+  useLayoutEffect(() => {
+    const el = contentRef.current;
+    const inner = innerRef.current;
+    // Electron always provides ResizeObserver; jsdom (unit tests) does not.
+    if (!el || !inner || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(() => {
+      knownScrollHeightRef.current = el.scrollHeight;
+      if (pinnedToBottomRef.current) {
+        el.scrollTop = el.scrollHeight;
+      }
+    });
+    observer.observe(inner);
+    return () => observer.disconnect();
+  }, []);
 
   return (
     <section className="console-pane">
@@ -97,21 +132,25 @@ export const Console: React.FC<ConsoleProps> = ({ onClear, onInstallPackage }) =
       </header>
 
       <div className="console-content" ref={contentRef} onScroll={handleScroll}>
-        {logs.length === 0 ? (
-          <div className="console-empty">
-            <p>No output yet</p>
-            <p className="hint">Execution results will appear here</p>
-          </div>
-        ) : (
-          logs.map((log, index) => (
-            <LogEntryView
-              key={log.id}
-              log={log}
-              index={index + 1}
-              onInstallPackage={onInstallPackage}
-            />
-          ))
-        )}
+        {/* Plain block wrapper: gives the ResizeObserver one element whose
+            height tracks the full log list. */}
+        <div ref={innerRef}>
+          {logs.length === 0 ? (
+            <div className="console-empty">
+              <p>No output yet</p>
+              <p className="hint">Execution results will appear here</p>
+            </div>
+          ) : (
+            logs.map((log, index) => (
+              <LogEntryView
+                key={log.id}
+                log={log}
+                index={index + 1}
+                onInstallPackage={onInstallPackage}
+              />
+            ))
+          )}
+        </div>
       </div>
     </section>
   );

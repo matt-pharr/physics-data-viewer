@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
+import { pickServerPath } from '../services/pick-path';
 import { invalidateNamespace } from '../queries/invalidation';
-import type { CellTab, Config, LogEntry, MenuActionPayload } from '../types';
+import { useStore } from '../store';
+import type { CellTab, Config, LogEntry, MenuActionPayload, RecentProjectEntry } from '../types';
 import type { ProgressPayload } from '../types/pdv';
-import { normalizeRecentProjects } from './app-utils';
+import { isSameRecentProject, normalizeRecentProjects } from './app-utils';
 import { MAX_RECENT_PROJECTS } from './constants';
 
 /** Options for {@link useProjectWorkflow}. Orchestrates save/load/new project flows. */
@@ -29,6 +31,9 @@ interface UseProjectWorkflowOptions {
   setModulesRefreshToken: Dispatch<SetStateAction<number>>;
   /** Active kernel id — used to invalidate namespace queries after load. */
   currentKernelId: string | null;
+  /** Active kernel language — recorded into recents so remote entries
+   *  (whose manifest cannot be peeked offline) still show a language. */
+  activeLanguage: 'python' | 'julia';
   /** Clears or updates save/load progress state. */
   setProgress: Dispatch<SetStateAction<ProgressPayload | null>>;
   /** Sets error message if save/load fails. */
@@ -77,7 +82,10 @@ export function useProjectWorkflow(options: UseProjectWorkflowOptions) {
     loadedProjectTabsRef,
     normalizeLoadedCodeCells,
     flushDirtyNotes,
+    activeLanguage,
   } = options;
+
+  const remoteHost = useStore((s) => s.remoteHost);
 
   // Refs so handleSaveProject always reads the latest cell state, even when
   // called from memoised callbacks.
@@ -87,8 +95,19 @@ export function useProjectWorkflow(options: UseProjectWorkflowOptions) {
   useEffect(() => { activeCellTabRef.current = activeCellTab; }, [activeCellTab]);
 
   const rememberRecentProject = useCallback(async (projectDir: string) => {
+    // Qualify with the host the session runs on: the same path on a cluster
+    // and on this machine are different projects, and opening the wrong one
+    // is a confusing failure rather than an obvious one.
+    const entry: RecentProjectEntry = {
+      host: remoteHost,
+      path: projectDir,
+      language: activeLanguage,
+    };
     const recentProjects = normalizeRecentProjects(config?.recentProjects);
-    const nextRecentProjects = [projectDir, ...recentProjects.filter((entry) => entry !== projectDir)].slice(0, MAX_RECENT_PROJECTS);
+    const nextRecentProjects = [
+      entry,
+      ...recentProjects.filter((existing) => !isSameRecentProject(existing, entry)),
+    ].slice(0, MAX_RECENT_PROJECTS);
     try {
       const updated = await window.pdv.config.set({ recentProjects: nextRecentProjects });
       setConfig(updated);
@@ -98,7 +117,7 @@ export function useProjectWorkflow(options: UseProjectWorkflowOptions) {
     if (window.pdv?.menu) {
       await window.pdv.menu.updateRecentProjects(nextRecentProjects);
     }
-  }, [config, setConfig]);
+  }, [config, remoteHost, activeLanguage, setConfig]);
 
   const handleSaveProject = useCallback(async (options?: { saveAs?: boolean; directory?: string; projectName?: string }): Promise<boolean> => {
     if (kernelStatus !== 'ready') {
@@ -193,7 +212,7 @@ export function useProjectWorkflow(options: UseProjectWorkflowOptions) {
         const defaultPath = currentProjectDir
           ? currentProjectDir.replace(/\/[^/]+\/?$/, '')
           : undefined;
-        pickedDir = await window.pdv.files.pickDirectory(defaultPath) ?? undefined;
+        pickedDir = await pickServerPath({ mode: 'directory', title: 'Open a project folder', defaultPath }) ?? undefined;
       }
       if (!pickedDir) {
         return;

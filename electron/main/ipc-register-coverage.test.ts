@@ -118,10 +118,16 @@ import { registerModulesIpcHandlers } from "./ipc-register-modules";
 import { registerProjectIpcHandlers } from "./ipc-register-project";
 import { registerAppStateIpcHandlers } from "./ipc-register-app-state";
 import { registerConfigIpcHandlers } from "./ipc-register-config";
+import { registerConfigBridge } from "./shell/config-bridge";
+import { LocalConfigStore } from "./shell/local-config-store";
+import type { ServerHandle } from "./shell/server-supervisor";
+import { registerFileBrowseIpcHandlers } from "./ipc-register-file-browse";
 import { registerGuiFilesIpcHandlers } from "./ipc-register-gui-files";
 import { registerModuleWindowIpcHandlers } from "./ipc-register-module-windows";
 import { registerGuiEditorIpcHandlers } from "./ipc-register-gui-editor";
 import { registerLaunchersIpcHandlers } from "./ipc-register-launchers";
+import { registerRemoteIpcHandlers } from "./ipc-register-remote";
+import type { RemoteConnectionManager } from "./remote/remote-connection";
 import { listRegisteredInvokeChannels } from "./server/invoke-registry";
 import {
   createBrowserWindowMock,
@@ -273,7 +279,31 @@ function setupAll(): void {
     },
   });
   registerConfigIpcHandlers({ configStore: config.store });
+  // `config:*` are shell channels served by the bridge, which merges the
+  // server half (registered just above, on its internal channels) with the
+  // shell-owned one.
+  // `fs` is mocked above, so this touches no real disk: construction only
+  // calls mkdirSync + existsSync, and nothing here writes.
+  registerConfigBridge({
+    server: { invoke: async () => ({}) } as unknown as ServerHandle,
+    localConfig: new LocalConfigStore("/tmp/pdv-coverage-local-config"),
+  });
+  // Injected manager: the real one would harvest ~/.ssh/config and spawn ssh.
+  // This test only asserts that every channel has a handler.
+  registerRemoteIpcHandlers({
+    win: win.win,
+    controlDir: "/tmp/pdv-coverage-ssh-control",
+    manager: {
+      listHosts: async () => [],
+      connect: async () => ({ ok: false, failure: "test", message: "" }),
+      respond: () => {},
+      cancel: () => {},
+      disconnect: async () => {},
+      getStatus: () => ({ phase: "idle" as const, host: null, attemptId: null }),
+    } as unknown as RemoteConnectionManager,
+  });
   registerGuiFilesIpcHandlers({ commRouter: commRouter.router });
+  registerFileBrowseIpcHandlers();
   registerModuleWindowIpcHandlers({
     moduleWindowManager: createModuleWindowManagerMock(),
     mainWindow: win.win,

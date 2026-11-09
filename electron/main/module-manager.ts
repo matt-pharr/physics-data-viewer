@@ -16,11 +16,9 @@
  * - Dependency auto-installation.
  */
 
-import { execFile } from "child_process";
 import * as fs from "fs/promises";
 import { statSync } from "fs";
 import * as path from "path";
-import { promisify } from "util";
 
 import { atomicWriteJson } from "./atomic-write";
 
@@ -51,8 +49,7 @@ import {
 } from "./modules/manifest-utils";
 import type { NodeDescriptor } from "./pdv-protocol";
 import { getResourcesRoot } from "./server/server-paths";
-
-const execFileAsync = promisify(execFile);
+import { serverExecFile } from "./server/spawn";
 
 /** Current on-disk metadata index schema version. */
 const MODULE_INDEX_SCHEMA_VERSION = "1.0";
@@ -1287,7 +1284,7 @@ export class ModuleManager {
     cwd?: string
   ): Promise<{ stdout: string; stderr: string }> {
     try {
-      const { stdout, stderr } = await execFileAsync("git", args, cwd ? { cwd } : undefined);
+      const { stdout, stderr } = await serverExecFile("git", args, cwd ? { cwd } : undefined);
       return { stdout: stdout.toString(), stderr: stderr.toString() };
     } catch (error) {
       const err = error as {

@@ -33,9 +33,9 @@
  *    selector and the project-load flow own that policy.
  */
 
-import { spawn } from "child_process";
 import * as fs from "fs";
 import * as os from "os";
+import { serverSpawn } from "./server/spawn";
 import * as path from "path";
 import type { PushSender } from "./server/invoke-registry";
 
@@ -391,7 +391,7 @@ function runStreamed(
 ): Promise<EnvironmentInstallResult> {
   return new Promise((resolve) => {
     const chunks: string[] = [];
-    const proc = spawn(file, args, {
+    const proc = serverSpawn(file, args, {
       env: { ...process.env, NO_COLOR: "1", ...opts.env },
       stdio: ["ignore", "pipe", "pipe"],
       timeout: ACQUIRE_TIMEOUT_MS,

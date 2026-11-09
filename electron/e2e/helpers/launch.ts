@@ -50,6 +50,73 @@ export interface LaunchedApp {
 }
 
 
+/**
+ * Kill any pdv-server session daemon this launch created under its temp
+ * HOME. Daemons are DESIGNED to outlive the app (session survival is the
+ * feature), and the idle cap can never reap them here: idle shutdown
+ * autosaves first, the autosave target lives in this temp HOME — deleted
+ * by cleanup — and a failed autosave blocks shutdown by design. Without
+ * this, every remote spec leaks an immortal daemon + kernel pair on the
+ * dev machine (observed: eleven pairs, the oldest eleven days).
+ *
+ * The daemon is a setsid group leader and its kernels share its process
+ * group, so signalling the negative pid reaps the whole family at once.
+ */
+async function reapSessionDaemons(homeDir: string): Promise<void> {
+  // Layout owned by main/server/session-paths.ts (REMOTE_ROOT + run/sessions).
+  // If that layout ever moves, the canary below makes this reap fail loudly
+  // in the test log instead of silently regressing back to leaked daemons.
+  const sessionsDir = path.join(homeDir, ".pdv-server", "run", "sessions");
+  let entries: string[];
+  try {
+    entries = await fs.readdir(sessionsDir);
+  } catch {
+    try {
+      await fs.access(path.join(homeDir, ".pdv-server"));
+      console.error(
+        `[e2e] ${homeDir}/.pdv-server exists but run/sessions does not — ` +
+          `has the session-paths layout moved? Daemon reap skipped.`,
+      );
+    } catch {
+      // No daemon ever started under this HOME — the common local-spec case.
+    }
+    return;
+  }
+  for (const entry of entries) {
+    try {
+      const meta = JSON.parse(
+        await fs.readFile(path.join(sessionsDir, entry, "session.json"), "utf8"),
+      ) as { pid?: number };
+      if (typeof meta.pid !== "number" || !Number.isInteger(meta.pid) || meta.pid <= 1) {
+        continue;
+      }
+      try {
+        // Liveness probe first: signalling a recycled pgid would hit an
+        // unrelated process group. kill(pid, 0) narrows the window to
+        // genuinely-alive daemons recorded seconds ago by this launch.
+        process.kill(meta.pid, 0);
+      } catch {
+        continue; // Daemon already exited.
+      }
+      try {
+        process.kill(-meta.pid, "SIGTERM");
+      } catch {
+        continue; // Already gone (or a platform without process groups).
+      }
+      // Brief grace, then make sure: the graceful stop can park on the
+      // (now doomed) autosave, and cleanup must stay bounded.
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      try {
+        process.kill(-meta.pid, "SIGKILL");
+      } catch {
+        // Exited during the grace period — the good case.
+      }
+    } catch {
+      // Unreadable metadata — nothing identifiable to reap for this entry.
+    }
+  }
+}
+
 async function seedPreferences(
   homeDir: string,
   pythonPath: string,
@@ -169,11 +236,40 @@ export async function launchPDV(opts: LaunchOptions = {}): Promise<LaunchedApp> 
   await window.waitForLoadState("domcontentloaded");
 
   const cleanup = async (): Promise<void> => {
+    // electronApp.close() must be bounded. On CI Linux, closing an app whose
+    // session was REMOTE at close time hung forever: the quit tracer showed
+    // the app reaching app.exit(0) 3ms after Playwright's inspector-evaluated
+    // app.quit() — a remote disconnect is instant, unlike the ~1s local
+    // server shutdown — and close()'s promise never resolved, eating the
+    // whole test budget inside afterEach and failing specs whose bodies had
+    // already passed. Race it against a timeout, record whether the Electron
+    // process is genuinely still alive (an app that lingers after
+    // app.exit(0) would be a real bug, not a Playwright close race), and
+    // fall back to SIGKILL either way.
+    const proc = app.process();
+    let closeTimer: NodeJS.Timeout | undefined;
     try {
-      await app.close();
+      const outcome = await Promise.race([
+        app.close().then(() => "closed" as const),
+        new Promise<"timeout">((resolve) => {
+          closeTimer = setTimeout(() => resolve("timeout"), 15_000);
+        }),
+      ]);
+      if (outcome === "timeout") {
+        console.error(
+          `[e2e] electronApp.close() did not resolve within 15s; ` +
+            `process exitCode=${String(proc.exitCode)} killed=${String(proc.killed)}; killing it`,
+        );
+        proc.kill("SIGKILL");
+      }
     } catch {
       // Already closed (test may have done it explicitly).
+    } finally {
+      if (closeTimer) clearTimeout(closeTimer);
     }
+    // Before deleting the temp HOME (session.json — the pid record — lives
+    // in it), reap any session daemon this launch spawned.
+    await reapSessionDaemons(homeDir);
     // app.close() resolves before the OS has necessarily flushed every last
     // write the closing session made under HOME/.PDV (a final autosave, the
     // restart-reload's file copies). If one lands mid-walk, a plain recursive

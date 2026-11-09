@@ -30,7 +30,10 @@ vi.mock("child_process", () => childProcessMocks);
 
 import type { PDVConfig } from "./config";
 import { IPC } from "./ipc";
-import { registerLaunchersIpcHandlers } from "./ipc-register-launchers";
+import {
+  registerLaunchersIpcHandlers,
+  type RemoteLauncherContext,
+} from "./ipc-register-launchers";
 
 function getHandler(channel: string): (event: unknown, ...args: unknown[]) => unknown {
   const handler = ipcRegistry.handlers.get(channel);
@@ -43,6 +46,7 @@ interface SetupOverrides {
   activeKernelId?: string | null;
   workingDirs?: [string, string][];
   resolveTreeFile?: (treePath: string) => Promise<string | null>;
+  remoteContext?: RemoteLauncherContext | null;
 }
 
 function setup(overrides: SetupOverrides = {}): void {
@@ -65,8 +69,15 @@ function setup(overrides: SetupOverrides = {}): void {
       }) as PDVConfig,
     getMcpStatus: async () => null,
     resolveTreeFile: overrides.resolveTreeFile ?? (async () => null),
+    getRemoteContext: () => overrides.remoteContext ?? null,
   });
 }
+
+/** A connected remote session on feyn with a PDV-owned master. */
+const FEYN: RemoteLauncherContext = {
+  host: "feyn",
+  control: { host: "feyn", controlPath: "/tmp/ctl/m-ab" },
+};
 
 beforeEach(() => {
   ipcRegistry.handlers.clear();
@@ -154,5 +165,192 @@ describe("script:edit", () => {
       ["/tmp/wd/scripts/demo.py"],
       expect.objectContaining({ detached: true, stdio: "ignore" }),
     );
+  });
+});
+
+describe("remote routing", () => {
+  it("script:edit routes a Remote-SSH-capable editor through --remote, never a bare cluster path", async () => {
+    setup({
+      remoteContext: FEYN,
+      config: { launchers: { editor: { fileCommand: "code {}" } } },
+      resolveTreeFile: async () => "/u/mp/proj/tree/ab12/run.py",
+    });
+    const result = (await getHandler(IPC.script.edit)({}, "k1", "scripts.run")) as {
+      success: boolean;
+    };
+    expect(result.success).toBe(true);
+    expect(childProcessMocks.spawn).toHaveBeenCalledWith(
+      "code",
+      ["--remote", "ssh-remote+feyn", "/u/mp/proj/tree/ab12/run.py"],
+      expect.objectContaining({ detached: true, stdio: "ignore" }),
+    );
+  });
+
+  it("script:edit wraps a TUI editor in the terminal preset running ssh -t over the master", async () => {
+    setup({
+      remoteContext: FEYN,
+      config: {
+        launchers: {
+          editor: { fileCommand: "vim {}" },
+          terminal: { preset: "kitty" },
+        },
+      },
+      resolveTreeFile: async () => "/u/mp/f.py",
+    });
+    const result = (await getHandler(IPC.script.edit)({}, "k1", "scripts.f")) as {
+      success: boolean;
+    };
+    expect(result.success).toBe(true);
+    // kitty on darwin: open -na kitty --args -- {cmd}; cmd = the ssh argv.
+    const [file, args] = childProcessMocks.spawn.mock.calls[0] as unknown as [
+      string,
+      string[],
+    ];
+    const argv = [file, ...args].join(" ");
+    expect(argv).toContain("ssh -t");
+    expect(argv).toContain(`ControlPath="/tmp/ctl/m-ab"`);
+    expect(argv).toContain("feyn");
+    expect(argv).toContain(`'vim' '/u/mp/f.py'`);
+  });
+
+  it("script:edit refuses an editor with no remote story instead of spawning", async () => {
+    setup({
+      remoteContext: FEYN,
+      config: { launchers: { editor: { fileCommand: "subl {}" } } },
+      resolveTreeFile: async () => "/u/mp/f.py",
+    });
+    const result = (await getHandler(IPC.script.edit)({}, "k1", "scripts.f")) as {
+      success: boolean;
+      error?: string;
+    };
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("subl");
+    expect(childProcessMocks.spawn).not.toHaveBeenCalled();
+  });
+
+  it("script:edit refuses ssh-carried launches while the connection is down", async () => {
+    setup({
+      remoteContext: { host: "feyn", control: null },
+      config: { launchers: { editor: { fileCommand: "vim {}" } } },
+      resolveTreeFile: async () => "/u/mp/f.py",
+    });
+    const result = (await getHandler(IPC.script.edit)({}, "k1", "scripts.f")) as {
+      success: boolean;
+      error?: string;
+    };
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/reconnect/i);
+    expect(childProcessMocks.spawn).not.toHaveBeenCalled();
+  });
+
+  it("openWorkingDir routes the dir through --remote too", async () => {
+    setup({ remoteContext: FEYN });
+    const result = (await getHandler(IPC.launchers.openWorkingDir)({})) as {
+      success: boolean;
+    };
+    expect(result.success).toBe(true);
+    expect(childProcessMocks.spawn).toHaveBeenCalledWith(
+      "code",
+      ["--remote", "ssh-remote+feyn", "/tmp/wd"],
+      expect.any(Object),
+    );
+  });
+
+  it("openAgent refuses in a remote session BEFORE any mcp/config work", async () => {
+    setup({ remoteContext: FEYN });
+    const result = (await getHandler(IPC.launchers.openAgent)({})) as {
+      success: boolean;
+      error?: string;
+    };
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/remote sessions/);
+    expect(childProcessMocks.spawn).not.toHaveBeenCalled();
+  });
+});
+
+describe("launchers.openTerminal", () => {
+  it("opens the terminal preset around a local login shell cd'ed to the working dir", async () => {
+    setup({ config: { launchers: { terminal: { preset: "kitty" } } } });
+    const result = (await getHandler(IPC.launchers.openTerminal)({})) as {
+      success: boolean;
+    };
+    expect(result.success).toBe(true);
+    const [file, args] = childProcessMocks.spawn.mock.calls[0] as unknown as [
+      string,
+      string[],
+    ];
+    const argv = [file, ...args].join(" ");
+    expect(argv).toContain("sh -c");
+    expect(argv).toContain("cd '/tmp/wd'; exec");
+  });
+
+  it("pins ssh-carried launches to the recorded session node", async () => {
+    setup({
+      remoteContext: { ...FEYN, hostNameOverride: "feynman.ap.columbia.edu" },
+      config: { launchers: { terminal: { preset: "kitty" } } },
+    });
+    const result = (await getHandler(IPC.launchers.openTerminal)({})) as {
+      success: boolean;
+    };
+    expect(result.success).toBe(true);
+    const [file, args] = childProcessMocks.spawn.mock.calls[0] as unknown as [
+      string,
+      string[],
+    ];
+    expect([file, ...args].join(" ")).toContain("HostName=feynman.ap.columbia.edu");
+  });
+
+  it("remotely runs ssh -t to a login shell in the session working dir", async () => {
+    setup({
+      remoteContext: FEYN,
+      config: { launchers: { terminal: { preset: "kitty" } } },
+    });
+    const result = (await getHandler(IPC.launchers.openTerminal)({})) as {
+      success: boolean;
+    };
+    expect(result.success).toBe(true);
+    const [file, args] = childProcessMocks.spawn.mock.calls[0] as unknown as [
+      string,
+      string[],
+    ];
+    const argv = [file, ...args].join(" ");
+    expect(argv).toContain("ssh -t");
+    expect(argv).toContain("feyn");
+    expect(argv).toContain("cd '/tmp/wd'; exec");
+  });
+
+  it("refuses when the terminal preset is 'none'", async () => {
+    setup({ config: { launchers: { terminal: { preset: "none" } } } });
+    const result = (await getHandler(IPC.launchers.openTerminal)({})) as {
+      success: boolean;
+      error?: string;
+    };
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/'None'/);
+    expect(childProcessMocks.spawn).not.toHaveBeenCalled();
+  });
+
+  it("refuses remotely while the connection is down instead of falling back to local", async () => {
+    setup({
+      remoteContext: { host: "feyn", control: null },
+      config: { launchers: { terminal: { preset: "kitty" } } },
+    });
+    const result = (await getHandler(IPC.launchers.openTerminal)({})) as {
+      success: boolean;
+      error?: string;
+    };
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/reconnect/i);
+    expect(childProcessMocks.spawn).not.toHaveBeenCalled();
+  });
+
+  it("returns an error when no kernel is active", async () => {
+    setup({ activeKernelId: null });
+    const result = (await getHandler(IPC.launchers.openTerminal)({})) as {
+      success: boolean;
+      error?: string;
+    };
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("No active kernel");
   });
 });

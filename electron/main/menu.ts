@@ -15,10 +15,11 @@
 
 import { app, BrowserWindow, dialog, Menu, shell, type MenuItemConstructorOptions } from "electron";
 
+import { normalizeRecentProjects, type RecentProjectEntry } from "./config";
 import { type AppMenuTopLevel, IPC, type MenuActionPayload, type MenuEnabledState } from "./ipc";
 
 let currentWindow: BrowserWindow | null = null;
-let recentProjects: string[] = [];
+let recentProjects: RecentProjectEntry[] = [];
 let menuEnabledState: MenuEnabledState = {};
 
 // Forward a menu action to the renderer when a window is available.
@@ -34,16 +35,19 @@ function buildOpenRecentSubmenu(): MenuItemConstructorOptions[] {
   if (recentProjects.length === 0) {
     return [{ label: "No Recent Projects", enabled: false }];
   }
-  const items: MenuItemConstructorOptions[] = recentProjects.map((projectPath) => {
+  const items: MenuItemConstructorOptions[] = recentProjects.map((entry) => {
     // Show the folder name as the label, with the full path as a sublabel.
-    const folderName = projectPath.split("/").filter(Boolean).pop() ?? projectPath;
+    // Remote entries carry their host in both, so two same-named projects on
+    // different machines are distinguishable at a glance.
+    const folderName = entry.path.split("/").filter(Boolean).pop() ?? entry.path;
     return {
-      label: folderName,
-      sublabel: projectPath,
+      label: entry.host ? `${folderName} — ${entry.host}` : folderName,
+      sublabel: entry.host ? `${entry.host}:${entry.path}` : entry.path,
       click: () =>
         sendMenuAction({
           action: "project:openRecent",
-          path: projectPath,
+          path: entry.path,
+          host: entry.host,
         }),
     };
   });
@@ -93,6 +97,23 @@ function buildTemplate(): MenuItemConstructorOptions[] {
           label: "Open Recent",
           submenu: buildOpenRecentSubmenu(),
         },
+        // Off unless PDV_REMOTE=1. The whole path now works — connect,
+        // bootstrap, and move the session onto the host — but every dialog
+        // that picks a server-side path is still a *native* dialog, so it
+        // browses the laptop's filesystem while the session lives on the
+        // cluster. Opening or saving a project, or choosing an interpreter,
+        // would silently point at the wrong machine. It stays hidden until
+        // the remote path picker lands.
+        ...(process.env.PDV_REMOTE === "1"
+          ? ([
+              { type: "separator" },
+              {
+                id: "remote:connect",
+                label: "Connect to Remote Host…",
+                click: () => sendMenuAction({ action: "remote:connect" }),
+              },
+            ] as Electron.MenuItemConstructorOptions[])
+          : []),
         { type: "separator" },
         {
           id: "project:save",
@@ -233,21 +254,12 @@ export function updateMenuEnabled(state: MenuEnabledState): void {
 /**
  * Update the "Open Recent" menu entries and refresh the native app menu.
  *
- * @param paths - Candidate recent project paths ordered by recency.
+ * @param entries - Candidate recent projects ordered by recency. A legacy
+ *   `string[]` is accepted and treated as entries on this machine.
  * @returns Nothing.
  */
-export function updateRecentProjectsMenu(paths: string[]): void {
-  const unique = new Set<string>();
-  const normalized: string[] = [];
-  for (const entry of paths) {
-    if (typeof entry !== "string") continue;
-    const trimmed = entry.trim();
-    if (!trimmed || unique.has(trimmed)) continue;
-    unique.add(trimmed);
-    normalized.push(trimmed);
-    if (normalized.length >= 10) break;
-  }
-  recentProjects = normalized;
+export function updateRecentProjectsMenu(entries: unknown): void {
+  recentProjects = normalizeRecentProjects(entries);
   if (app.isReady()) {
     applyMenu();
   }

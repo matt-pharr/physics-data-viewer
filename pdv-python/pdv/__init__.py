@@ -699,12 +699,15 @@ def bootstrap(ip=None):
         except Exception:  # noqa: BLE001 — never let bootstrap fail on this
             pass
 
-    # Configure a non-blocking interactive matplotlib backend so that
-    # plt.show() opens native windows rather than falling back to the
-    # ipykernel default (inline/Agg), which would silently swallow plots.
-    # This must run before any `import matplotlib.pyplot` in user code.
-    # Users can still override with %matplotlib <backend> after bootstrap.
-    _configure_matplotlib()
+    # Configure a matplotlib backend through IPython's enable_matplotlib
+    # machinery (event-loop integration included, so windows actually work),
+    # with display probing and subprocess pre-flight so a dead or hostile
+    # display can never abort the kernel. Falls back to the inline backend.
+    # Must run before any `import matplotlib.pyplot` in user code. Users can
+    # still override with %matplotlib <backend>, which mpl_config guards.
+    from pdv import mpl_config  # noqa: PLC0415
+
+    mpl_config.configure(ip)
 
     # Built-in double-click plot handlers (ndarray / Series / DataFrame /
     # DataArray) register lazily: the handler-registry lookups in
@@ -724,102 +727,3 @@ def bootstrap(ip=None):
             pass
 
     comms_mod._bootstrapped = True
-
-
-def _configure_matplotlib() -> None:
-    """Set a sensible default matplotlib backend for native-mode PDV.
-
-    Tries platform-appropriate interactive backends in order.  If none are
-    available, falls back to Agg and monkey-patches ``plt.show()`` so that
-    figures are emitted as ``display_data`` iopub messages and appear inline
-    in the PDV console.
-
-    Silently skips if matplotlib is not installed.
-    """
-    import sys  # noqa: PLC0415
-
-    try:
-        import matplotlib  # noqa: PLC0415
-    except ImportError:
-        return
-
-    # If a non-trivial backend is already configured (e.g. user's matplotlibrc
-    # or a previous import of pyplot), respect it and do nothing.
-    current = matplotlib.get_backend().lower()
-    _inline_backends = (
-        "agg",
-        "module://matplotlib_inline.backend_inline",
-        "module://ipykernel.pylab.backend_inline",
-        "",
-    )
-    if current not in _inline_backends:
-        return
-
-    if sys.platform == "darwin":
-        candidates = ["MacOSX", "TkAgg"]
-    elif sys.platform.startswith("win"):
-        candidates = ["TkAgg", "Qt5Agg"]
-    else:
-        candidates = ["Qt5Agg", "TkAgg", "GTK4Agg"]
-
-    for backend in candidates:
-        try:
-            matplotlib.use(backend)
-            # Enable interactive mode so plt.show() is non-blocking — the
-            # plot window opens and the kernel returns to idle immediately.
-            import matplotlib.pyplot as _plt  # noqa: PLC0415
-
-            _plt.ion()
-            return
-        except Exception:
-            continue
-
-    # No interactive backend available.  Stay on Agg and patch plt.show() so
-    # that figures are sent to the PDV console as inline images.
-    matplotlib.use("Agg")
-    _patch_plt_show_for_inline_capture()
-
-
-def _patch_plt_show_for_inline_capture() -> None:
-    """Monkey-patch ``plt.show()`` to emit figures as display_data messages.
-
-    Only called when no interactive matplotlib backend is available.  Uses
-    IPython's ``display()`` / ``Image`` so the image appears in the PDV
-    console output just like any other captured result.
-    """
-    try:
-        import matplotlib.pyplot as plt  # noqa: PLC0415
-    except ImportError:
-        return
-
-    _original_show = plt.show
-
-    def _pdv_inline_show(*args, **kwargs):
-        _ = (args, kwargs)  # swallow block= and other kwargs
-        try:
-            import io  # noqa: PLC0415
-            import base64  # noqa: PLC0415
-
-            fig = plt.gcf()
-            buf = io.BytesIO()
-            fig.savefig(buf, format="png", bbox_inches="tight")
-            buf.seek(0)
-            png_b64 = base64.b64encode(buf.read()).decode("ascii")
-            buf.close()
-
-            try:
-                from IPython.display import display, Image  # noqa: PLC0415
-
-                display(Image(data=base64.b64decode(png_b64), format="png"))
-            except ImportError:
-                # IPython not available — nothing we can do
-                pass
-
-            plt.close(fig)
-        except Exception as exc:
-            print(f"[PDV] Could not capture figure: {exc}")
-
-    plt.show = _pdv_inline_show
-    print(
-        "[PDV] No interactive matplotlib backend found — figures will render inline in the PDV console."
-    )

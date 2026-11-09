@@ -10,6 +10,7 @@
  */
 
 import React, { useEffect, useRef, useState } from 'react';
+import { pickServerPath } from '../../services/pick-path';
 import { useModalKeyboard } from '../../hooks/useModalKeyboard';
 
 interface SaveAsDialogProps {
@@ -50,7 +51,7 @@ export const SaveAsDialog: React.FC<SaveAsDialogProps> = ({
 
   const handlePickLocation = async () => {
     try {
-      const picked = await window.pdv.files.pickDirectory(location || undefined);
+      const picked = await pickServerPath({ mode: 'directory', title: 'Choose where to save this project', defaultPath: location || undefined });
       if (picked) {
         setLocation(picked);
       }

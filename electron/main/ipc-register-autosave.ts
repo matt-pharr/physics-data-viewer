@@ -113,6 +113,22 @@ export interface AutosaveController {
    */
   autosaveBeforeRestart(kernelId: string): Promise<boolean>;
   /**
+   * Idle-shutdown snapshot for the session daemon: persist everything
+   * preservable before the idle policy stops the session. Unlike the
+   * renderer-driven autosave there is no client to supply live code cells,
+   * so they come from the working dir's `code-cells.json` mirror.
+   *
+   * The question this answers is "may the session shut down without losing
+   * work", which differs from {@link autosaveBeforeRestart}'s "is there a
+   * snapshot to recover": a dead kernel reports true here — the Tree lived
+   * in the kernel and nothing preservable remains, and blocking on it would
+   * keep a dead session on a login node forever.
+   *
+   * @returns True when everything preservable has been preserved; false
+   *   blocks the shutdown (the idle policy stays alive and retries).
+   */
+  autosaveForShutdown(): Promise<boolean>;
+  /**
    * Restore an unsaved session's `.autosave` snapshot from `orphanDir` into
    * the active session's working dir, load the tree/cells from it, and
    * delete the orphan.
@@ -221,38 +237,74 @@ export function registerAutosaveIpcHandlers(
     });
   }
 
+  /** Whether the kernel process is gone or has crashed (stale-idle safe). */
+  function kernelIsDead(kernelId: string): boolean {
+    const proc = kernelManager.getKernelProcessState(kernelId);
+    return (
+      !proc ||
+      proc.exitCode !== null ||
+      proc.killed ||
+      kernelManager.getKernel(kernelId)?.status === "dead"
+    );
+  }
+
+  /** Code cells from the working dir's mirror, or empty when absent. */
+  async function readMirroredCodeCells(
+    workingDir: string | undefined,
+  ): Promise<CodeCellData> {
+    if (workingDir) {
+      try {
+        return JSON.parse(
+          await fs.readFile(path.join(workingDir, "code-cells.json"), "utf8"),
+        ) as CodeCellData;
+      } catch {
+        /* no cells mirrored yet — snapshot the tree with empty cells */
+      }
+    }
+    return { tabs: [], activeTabId: 1 };
+  }
+
   async function autosaveBeforeRestart(kernelId: string): Promise<boolean> {
     const workingDir = kernelWorkingDirs.get(kernelId);
     const baseDir = getActiveProjectDir() || workingDir;
     if (!baseDir) return false;
 
-    const proc = kernelManager.getKernelProcessState(kernelId);
-    const dead =
-      !proc ||
-      proc.exitCode !== null ||
-      proc.killed ||
-      kernelManager.getKernel(kernelId)?.status === "dead";
-    if (!dead && kernelManager.getExecutionState(kernelId) === "idle") {
-      let codeCells: CodeCellData = { tabs: [], activeTabId: 1 };
-      if (workingDir) {
-        try {
-          codeCells = JSON.parse(
-            await fs.readFile(path.join(workingDir, "code-cells.json"), "utf8"),
-          ) as CodeCellData;
-        } catch {
-          /* no cells mirrored yet — snapshot the tree with empty cells */
-        }
-      }
+    if (
+      !kernelIsDead(kernelId) &&
+      kernelManager.getExecutionState(kernelId) === "idle"
+    ) {
+      const codeCells = await readMirroredCodeCells(workingDir);
       const result = await performAutosave(codeCells, { timeoutMs: 5000 });
       if (result.saved) return true;
     } else {
       console.warn(
-        dead
+        kernelIsDead(kernelId)
           ? "[autosave] pre-restart snapshot skipped: server process is dead; falling back to the last timer autosave"
           : "[autosave] pre-restart snapshot skipped: server not idle; falling back to the last timer autosave",
       );
     }
     return (await ProjectManager.checkForAutosave(baseDir)).exists;
+  }
+
+  async function autosaveForShutdown(): Promise<boolean> {
+    const kernelId = getActiveKernelId();
+    // No kernel session was ever started (or it was already stopped):
+    // nothing to persist, so the shutdown may proceed.
+    if (!kernelId) return true;
+    if (kernelIsDead(kernelId)) {
+      // The Tree lived in the kernel and died with it. Nothing preservable
+      // remains, and blocking the shutdown on an autosave that can never
+      // succeed would keep a dead session alive on a login node forever.
+      console.warn(
+        "[autosave] idle-shutdown snapshot skipped: kernel is dead; nothing left to preserve",
+      );
+      return true;
+    }
+    const codeCells = await readMirroredCodeCells(kernelWorkingDirs.get(kernelId));
+    // Generous bound: this runs on an otherwise-idle daemon, and failing
+    // (which blocks the shutdown and retries) is worse than waiting.
+    const result = await performAutosave(codeCells, { timeoutMs: 60_000 });
+    return result.saved;
   }
 
   async function recoverUnsavedSession(orphanDir: string): Promise<RecoverUnsavedResult> {
@@ -457,5 +509,11 @@ export function registerAutosaveIpcHandlers(
     await fs.rm(orphanDir, { recursive: true, force: true });
   });
 
-  return { triggerAutosave, performAutosave, autosaveBeforeRestart, recoverUnsavedSession };
+  return {
+    triggerAutosave,
+    performAutosave,
+    autosaveBeforeRestart,
+    autosaveForShutdown,
+    recoverUnsavedSession,
+  };
 }

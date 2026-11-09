@@ -81,9 +81,20 @@
   transition: color 0.15s, background-color 0.15s;
 }
 
-.activity-btn:hover {
+.activity-btn:hover:not(:disabled) {
   color: var(--text-primary);
   background-color: var(--bg-hover);
+}
+
+/* Disabled launchers (no kernel; agent while remote) must read as
+   disabled: dimmed, no hover feedback, default cursor. Without this a
+   disabled button was pixel-identical to an enabled one and still lit up
+   on hover — a dead-looking click with zero feedback (B5a UI audit). The
+   tooltip still explains why. */
+.activity-btn:disabled {
+  color: var(--text-secondary);
+  opacity: 0.4;
+  cursor: default;
 }
 
 /* Active panel — same accent-tint bg + stripe pattern as a selected

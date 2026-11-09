@@ -19,6 +19,11 @@ dependencies = [
     # bug that breaks pandas .plot(), and 3.10.5 is the first release with
     # Python 3.14 wheels.
     "matplotlib>=3.10.5",
+    # mpl_config.py's inline fallback enables the backend by its registered
+    # entry-point name ("inline"), which matplotlib-inline first shipped in
+    # 0.1.7. ipykernel only floors it at >=0.1, so pin it directly rather
+    # than trusting the transitive resolution.
+    "matplotlib-inline>=0.1.7",
     # numpy is a core dependency: matplotlib already pulls it in transitively,
     # and checksum.py / serialization.py import it directly. Pinning it here
     # (rather than relying on the transitive resolution) guarantees the >=2.2

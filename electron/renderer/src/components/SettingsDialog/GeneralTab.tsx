@@ -9,6 +9,7 @@
  */
 
 import React, { useState } from 'react';
+import { pickServerPath } from '../../services/pick-path';
 import type { TerminalPreset } from '../../types';
 import {
   CUSTOM_PRESET_ID,
@@ -21,6 +22,13 @@ import {
 const TERMINAL_PRESET_OPTIONS = getTerminalPresetsForPlatform(PLATFORM);
 
 interface GeneralTabProps {
+  /**
+   * Host the session currently runs on, or null for this machine. The
+   * directory fields below edit the SESSION's server config — on a remote
+   * session that is the cluster's `~/.PDV/preferences.json`, which is not
+   * obvious and reads as a duplicate of the Remote tab without a note.
+   */
+  remoteHost?: string | null;
   editorPresetId: string;
   /** Custom editor command template (shown when the preset is Custom…). */
   editorCustomCommand: string;
@@ -54,6 +62,7 @@ const renderUnavailable = (state: boolean | null, kind: string): React.ReactNode
 
 /** General settings tab body (launchers, directories, autosave). */
 export const GeneralTab: React.FC<GeneralTabProps> = ({
+  remoteHost,
   editorPresetId,
   editorCustomCommand,
   editorCustomIsTui,
@@ -176,6 +185,14 @@ export const GeneralTab: React.FC<GeneralTabProps> = ({
 
 
       <h4 className="settings-general-section">Directories</h4>
+      {remoteHost && (
+        <p className="settings-general-hint">
+          Your session runs on <strong>{remoteHost}</strong>, so these edit
+          that host&rsquo;s configuration directly. Per-host values set in
+          the Remote tab are re-applied every time a session starts there
+          and will override what you set here.
+        </p>
+      )}
       <div className="settings-general-grid">
         <label htmlFor="sg-default-save">Default save location</label>
         <div className="settings-general-dir-row">
@@ -186,7 +203,7 @@ export const GeneralTab: React.FC<GeneralTabProps> = ({
             className="btn btn-secondary btn-sm"
             type="button"
             onClick={async () => {
-              const picked = await window.pdv.files.pickDirectory(defaultSaveLocation || undefined);
+              const picked = await pickServerPath({ mode: 'directory', title: 'Choose the default save location', defaultPath: defaultSaveLocation || undefined });
               if (picked) onDefaultSaveLocationChange(picked);
             }}
           >
@@ -215,7 +232,7 @@ export const GeneralTab: React.FC<GeneralTabProps> = ({
             className="btn btn-secondary btn-sm"
             type="button"
             onClick={async () => {
-              const picked = await window.pdv.files.pickDirectory(workingDirBase || undefined);
+              const picked = await pickServerPath({ mode: 'directory', title: 'Choose the working directory base', defaultPath: workingDirBase || undefined });
               if (picked) onWorkingDirBaseChange(picked);
             }}
           >

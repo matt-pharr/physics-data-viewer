@@ -1499,6 +1499,23 @@ class PDVTree(dict):
             cls._global_timer.start()
 
     @classmethod
+    def _disarm_global_debounce(cls) -> None:
+        """Unconditionally cancel and clear the class-level debounce state.
+
+        Unlike :meth:`_detach_comm` (which only acts when called on the
+        current root tree), this always disarms — it exists for test
+        harnesses that must guarantee no debounce timer survives a test,
+        regardless of which tree instances the test created or leaked.
+        """
+        with cls._global_lock:
+            if cls._global_timer is not None:
+                cls._global_timer.cancel()
+                cls._global_timer = None
+            cls._global_pending = False
+        cls._global_send_fn = None
+        cls._root_tree = None
+
+    @classmethod
     def _flush_global(cls) -> None:
         """Send the pending ``change_type: "unknown"`` notification.
 
@@ -1619,6 +1636,12 @@ class PDVTree(dict):
         with self._debounce_lock:
             pending = self._pending_changes
             self._pending_changes = []
+            # Cancel before dropping the reference: a manual flush (tests,
+            # _detach_comm) would otherwise leave the timer thread alive to
+            # re-enter this method ~100 ms later. Harmless no-op when this
+            # call *is* the timer firing.
+            if self._debounce_timer is not None:
+                self._debounce_timer.cancel()
             self._debounce_timer = None
             send_fn = (
                 self._send_fn

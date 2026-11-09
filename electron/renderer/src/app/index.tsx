@@ -34,6 +34,13 @@ import { SaveAsDialog } from '../components/SaveAsDialog';
 import { NewProjectDialog } from '../components/NewProjectDialog';
 import { NewJuliaProjectDialog } from '../components/NewJuliaProjectDialog';
 import { UnsavedChangesDialog } from '../components/UnsavedChangesDialog';
+import { PathPicker } from '../components/PathPicker';
+import { RemoteConnect } from '../components/RemoteConnect';
+import {
+  pickServerPath,
+  registerPathPickerHost,
+  type ActivePickRequest,
+} from '../services/pick-path';
 import { WelcomeScreen } from '../components/WelcomeScreen';
 import { EnvSyncModal } from '../components/EnvSyncModal';
 import type {
@@ -58,6 +65,8 @@ import { useLayoutState } from './useLayoutState';
 import { useNoteTabs } from './useNoteTabs';
 import { useProjectWorkflow } from './useProjectWorkflow';
 import { useKernelSubscriptions } from './useKernelSubscriptions';
+import { useRemoteConnection } from './useRemoteConnection';
+import { useSessionState } from './useSessionState';
 import { useWelcomeState } from './useWelcomeState';
 import { useThemeManager } from './useThemeManager';
 import { useTreeAction } from '../hooks/useTreeAction';
@@ -370,7 +379,7 @@ const App: React.FC = () => {
   // project:open and project:openRecent are dispatched via refs so this effect
   // doesn't re-subscribe on every kernelStatus change (handlers defined later).
   const handleOpenWithPickerRef = useRef<() => Promise<void>>();
-  const handleOpenRecentRef = useRef<(path: string) => Promise<void>>();
+  const handleOpenRecentRef = useRef<(path: string, host?: string | null) => Promise<void>>();
   const handleClearRecentsRef = useRef<() => void>();
   useEffect(() => {
     if (!window.pdv?.menu) return;
@@ -378,7 +387,7 @@ const App: React.FC = () => {
       if (payload.action === 'project:open') {
         void handleOpenWithPickerRef.current?.();
       } else if (payload.action === 'project:openRecent') {
-        if (payload.path) void handleOpenRecentRef.current?.(payload.path);
+        if (payload.path) void handleOpenRecentRef.current?.(payload.path, payload.host);
       } else if (payload.action === 'modules:import') {
         setActiveDialog({ kind: 'importModule' });
       } else if (payload.action === 'modules:newEmpty') {
@@ -404,6 +413,8 @@ const App: React.FC = () => {
           setProjectDirty(false);
           setForceWelcome(true);
         });
+      } else if (payload.action === 'remote:connect') {
+        setActiveDialog({ kind: 'remoteConnect' });
       } else if (payload.action === 'recentProjects:clear') {
         handleClearRecentsRef.current?.();
       }
@@ -456,6 +467,15 @@ const App: React.FC = () => {
     });
   }, []);
 
+  const handleOpenTerminal = useCallback(() => {
+    void window.pdv.launchers.openTerminal().then((result) => {
+      if (!result.success) {
+        console.error('[pdv] failed to open terminal:', result.error);
+        window.alert(result.error ?? 'Failed to open a terminal.');
+      }
+    });
+  }, []);
+
   const handleKernelCrash = useCallback((crashedKernelId: string) => {
     if (crashedKernelId === currentKernelIdRef.current) {
       setKernelStatus('error');
@@ -484,6 +504,73 @@ const App: React.FC = () => {
     }
     setPendingDirtyAction({ label, run: action });
   }, [projectDirty]);
+
+  // The one PathPicker mount serving every remote path pick (pick-path.ts).
+  const [pathPickRequest, setPathPickRequest] = useState<ActivePickRequest | null>(null);
+  useEffect(
+    () =>
+      registerPathPickerHost((req) => {
+        setPathPickRequest((prev) => {
+          // A new pick displaces any open one, and the displaced caller must
+          // get its answer — with one state slot and no resolution, its
+          // `await` would simply never continue.
+          prev?.resolve(null);
+          return req;
+        });
+      }),
+    [],
+  );
+
+  /**
+   * A recent whose project lives on a different machine than the session
+   * currently does (set by `moveSessionAndOpen` below). The open completes
+   * in the connection-state effect next to it once the session has actually
+   * moved; `openingRecent` suppresses the resync handler's welcome-screen
+   * landing while that open is in flight.
+   */
+  const pendingRecentOpenRef = useRef<{ host: string | null; path: string; at: number } | null>(
+    null,
+  );
+  const openingRecentRef = useRef(false);
+
+  // An ssh connection outlives any one kernel, so this is not kernel-keyed.
+  useRemoteConnection();
+  useSessionState(
+    currentKernelId,
+    // On a resync the server behind this window changed; `config` lives in
+    // component state, so the query-cache reset cannot refresh it. Without
+    // this reload a kernel start after a session swap uses the previous
+    // machine's pythonPath and default packages.
+    useCallback((cause?: 'moved' | 'recovered') => {
+      void window.pdv.config.get().then((loaded) => {
+        setConfig(loaded);
+      });
+      // Land on the welcome screen when this window has nothing to show
+      // after the swap. Two cases, decided by the push's cause — NOT by
+      // the daemon's kernel list: a long-lived daemon can hold kernels
+      // from previous app runs that this window cannot adopt yet (that
+      // adoption is the tracked NEW-4b follow-up), and gating on the list
+      // left a stranded dead-looking "No active session" GUI.
+      //  - 'moved': the server behind this window changed, so any previous
+      //    kernel id is meaningless — always land on the welcome.
+      //  - 'recovered' (or unknown): same session, view rebuilt; only land
+      //    on the welcome if this window had no kernel anyway. A reattach
+      //    mid-work keeps the user exactly where they were.
+      // Suppressed while a recent-project open is riding this same swap:
+      // that flow is about to open a project, and forcing the welcome
+      // screen under it would re-surface after the open dismissed it.
+      const windowHasKernel = currentKernelIdRef.current !== null;
+      if (
+        (cause === 'moved' || !windowHasKernel) &&
+        !pendingRecentOpenRef.current &&
+        !openingRecentRef.current
+      ) {
+        setCurrentKernelId(null);
+        setKernelStatus('idle');
+        setForceWelcome(true);
+      }
+    }, [setForceWelcome]),
+  );
 
   useKernelSubscriptions({
     currentKernelId,
@@ -1073,6 +1160,7 @@ const App: React.FC = () => {
     loadedProjectTabsRef,
     normalizeLoadedCodeCells,
     flushDirtyNotes,
+    activeLanguage,
   });
 
   // Subscribe to main-process close requests (title-bar X, OS close, Cmd+Q)
@@ -1281,7 +1369,7 @@ const App: React.FC = () => {
     const defaultPath = currentProjectDir
       ? currentProjectDir.replace(/\/[^/]+\/?$/, '')
       : undefined;
-    const dir = await window.pdv.files.pickDirectory(defaultPath);
+    const dir = await pickServerPath({ mode: 'directory', title: 'Open a project folder', defaultPath });
     if (!dir) return;
     if (kernelStatus === 'ready') {
       guardDirty('open another project', () => {
@@ -1293,16 +1381,141 @@ const App: React.FC = () => {
     }
   }, [currentProjectDir, kernelStatus, openProjectFresh, openProjectFromWelcome, guardDirty, dismissWelcome]);
 
-  const handleOpenRecent = useCallback(async (path: string) => {
+  /**
+   * Complete a pending cross-machine open when the session is already where
+   * the pending expects — shared by the connection-state effect (arrivals
+   * announced by push) and the direct post-startSession check (arrivals the
+   * store already reflected, where no state change would re-run the effect).
+   */
+  const tryConsumePendingOpen = useCallback((): void => {
+    const pending = pendingRecentOpenRef.current;
+    if (!pending) return;
+    // A pending open is a click, not a standing order. If it has not been
+    // satisfiable for a couple of minutes (auth abandoned mid-flow, dialog
+    // closed, session went elsewhere), it must die — a surviving one would
+    // silently open a long-forgotten project the next time the user happens
+    // to connect to that host.
+    if (Date.now() - pending.at > 2 * 60 * 1000) {
+      pendingRecentOpenRef.current = null;
+      return;
+    }
+    const st = useStore.getState();
+    const here =
+      st.connectionState === 'remote-connected'
+        ? st.remoteHost
+        : st.connectionState === 'local'
+          ? null
+          : undefined; // still in transit
+    if (here === undefined || here !== pending.host) return;
+    pendingRecentOpenRef.current = null;
+    openingRecentRef.current = true;
+    void openProjectFromWelcome(pending.path)
+      .catch((err: unknown) => {
+        setLastError(err instanceof Error ? err.message : String(err));
+      })
+      .finally(() => {
+        openingRecentRef.current = false;
+      });
+  }, [openProjectFromWelcome]);
+
+  /** Move the session to `targetHost` (null = back home), then open `path`. */
+  const moveSessionAndOpen = useCallback(async (targetHost: string | null, path: string) => {
+    // Identity, not just content: a second click replaces the pending, and
+    // the FIRST flow's failure paths must then clear only their own pending
+    // — nulling whatever is there would kill the newer flow's open.
+    const mine = { host: targetHost, path, at: Date.now() };
+    pendingRecentOpenRef.current = mine;
+    try {
+      if (targetHost === null) {
+        // Home: disconnect returns this window to a fresh local server; the
+        // remote session keeps running on its host.
+        await window.pdv.remote.disconnect();
+        tryConsumePendingOpen();
+        return;
+      }
+      const st = useStore.getState();
+      const alreadyConnected = st.remotePhase === 'connected' && st.remoteConnectHost === targetHost;
+      if (!alreadyConnected) {
+        // The dialog exists to host auth prompts (Duo, keys) — it opens
+        // ONLY when a connect actually has to happen. With a live master
+        // it used to flash the connected-state dialog for a frame between
+        // open and close, which read as a glitch.
+        setActiveDialog({ kind: 'remoteConnect' });
+        const result = await window.pdv.remote.connect(targetHost);
+        // Failures stay visible in the dialog; the pending open is dead.
+        if (!result.ok) {
+          if (pendingRecentOpenRef.current === mine) pendingRecentOpenRef.current = null;
+          return;
+        }
+        // The connect is done prompting; the session move needs no dialog.
+        closeDialog();
+      }
+      const session = await window.pdv.remote.startSession();
+      if (!session.ok) {
+        if (pendingRecentOpenRef.current === mine) pendingRecentOpenRef.current = null;
+        // Surface the failure in the dialog (reopening it if the connect
+        // path closed it): its error slot can only be set through the
+        // store from here.
+        useStore
+          .getState()
+          .setRemoteSessionError(session.message ?? 'Could not run the session on the host.');
+        setActiveDialog({ kind: 'remoteConnect' });
+        return;
+      }
+      closeDialog();
+      // The push-driven effect usually completes the open; this direct
+      // check covers arrivals the store already reflected, where no state
+      // change will re-run the effect.
+      tryConsumePendingOpen();
+    } catch (err) {
+      if (pendingRecentOpenRef.current === mine) pendingRecentOpenRef.current = null;
+      setLastError(err instanceof Error ? err.message : String(err));
+    }
+  }, [closeDialog, setActiveDialog, tryConsumePendingOpen]);
+
+  const handleOpenRecent = useCallback(async (path: string, host?: string | null) => {
+    const targetHost = host ?? null;
+    const st = useStore.getState();
+    // The session's LOCATION, not its health: while reconnecting the session
+    // still lives on the remote host (parked invokes complete when the
+    // backoff wins), and a local recent must take the disconnect-home path
+    // rather than opening against an unreachable server. `remote-lost` is
+    // the exception in BOTH directions — even the lost host's own recent
+    // must go through moveSessionAndOpen, whose startSession is the
+    // reattach path; opening directly would park against a dead channel.
+    const atHost =
+      st.connectionState !== 'remote-lost' &&
+      targetHost === (st.connectionState === 'local' ? null : st.remoteHost);
+    if (atHost) {
+      if (kernelStatus === 'ready') {
+        guardDirty('open another project', () => {
+          dismissWelcome();
+          void openProjectFresh(path);
+        });
+      } else {
+        await openProjectFromWelcome(path);
+      }
+      return;
+    }
+    // The project lives elsewhere: move the session first. Same dirty guard
+    // — leaving for another machine abandons unsaved work just as surely.
     if (kernelStatus === 'ready') {
       guardDirty('open another project', () => {
-        dismissWelcome();
-        void openProjectFresh(path);
+        void moveSessionAndOpen(targetHost, path);
       });
     } else {
-      await openProjectFromWelcome(path);
+      await moveSessionAndOpen(targetHost, path);
     }
-  }, [kernelStatus, openProjectFresh, openProjectFromWelcome, guardDirty, dismissWelcome]);
+  }, [kernelStatus, openProjectFresh, openProjectFromWelcome, guardDirty, dismissWelcome, moveSessionAndOpen]);
+
+  // Complete a pending cross-machine open once the session has arrived
+  // where the project lives.
+  const connectionStateNow = useStore((s) => s.connectionState);
+  const remoteHostNow = useStore((s) => s.remoteHost);
+  const remoteSetupWarningNow = useStore((s) => s.remoteSetupWarning);
+  useEffect(() => {
+    tryConsumePendingOpen();
+  }, [connectionStateNow, remoteHostNow, tryConsumePendingOpen]);
 
   /**
    * Recover an orphaned autosave into the active kernel session. The recovered
@@ -1481,6 +1694,7 @@ const App: React.FC = () => {
           onSettingsClick={() => openSettings('general')}
           onAgentClick={handleOpenAgent}
           onOpenWorkingDir={handleOpenWorkingDir}
+          onOpenTerminal={handleOpenTerminal}
           guiModules={importedGuiModules}
           kernelId={currentKernelId}
         />
@@ -1504,6 +1718,7 @@ const App: React.FC = () => {
                   <Tree
                     kernelId={currentKernelId}
                     disabled={kernelStatus !== 'ready'}
+                    startingKernel={kernelStatus === 'starting'}
                     onAction={handleTreeAction}
                     shortcuts={shortcuts}
                     projectKey={currentProjectDir}
@@ -1578,6 +1793,7 @@ const App: React.FC = () => {
                   <div className="horizontal-resizer" onMouseDown={startHorizontalDrag} />
                   <div className="editor-wrapper" style={{ height: `${editorHeight}px` }}>
                     <CodeCell
+                      startingKernel={kernelStatus === 'starting'}
                       tabs={cellTabs.map((tab) => ({
                         ...tab,
                         onChange: (code: string) => handleCodeChange(tab.id, code),
@@ -1852,11 +2068,35 @@ const App: React.FC = () => {
          refreshToken={modulesRefreshToken}
          onClose={closeDialog}
        />
+       {pathPickRequest && (
+         <PathPicker
+           key={pathPickRequest.seq}
+           request={pathPickRequest}
+           onDone={() => setPathPickRequest(null)}
+         />
+       )}
+       {activeDialog?.kind === 'remoteConnect' && (
+         <RemoteConnect
+           onClose={() => {
+             // Closing the dialog abandons any open-a-recent flow riding it:
+             // without this, the connect keeps running headless (auth
+             // prompts with no UI) and the pending open fires whenever the
+             // session happens to reach that host later.
+             if (pendingRecentOpenRef.current) {
+               pendingRecentOpenRef.current = null;
+               void window.pdv.remote.cancel();
+             }
+             closeDialog();
+           }}
+         />
+       )}
        {activeDialog?.kind === 'saveAs' && (
          <SaveAsDialog
            defaultLocation={currentProjectDir
              ? currentProjectDir.replace(/\/[^/]+\/?$/, '')
-             : config?.defaultSaveLocation ?? null}
+             // `||`, not `??`: an empty string means "cleared" (the per-host
+             // push writes "" to un-set a key) and must fall through to null.
+             : config?.defaultSaveLocation || null}
            defaultName={currentProjectName ?? undefined}
            onSave={async (projectName, saveDir) => {
              closeDialog();
@@ -1871,6 +2111,8 @@ const App: React.FC = () => {
          activeLanguage={activeLanguage}
          environmentMode={environmentMode}
          kernelRunning={currentKernelId !== null && kernelStatus === 'ready'}
+         remoteEnabled={chromeInfo?.remoteEnabled ?? false}
+         remoteHost={connectionStateNow === 'local' ? null : remoteHostNow}
          config={config}
          shortcuts={shortcuts}
          onClose={() => setShowSettings(false)}
@@ -1910,12 +2152,28 @@ const App: React.FC = () => {
          <WelcomeScreen
            recentProjects={recentProjects}
            recoverableSessions={recoverableSessions}
+           remoteHost={connectionStateNow === 'local' ? null : remoteHostNow}
+           remoteReachable={connectionStateNow === 'remote-connected'}
+           remoteSetupWarning={remoteSetupWarningNow}
            onNewProject={handleWelcomeNewProject}
            onOpenProject={handleOpenWithPicker}
            onOpenRecent={handleOpenRecent}
            onRecoverSession={handleRecoverSession}
            onDiscardSession={handleDiscardSession}
            onClearRecents={handleClearRecents}
+           remoteEnabled={chromeInfo?.remoteEnabled ?? false}
+           onConnectHost={() => setActiveDialog({ kind: 'remoteConnect' })}
+           onDisconnectHost={() => {
+             // Returns this window to a fresh local session; the daemon
+             // keeps running on the host. On failure, open the dialog with
+             // the error — it is the surface that can explain and retry.
+             void window.pdv.remote.disconnect().catch((err: unknown) => {
+               useStore
+                 .getState()
+                 .setRemoteSessionError(err instanceof Error ? err.message : String(err));
+               setActiveDialog({ kind: 'remoteConnect' });
+             });
+           }}
          />
        )}
 

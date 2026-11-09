@@ -25,7 +25,11 @@
   background-color: var(--bg-secondary);
   border: 1px solid var(--border-color);
   border-radius: 8px;
-  width: 760px;
+  /* Wide enough for all eight tabs on one row with real macOS font
+     metrics (760px wrapped "About" onto a second row on a live system —
+     the flex-wrap below stays as the graceful fallback for narrow
+     windows, not the expected state). */
+  width: 860px;
   max-width: 92%;
   /* Fixed height so the dialog (and its tab bar / footer) stays put
      regardless of which tab is active. */
@@ -38,6 +42,10 @@
 
 .settings-tabs {
   display: flex;
+  /* Whole tabs may wrap to a second row on narrow windows; labels never
+     wrap WITHIN a tab — eight tabs squeezed into one flex row used to
+     break four labels onto two lines each, on every tab. */
+  flex-wrap: wrap;
   gap: 8px;
   padding: 10px 20px;
   border-bottom: 1px solid var(--border-color);
@@ -48,6 +56,9 @@
 .settings-tabs .tab,
 .settings-tabs .tab.active {
   font-weight: 500;
+  white-space: nowrap;
+  padding-left: 8px;
+  padding-right: 8px;
 }
 
 .settings-grid {
@@ -1609,4 +1620,280 @@
   padding: 8px 12px;
   margin: 0 0 12px;
   line-height: 1.4;
+}
+
+/* ── Remote Hosts tab ── */
+/* Two panes: a narrow host list, and the selected host's configuration.
+   Mirrors the VS Code settings shape rather than inventing a new one. */
+.settings-remote {
+  display: grid;
+  grid-template-columns: 160px 1fr;
+  gap: 16px;
+  min-height: 0;
+}
+
+.settings-remote-hosts {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-right: 12px;
+  min-width: 0;
+  /* The rail stays put while the (taller) form scrolls in the dialog body.
+     Sticky against the scrolling ancestor, not height games — the tab body
+     owns the scroll. */
+  position: sticky;
+  top: 0;
+  align-self: start;
+}
+
+.settings-remote-hosts-heading {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-secondary);
+}
+
+.settings-remote-host-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow-y: auto;
+}
+
+.settings-remote-host {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 5px 8px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 0.12s ease;
+}
+
+.settings-remote-host:hover {
+  background-color: var(--bg-hover);
+}
+
+.settings-remote-host.active {
+  background-color: var(--accent);
+  color: var(--text-on-accent);
+}
+
+.settings-remote-host-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Unsaved-changes marker beside a host name. */
+.settings-remote-host-dirty {
+  font-size: 10px;
+  flex-shrink: 0;
+  color: var(--warning);
+}
+
+/* Forget-host affordance; quiet until hovered. */
+.settings-remote-host-remove {
+  flex-shrink: 0;
+  padding: 0 3px;
+  border-radius: 3px;
+  font-size: 13px;
+  line-height: 1;
+  color: var(--text-secondary);
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.settings-remote-host:hover .settings-remote-host-remove {
+  opacity: 1;
+}
+
+.settings-remote-host-remove:hover {
+  color: var(--error);
+  background-color: var(--bg-hover);
+}
+
+/* Hints beside buttons in flex rows. Deliberately NOT
+   .settings-general-desc, whose grid-column/negative-margin rules fight
+   flex centering. */
+.settings-remote-inline-hint {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+/* P3: caption for the script's captured output. */
+.settings-remote-output-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.settings-remote-add-row input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 4px 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.settings-remote-hosts-hint {
+  font-size: 10px;
+  color: var(--text-secondary);
+  line-height: 1.35;
+}
+
+.settings-remote-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  /* The divider lives on the taller pane so it spans the whole tab instead
+     of ending where the (short) host list does. */
+  border-left: 1px solid var(--border-color);
+  padding-left: 16px;
+}
+
+.settings-remote-node-note {
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 8px 12px;
+  margin: 0;
+}
+
+.settings-remote-node-note code {
+  font-family: var(--font-mono);
+}
+
+.settings-remote-script {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 110px;
+  resize: vertical;
+  padding: 8px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.settings-remote-script:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.settings-remote-test-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.settings-remote-test-result {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.settings-remote-test-verdict {
+  font-size: 12px;
+}
+
+.settings-remote-test-verdict.ok {
+  color: var(--success);
+}
+
+.settings-remote-test-verdict.failed {
+  color: var(--error);
+}
+
+/* The script's own output — the chatter and errors the daemon's capture
+   deliberately discards. Scrolls in place; never widens the dialog. */
+.settings-remote-test-output {
+  margin: 0;
+  max-height: 140px;
+  overflow: auto;
+  padding: 8px 10px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text-secondary);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+}
+
+.settings-remote-probe-table {
+  border-collapse: collapse;
+  font-size: 11px;
+  width: 100%;
+  /* Fixed layout so the columns do not reflow between runs with different
+     path lengths. */
+  table-layout: fixed;
+}
+
+.settings-remote-probe-table th:first-child {
+  width: 70px;
+}
+
+.settings-remote-probe-table td {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-remote-probe-table th,
+.settings-remote-probe-table td {
+  text-align: left;
+  padding: 3px 8px;
+  border-bottom: 1px solid var(--border-color);
+  color: var(--text-secondary);
+}
+
+.settings-remote-probe-table td code {
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+}
+
+/* A row the script changed — the entire point of the diff. */
+.settings-remote-probe-table tr.changed td {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.settings-remote-save-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+/* A pathological alias must not grow the button without bound. */
+.settings-remote-save-row .btn {
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

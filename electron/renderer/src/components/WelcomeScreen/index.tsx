@@ -14,6 +14,12 @@ import React from 'react';
 /** Entry in the recent projects list with optional language and name metadata. */
 export interface RecentProject {
   path: string;
+  /**
+   * SSH alias the project lives on, or null for this machine. Remote entries
+   * carry no manifest metadata: reading it means connecting to the host
+   * first, which is not something the welcome screen should do on its own.
+   */
+  host?: string | null;
   language?: "python" | "julia";
   /** Project name from the manifest (falls back to folder name when absent). */
   name?: string;
@@ -44,7 +50,21 @@ interface WelcomeScreenProps {
   /** Called when the user clicks "Open Project" (shows file picker). */
   onOpenProject: () => void;
   /** Called when the user clicks a recent project entry. */
-  onOpenRecent: (path: string, language?: "python" | "julia") => void;
+  onOpenRecent: (path: string, host?: string | null) => void;
+  /**
+   * Host the session currently runs on, or null for this machine. The
+   * full-window welcome covers the status bar — without this line the
+   * post-swap landing is pixel-identical to a fresh local launch, and the
+   * user's next "New Project" targets a machine named nowhere on screen.
+   */
+  remoteHost?: string | null;
+  /** False while the remote session is unreachable — the banner must not
+   *  claim "Connected" over a dead channel. */
+  remoteReachable?: boolean;
+  /** Set when the session runs remotely WITHOUT the configured setup
+   *  script. Shown as its own warning banner: the failure otherwise
+   *  surfaces later as mysteriously missing modules. */
+  remoteSetupWarning?: string | null;
   /** Called when the user clicks "Recover" on an orphan autosave. Receives
    *  the autosave's kernel language so the right kernel boots, and its env
    *  mode so a uv/pkg session recovers with its environment active. */
@@ -57,6 +77,20 @@ interface WelcomeScreenProps {
   onDiscardSession: (orphanDir: string) => void;
   /** Called when the user clicks "Clear" beneath the recent-projects list. */
   onClearRecents: () => void;
+  /**
+   * True when remote sessions are enabled (the PDV_REMOTE release gate).
+   * Hides the Connect to Host button entirely when false, mirroring the
+   * shell's gated File-menu entry.
+   */
+  remoteEnabled?: boolean;
+  /** Called when the user clicks "Connect to Host…" (or "Reconnect to
+   *  '<host>'…" while the remote session is unreachable). Opens the
+   *  connect dialog; it never connects directly. */
+  onConnectHost: () => void;
+  /** Called when the user clicks "Disconnect from '<host>'" while the
+   *  session runs remotely. Returns this window to a fresh local session;
+   *  the remote session keeps running on the host. */
+  onDisconnectHost: () => void;
 }
 
 /** Short language badge for the recent projects list. */
@@ -95,12 +129,18 @@ function relativeTimeLabel(iso: string): string {
 export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
   recentProjects,
   recoverableSessions,
+  remoteHost,
+  remoteReachable,
+  remoteSetupWarning,
   onNewProject,
   onOpenProject,
   onOpenRecent,
   onRecoverSession,
   onDiscardSession,
   onClearRecents,
+  remoteEnabled,
+  onConnectHost,
+  onDisconnectHost,
 }) => {
   const handleDiscard = (dir: string): void => {
     if (window.confirm(
@@ -156,6 +196,35 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
           <h1 className="welcome-title">Physics Data Viewer</h1>
         </div>
 
+        {remoteHost && (
+          <div
+            className={
+              remoteReachable !== false
+                ? "welcome-remote-banner"
+                : "welcome-remote-banner welcome-remote-banner-warning"
+            }
+          >
+            {remoteReachable !== false ? (
+              <>
+                Connected to <strong>{remoteHost}</strong> — new and opened
+                projects will run there. Disconnecting keeps the session
+                running for later.
+              </>
+            ) : (
+              <>
+                Your session lives on <strong>{remoteHost}</strong> but is
+                unreachable right now — use Reconnect below.
+              </>
+            )}
+          </div>
+        )}
+
+        {remoteHost && remoteSetupWarning && (
+          <div className="welcome-remote-banner welcome-remote-banner-warning">
+            {remoteSetupWarning}
+          </div>
+        )}
+
         <div className="welcome-actions">
           <button
             className="btn btn-primary welcome-action-btn"
@@ -175,6 +244,35 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
           >
             Open Project…
           </button>
+          {remoteEnabled &&
+            // Three states, keyed on the same values as the banner above:
+            // no remote session → connect; running remotely → disconnect
+            // (session keeps running on the host); unreachable → reconnect
+            // via the dialog, which owns the auth flow.
+            (!remoteHost ? (
+              <button
+                className="btn btn-secondary welcome-action-btn"
+                onClick={onConnectHost}
+              >
+                Connect to Host…
+              </button>
+            ) : remoteReachable !== false ? (
+              <button
+                className="btn btn-secondary welcome-action-btn welcome-remote-btn"
+                title={`Disconnect from ‘${remoteHost}’ — the session keeps running there`}
+                onClick={onDisconnectHost}
+              >
+                Disconnect from ‘{remoteHost}’
+              </button>
+            ) : (
+              <button
+                className="btn btn-secondary welcome-action-btn welcome-remote-btn"
+                title={`Reconnect to ‘${remoteHost}’`}
+                onClick={onConnectHost}
+              >
+                Reconnect to ‘{remoteHost}’…
+              </button>
+            ))}
         </div>
 
         {recoverableSessions.length > 0 && (
@@ -225,13 +323,28 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
             </div>
             <ul className="welcome-recent-list">
               {recentProjects.map((entry) => (
-                <li key={entry.path}>
+                // Keyed on host + path: the same path on two machines is two
+                // different projects, so path alone would collide.
+                <li key={`${entry.host ?? ''}:${entry.path}`}>
                   <button
                     className="welcome-recent-item"
-                    onClick={() => onOpenRecent(entry.path, entry.language)}
-                    title={entry.path}
+                    onClick={() => onOpenRecent(entry.path, entry.host)}
+                    title={entry.host ? `${entry.host}:${entry.path}` : entry.path}
                   >
-                    <span className="welcome-recent-badge">[{languageBadge(entry.language)}]</span>
+                    {/* Remote entries show BOTH language and host — the host
+                        must never replace the language (a user still wants to
+                        know Python vs Julia). The language rides the recents
+                        entry itself, recorded at remember-time; entries from
+                        before that field existed have genuinely unknown
+                        language and show only the host rather than a guess. */}
+                    {(entry.host === null || entry.language) && (
+                      <span className="welcome-recent-badge">
+                        [{languageBadge(entry.language)}]
+                      </span>
+                    )}
+                    {entry.host && (
+                      <span className="welcome-recent-badge">[{entry.host}]</span>
+                    )}
                     <span className="welcome-recent-name">{entry.name ?? projectName(entry.path)}</span>
                     <span className="welcome-recent-path">{projectDir(entry.path)}</span>
                   </button>
