@@ -19,6 +19,8 @@
  * app.ts — calls initAutoUpdater() during window creation
  */
 
+import * as fs from "fs";
+import * as path from "path";
 import { app, BrowserWindow, shell } from "electron";
 import { autoUpdater } from "electron-updater";
 import type { UpdateInfo, ProgressInfo } from "electron-updater";
@@ -88,13 +90,26 @@ export function getUpdateStatus(): UpdateStatus | null {
 /**
  * Returns true when the current platform supports in-place auto-update.
  *
- * macOS and Linux AppImage support auto-update. Linux deb/snap installs
- * are managed by the system package manager and cannot be updated in place.
+ * macOS, Windows NSIS installs, and Linux AppImage support auto-update.
+ * Linux deb/snap installs and Windows portable builds cannot be updated in place.
  */
 function canAutoUpdate(): boolean {
   if (process.platform === "darwin") return true;
   if (process.platform === "linux" && !!process.env.APPIMAGE) return true;
+  if (process.platform === "win32" && !process.env.PORTABLE_EXECUTABLE_FILE) return true;
   return false;
+}
+
+/**
+ * Returns true when the packaged app has an `app-update.yml` manifest and is
+ * not running from the single-file NSIS portable wrapper (which unpacks into a
+ * temporary directory on each launch and cannot update in place).
+ */
+function hasUpdateConfig(): boolean {
+  if (!app.isPackaged) return false;
+  if (process.env.PORTABLE_EXECUTABLE_FILE) return false;
+  if (typeof process.resourcesPath !== "string") return false;
+  return fs.existsSync(path.join(process.resourcesPath, "app-update.yml"));
 }
 
 /**
@@ -126,7 +141,7 @@ function pushStatus(status: UpdateStatus): void {
 export function initAutoUpdater(win: BrowserWindow, stamp: UpdateCheckStamp): void {
   mainWindow = win;
 
-  if (!app.isPackaged) {
+  if (!hasUpdateConfig()) {
     return;
   }
 
@@ -204,7 +219,7 @@ export function initAutoUpdater(win: BrowserWindow, stamp: UpdateCheckStamp): vo
  * @param stamp - Optional accessors to record the check timestamp.
  */
 export async function checkForUpdates(stamp?: UpdateCheckStamp): Promise<void> {
-  if (!app.isPackaged) {
+  if (!hasUpdateConfig()) {
     pushStatus({ state: "not-available" });
     return;
   }
@@ -213,7 +228,12 @@ export async function checkForUpdates(stamp?: UpdateCheckStamp): Promise<void> {
       console.warn("[updater] unable to record lastUpdateCheck:", err);
     });
   }
-  await autoUpdater.checkForUpdates();
+  try {
+    await autoUpdater.checkForUpdates();
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    pushStatus({ state: "error", error: message });
+  }
 }
 
 /**

@@ -101,4 +101,18 @@ describe("electron-builder.yml extraResources", () => {
     const unpackBlock = configText.slice(configText.indexOf("asarUnpack:"));
     expect(unpackBlock).toMatch(/- "node_modules\/node-pty\/\*\*"/);
   });
+
+  it("configures Windows icon and per-user NSIS installer without admin elevation", () => {
+    const winBlock = configText.slice(
+      configText.indexOf("win:"),
+      configText.indexOf("nsis:"),
+    );
+    expect(winBlock).toContain("icon: assets/pdv-icon.ico");
+    const nsisBlock = configText.slice(configText.indexOf("nsis:"));
+    expect(nsisBlock).toContain("oneClick: false");
+    expect(nsisBlock).toContain("perMachine: false");
+    expect(nsisBlock).toContain("allowElevation: false");
+    expect(nsisBlock).toContain("allowToChangeInstallationDirectory: true");
+    expect(nsisBlock).toContain("packElevateHelper: false");
+  });
 });

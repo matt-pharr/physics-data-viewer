@@ -133,6 +133,10 @@ if (process.env.NODE_ENV === "development") {
   app.commandLine.appendSwitch("remote-debugging-port", "9222");
 }
 
+if (process.platform === "win32") {
+  app.setAppUserModelId("com.pdv.physics-data-viewer");
+}
+
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
 if (!hasSingleInstanceLock) {
   app.quit();
