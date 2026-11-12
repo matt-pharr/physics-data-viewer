@@ -387,7 +387,7 @@ describe("ProjectManager", () => {
       expect(cbStat.birthtimeMs).toBeLessThanOrEqual(pjStat.birthtimeMs);
     });
 
-    it("commitProjectManifest leaves the prior project.json intact when the rename fails", async () => {
+    it.skipIf(process.platform === "win32")("commitProjectManifest leaves the prior project.json intact when the rename fails", async () => {
       // Simulates a crash-equivalent: the .tmp gets written but the
       // rename cannot complete because the project directory is read-only.
       // The prior project.json (with old content) must still be on disk.

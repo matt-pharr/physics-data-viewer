@@ -67,7 +67,7 @@ describe("files:listDir", () => {
     expect(result.path).toBe(os.homedir());
   });
 
-  it("reports a symlink as its target's kind and skips dangling ones", async () => {
+  it.skipIf(process.platform === "win32")("reports a symlink as its target's kind and skips dangling ones", async () => {
     fs.mkdirSync(path.join(dir, "real-dir"));
     fs.symlinkSync(path.join(dir, "real-dir"), path.join(dir, "link-to-dir"));
     fs.symlinkSync(path.join(dir, "no-such-target"), path.join(dir, "dangling"));

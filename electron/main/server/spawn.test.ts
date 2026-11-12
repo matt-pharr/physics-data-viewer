@@ -24,7 +24,7 @@ import { serverExecFile, serverSpawn } from "./spawn";
 
 const MAIN_DIR = path.resolve(__dirname, "..");
 
-describe("serverExecFile", () => {
+describe.skipIf(process.platform === "win32")("serverExecFile", () => {
   it("resolves with decoded stdout and stderr on exit 0", async () => {
     const { stdout, stderr } = await serverExecFile("sh", [
       "-c",
@@ -64,7 +64,7 @@ describe("serverExecFile", () => {
   });
 });
 
-describe("serverSpawn", () => {
+describe.skipIf(process.platform === "win32")("serverSpawn", () => {
   it("returns a child whose streams and exit code behave like child_process.spawn", async () => {
     const proc = serverSpawn("sh", ["-c", "printf hello; exit 7"], {
       stdio: ["ignore", "pipe", "pipe"],

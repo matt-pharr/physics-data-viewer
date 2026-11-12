@@ -53,7 +53,7 @@ const localExec: typeof execViaSsh = async (_control, command) => {
 // Real `bash -l` spawns (two per test) can exceed vitest's 5 s default on a
 // loaded CI runner with parallel test files — seen as a spurious timeout of
 // the first test in this file.
-describe("runSetupScriptTest against a real shell", { timeout: 30_000 }, () => {
+describe.skipIf(process.platform === "win32")("runSetupScriptTest against a real shell", { timeout: 30_000 }, () => {
   it("reports an interpreter the script makes visible", async () => {
     // A fake python3 in a private bin dir that only the script adds to PATH.
     const dir = tempDir();

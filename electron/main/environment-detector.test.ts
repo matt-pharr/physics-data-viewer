@@ -13,6 +13,7 @@
  * Reference: ARCHITECTURE.md §5.1, §10
  */
 
+import * as path from "path";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { EnvironmentDetector } from "./environment-detector";
 import { setAppVersion } from "./pdv-protocol";
@@ -154,7 +155,7 @@ describe("EnvironmentDetector", () => {
       process.env.CONDA_PREFIX = "/opt/conda/envs/myenv";
       const condaPython =
         process.platform === "win32"
-          ? "/opt/conda/envs/myenv/python.exe"
+          ? path.join("/opt/conda/envs/myenv", "python.exe")
           : "/opt/conda/envs/myenv/bin/python";
 
       mockExecPerCommand({

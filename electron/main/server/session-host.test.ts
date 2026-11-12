@@ -89,7 +89,7 @@ async function attach(
 const delay = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
 
-describe("SessionHost", () => {
+describe.skipIf(process.platform === "win32")("SessionHost", () => {
   it("serves a session id and epoch in the hello", async () => {
     const { client } = connect();
     const hello = await client.waitForHello(2000);

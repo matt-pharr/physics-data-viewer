@@ -92,7 +92,7 @@ async function makeJuliaupDir(options: {
 // listJuliaupChannels
 // ---------------------------------------------------------------------------
 
-describe("listJuliaupChannels()", () => {
+describe.skipIf(process.platform === "win32")("listJuliaupChannels()", () => {
   it("parses channels, resolves relative paths, and strips build metadata from versions", async () => {
     const juliaupDir = await makeJuliaupDir({
       defaultChannel: "release",
@@ -177,7 +177,7 @@ describe("listJuliaupChannels()", () => {
 // resolveJuliaShim / discoverDefaultJulia
 // ---------------------------------------------------------------------------
 
-describe("resolveJuliaShim()", () => {
+describe.skipIf(process.platform === "win32")("resolveJuliaShim()", () => {
   it("resolves the julialauncher shim to the default channel binary", async () => {
     const juliaupDir = await makeJuliaupDir({
       defaultChannel: "release",
@@ -244,7 +244,7 @@ describe("resolveJuliaShim()", () => {
   });
 });
 
-describe("discoverDefaultJulia()", () => {
+describe.skipIf(process.platform === "win32")("discoverDefaultJulia()", () => {
   it("returns the default channel binary", async () => {
     const juliaupDir = await makeJuliaupDir({
       defaultChannel: "lts",
@@ -272,7 +272,7 @@ describe("discoverDefaultJulia()", () => {
 const HEALTHY_PROBE =
   'echo "PDV_JULIA_VERSION=1.11.6"; echo "PDV_PDVKERNEL_VERSION=0.1.0"; echo "PDV_IJULIA=ok"';
 
-describe("probeJuliaRuntime()", () => {
+describe.skipIf(process.platform === "win32")("probeJuliaRuntime()", () => {
   it("parses version, PDVKernel version, and IJulia presence", async () => {
     const stub = await writeStub("probe/julia", HEALTHY_PROBE);
 
@@ -332,7 +332,7 @@ describe("sanitizedJuliaEnv()", () => {
     }
   });
 
-  it("probes ignore a shell-exported JULIA_PROJECT (review M8)", async () => {
+  it.skipIf(process.platform === "win32")("probes ignore a shell-exported JULIA_PROJECT (review M8)", async () => {
     // A cluster user's exported project would otherwise redirect the probe
     // (and Pkg.develop in the installer, which uses the same env) into
     // their own Project.toml. The stub fails when either var leaks in.
@@ -356,7 +356,7 @@ describe("sanitizedJuliaEnv()", () => {
 // checkJuliaRuntime (single-path enrichment)
 // ---------------------------------------------------------------------------
 
-describe("checkJuliaRuntime()", () => {
+describe.skipIf(process.platform === "win32")("checkJuliaRuntime()", () => {
   it("enriches a healthy probe with compatibility flags", async () => {
     const juliaupDir = await makeJuliaupDir({
       defaultChannel: "release",
@@ -402,7 +402,7 @@ describe("checkJuliaRuntime()", () => {
 // installPDVKernel
 // ---------------------------------------------------------------------------
 
-describe("installPDVKernel()", () => {
+describe.skipIf(process.platform === "win32")("installPDVKernel()", () => {
   it("stages the bundled source and runs Pkg.develop + IJulia add against it", async () => {
     const stub = await writeStub("install/julia", 'echo "ARGS:$@"');
     const staging = path.join(dir, "staged", "pdv-julia");

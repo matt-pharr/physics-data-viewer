@@ -385,7 +385,7 @@ describe("project:load", () => {
     harness.kernelWorkingDirs.set("k1", "/tmp/wd");
     await getHandler(IPC.project.load)({}, "/save", { restoreFromAutosave: true });
     expect(projectFileSyncMocks.overlayAutosaveTreeFiles).toHaveBeenCalledWith(
-      "/save/.autosave",
+      path.join("/save", ".autosave"),
       "/tmp/wd",
     );
   });

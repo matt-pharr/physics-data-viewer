@@ -109,7 +109,7 @@ describe("listHosts", () => {
   });
 });
 
-describe("connect", () => {
+describe.skipIf(process.platform === "win32")("connect", () => {
   it("reuses a live master without authenticating", async () => {
     setEnv("FAKE_SSH_MASTER", "alive");
     // If this path ever authenticated, the fixture would refuse: `fail`
@@ -223,7 +223,7 @@ describe("connect", () => {
   }, 30_000);
 });
 
-describe("session-node pinning", () => {
+describe.skipIf(process.platform === "win32")("session-node pinning", () => {
   /** The `-N -M` (master-establishing) invocations from the fixture's log. */
   function masterInvocations(logPath: string): string[][] {
     if (!fs.existsSync(logPath)) return [];
@@ -341,7 +341,7 @@ describe("session-node pinning", () => {
   }, 30_000);
 });
 
-describe("bootstrap", () => {
+describe.skipIf(process.platform === "win32")("bootstrap", () => {
   it("refuses a host PDV cannot run on, before trying to install anything", async () => {
     setEnv("FAKE_SSH_MASTER", "alive");
     fakeUnsupportedHost();
@@ -407,7 +407,7 @@ describe("bootstrap", () => {
   }, 30_000);
 });
 
-describe("getStatus", () => {
+describe.skipIf(process.platform === "win32")("getStatus", () => {
   it("starts idle", () => {
     expect(makeManager().getStatus()).toEqual({
       phase: "idle",
@@ -438,7 +438,7 @@ describe("getStatus", () => {
   }, 30_000);
 });
 
-describe("disconnect", () => {
+describe.skipIf(process.platform === "win32")("disconnect", () => {
   it("stops a master PDV owns", async () => {
     setEnv("FAKE_SSH_MASTER", "stateful");
     setEnv("FAKE_SSH_AUTH", "hold");

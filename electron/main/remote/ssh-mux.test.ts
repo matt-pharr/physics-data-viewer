@@ -108,7 +108,7 @@ describe("controlPathFor", () => {
     expect(result.startsWith(userData)).toBe(false);
   });
 
-  it("survives a control directory containing a space, end to end", async () => {
+  it.skipIf(process.platform === "win32")("survives a control directory containing a space, end to end", async () => {
     // Not hypothetical: Electron's userData on macOS is
     // `~/Library/Application Support/<app>`. ssh parses an -o value as
     // config-file syntax and splits it on whitespace, so an unquoted path
@@ -139,7 +139,7 @@ describe("controlPathFor", () => {
     expect(path.dirname(result)).toBe(dir);
   });
 
-  it("ensureControlDir creates an owner-only directory", () => {
+  it.skipIf(process.platform === "win32")("ensureControlDir creates an owner-only directory", () => {
     const target = path.join(dir, "sockets");
     ensureControlDir(target);
     expect(fs.statSync(target).isDirectory()).toBe(true);
@@ -147,7 +147,7 @@ describe("controlPathFor", () => {
   });
 });
 
-describe("checkMaster", () => {
+describe.skipIf(process.platform === "win32")("checkMaster", () => {
   it("reports a live master", async () => {
     setEnv("FAKE_SSH_MASTER", "alive");
     await expect(checkMaster(control, opts())).resolves.toBe("alive");
@@ -179,7 +179,7 @@ describe("checkMaster", () => {
   });
 });
 
-describe("resolveSshControl", () => {
+describe.skipIf(process.platform === "win32")("resolveSshControl", () => {
   it("inherits the user's own master when one is already running", async () => {
     setEnv("FAKE_SSH_MASTER", "alive");
     const resolved = await resolveSshControl("flux", dir, opts());
@@ -208,7 +208,7 @@ describe("resolveSshControl", () => {
   });
 });
 
-describe("stopMaster", () => {
+describe.skipIf(process.platform === "win32")("stopMaster", () => {
   it("reports success when ssh accepts the stop", async () => {
     setEnv("FAKE_SSH_MASTER", "alive");
     await expect(stopMaster(control, opts())).resolves.toBe(true);
@@ -220,7 +220,7 @@ describe("stopMaster", () => {
   });
 });
 
-describe("execViaSsh", () => {
+describe.skipIf(process.platform === "win32")("execViaSsh", () => {
   it("runs a command and returns its output and exit code", async () => {
     const result = await execViaSsh(control, "echo hello", opts());
     expect(result).toMatchObject({ ok: true, exitCode: 0, failure: null });

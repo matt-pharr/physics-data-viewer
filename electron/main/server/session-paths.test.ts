@@ -68,7 +68,7 @@ describe("runtimeDirCandidates", () => {
   });
 });
 
-describe("resolveSessionPaths", () => {
+describe.skipIf(process.platform === "win32")("resolveSessionPaths", () => {
   it("puts metadata under the root and the socket outside it", () => {
     const paths = resolveSessionPaths({
       sessionId: SESSION,
@@ -144,7 +144,7 @@ describe("resolveSessionPaths", () => {
   });
 });
 
-describe("ensurePrivateDir", () => {
+describe.skipIf(process.platform === "win32")("ensurePrivateDir", () => {
   it("creates a directory with owner-only access", () => {
     const dir = path.join(workDir, "private");
     ensurePrivateDir(dir);

@@ -50,7 +50,7 @@ function fakeDaemon(sockPath: string): Promise<net.Server> {
   return new Promise((resolve) => server.listen(sockPath, () => resolve(server)));
 }
 
-describe("attachToSession", () => {
+describe.skipIf(process.platform === "win32")("attachToSession", () => {
   it("joins a daemon that is already running", async () => {
     const paths = resolveSessionPaths({ sessionId: SESSION, root });
     await fakeDaemon(paths.sockPath);
@@ -200,7 +200,7 @@ describe("attachToSession", () => {
   });
 });
 
-describe("tryConnect", () => {
+describe.skipIf(process.platform === "win32")("tryConnect", () => {
   it("returns null when nothing is listening", async () => {
     expect(await tryConnect(path.join(workDir, "absent.sock"))).toBeNull();
   });

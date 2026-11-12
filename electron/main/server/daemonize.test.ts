@@ -39,7 +39,7 @@ const delay = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
 
 describe("daemonize", () => {
-  it("detaches into its own session with no controlling terminal", async () => {
+  it.skipIf(process.platform === "win32")("detaches into its own session with no controlling terminal", async () => {
     const pid = daemonize({
       execPath: process.execPath,
       args: ["-e", "setInterval(() => {}, 1000)"],

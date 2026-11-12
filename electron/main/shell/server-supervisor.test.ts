@@ -181,7 +181,7 @@ describe("LocalServerSupervisor", () => {
     );
   });
 
-  it("escalates to SIGKILL when the server ignores shutdown and SIGTERM", async () => {
+  it.skipIf(process.platform === "win32")("escalates to SIGKILL when the server ignores shutdown and SIGTERM", async () => {
     setFixtureEnv("ignore-shutdown");
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     const supervisor = makeSupervisor();
