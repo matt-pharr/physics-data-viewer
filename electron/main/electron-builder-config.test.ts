@@ -33,8 +33,9 @@ describe("electron-builder.yml extraResources", () => {
 
   it("bundles the pdv-python wheel and uv binary on every desktop platform (§10.5.6–7)", () => {
     const macBlock = configText.slice(configText.indexOf("mac:"), configText.indexOf("dmg:"));
-    const linuxBlock = configText.slice(configText.indexOf("linux:"));
-    for (const block of [macBlock, linuxBlock]) {
+    const linuxBlock = configText.slice(configText.indexOf("linux:"), configText.indexOf("win:"));
+    const winBlock = configText.slice(configText.indexOf("win:"));
+    for (const block of [macBlock, linuxBlock, winBlock]) {
       expect(block).toContain("to: uv");
       expect(block).toContain("to: pdv-python-wheel");
     }

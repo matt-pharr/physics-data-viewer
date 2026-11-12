@@ -49,7 +49,7 @@ const TARGETS = {
 };
 
 /** Targets fetched by default — keep in sync with electron-builder.yml. */
-const PACKAGED_TARGETS = ["darwin-arm64", "linux-x64"];
+const PACKAGED_TARGETS = ["darwin-arm64", "linux-x64", "win32-x64"];
 
 /**
  * Targets the remote server bundle ships (build-server-bundle.mjs). Remote
