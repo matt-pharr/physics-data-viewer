@@ -55,9 +55,10 @@ const PACKAGED_TARGETS = ["darwin-arm64", "linux-x64"];
  * Targets the remote server bundle ships (build-server-bundle.mjs). Remote
  * hosts are always linux, whatever OS the app is built on, and the remote
  * server has no PATH fallback for uv — a bundle without one cannot start a
- * Python kernel on a fresh host.
+ * Python kernel on a fresh host. Both arches, matching the Node runtimes
+ * fetch-remote-node.mjs provides.
  */
-const REMOTE_TARGETS = ["linux-x64"];
+const REMOTE_TARGETS = ["linux-x64", "linux-arm64"];
 
 /**
  * Decide which targets to fetch from the CLI flags.

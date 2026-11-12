@@ -286,8 +286,13 @@ describe("launchers.openTerminal", () => {
       string[],
     ];
     const argv = [file, ...args].join(" ");
-    expect(argv).toContain("sh -c");
-    expect(argv).toContain("cd '/tmp/wd'; exec");
+    // A local login shell is built for the host OS (loginShellCommand).
+    if (process.platform === "win32") {
+      expect(argv).toContain("cmd.exe /K cd /d /tmp/wd");
+    } else {
+      expect(argv).toContain("sh -c");
+      expect(argv).toContain("cd '/tmp/wd'; exec");
+    }
   });
 
   it("pins ssh-carried launches to the recorded session node", async () => {

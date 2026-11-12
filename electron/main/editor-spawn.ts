@@ -614,13 +614,43 @@ function quoteForCmd(arg: string): string {
 }
 
 /**
+ * `PATHEXT` extensions {@link toPlatformSpawn} can actually launch. A real
+ * `PATHEXT` also lists `.VBS;.JS;.WSF;.MSC;…`, which cmd opens through file
+ * associations but `spawn` cannot run; matching one would shadow a runnable
+ * `.exe` later on `PATH`.
+ */
+const SPAWNABLE_EXTS = new Set([".com", ".exe", ".bat", ".cmd"]);
+
+/**
+ * Whether `candidate` exists as a link-like entry even though `stat` refused
+ * it — an App Execution Alias. `lstat` reads the reparse point itself, so it
+ * succeeds there, but still fails for a directory the user cannot read at
+ * all (where every probe is EACCES and nothing should match).
+ *
+ * @param candidate - Path that `stat` failed on with EACCES.
+ * @returns True when the entry exists.
+ */
+function isAppExecutionAlias(candidate: string): boolean {
+  try {
+    return fs.lstatSync(candidate).isSymbolicLink();
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Locate `command` the way `cmd.exe` would: through `PATH` with each
- * `PATHEXT` extension. A command that already carries a `PATHEXT` extension,
- * or contains a path separator, is probed as given. `PATH` entries may be
- * double-quoted (legal, and needed for directories containing `;`). An
- * explicit path with no executable extension is only probed with each
- * `PATHEXT` suffix, never bare: Windows cannot execute an extensionless
- * file, so the caller falls through to spawn's own error.
+ * `PATHEXT` extension, restricted to {@link SPAWNABLE_EXTS}. A command that
+ * already carries such an extension, or contains a path separator, is probed
+ * as given. `PATH` entries may be double-quoted (legal, and needed for
+ * directories containing `;`). An explicit path with no executable extension
+ * is only probed with each suffix, never bare: Windows cannot execute an
+ * extensionless file, so the caller falls through to spawn's own error.
+ *
+ * App Execution Aliases (`%LOCALAPPDATA%\Microsoft\WindowsApps\wt.exe`, the
+ * Store `python.exe`, …) are reparse points that `stat` refuses with EACCES
+ * although CreateProcess runs them fine, so an `.exe`/`.com` candidate that
+ * fails that way counts as found when `lstat` confirms it exists.
  *
  * @param command - Executable name or path.
  * @param env - Environment to read `PATH` / `PATHEXT` from.
@@ -630,7 +660,9 @@ export function findOnWindowsPath(
   command: string,
   env: NodeJS.ProcessEnv = process.env,
 ): string | null {
-  const exts = (env.PATHEXT ?? ".COM;.EXE;.BAT;.CMD").split(";").filter(Boolean);
+  const exts = (env.PATHEXT ?? ".COM;.EXE;.BAT;.CMD")
+    .split(";")
+    .filter((e) => SPAWNABLE_EXTS.has(e.toLowerCase()));
   const ext = path.win32.extname(command).toLowerCase();
   const names = exts.some((e) => e.toLowerCase() === ext)
     ? [command]
@@ -646,7 +678,14 @@ export function findOnWindowsPath(
       const candidate = dir ? path.join(dir, name) : name;
       try {
         if (fs.statSync(candidate).isFile()) return candidate;
-      } catch {
+      } catch (err) {
+        if (
+          (err as NodeJS.ErrnoException).code === "EACCES" &&
+          /\.(exe|com)$/i.test(candidate) &&
+          isAppExecutionAlias(candidate)
+        ) {
+          return candidate;
+        }
         /* try next candidate */
       }
     }

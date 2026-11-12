@@ -20,24 +20,42 @@ export function pathSeparatorFor(p: string): '/' | '\\' {
 }
 
 /**
+ * Separators that split `p`: both for a Windows-style path (which accepts
+ * either), only `/` for a POSIX path (where `\` is an ordinary filename
+ * character).
+ *
+ * @param p - A path.
+ * @returns The splitting pattern.
+ */
+function separatorsFor(p: string): RegExp {
+  return pathSeparatorFor(p) === '\\' ? /[\\/]/ : /\//;
+}
+
+/**
  * Join a child name onto a directory using the directory's own separator.
+ * A Windows path spelled with forward slashes only (`c:/Users/me`) keeps
+ * them rather than gaining a mixed `\`.
  *
  * @param dir - Parent directory.
  * @param name - A single path segment.
  * @returns `dir` + separator + `name` (no doubled separator).
  */
 export function joinPath(dir: string, name: string): string {
-  return /[\\/]$/.test(dir) ? `${dir}${name}` : `${dir}${pathSeparatorFor(dir)}${name}`;
+  const windows = pathSeparatorFor(dir) === '\\';
+  const endsWithSep = windows ? /[\\/]$/.test(dir) : dir.endsWith('/');
+  if (endsWithSep) return `${dir}${name}`;
+  const sep = windows && !dir.includes('\\') ? '/' : pathSeparatorFor(dir);
+  return `${dir}${sep}${name}`;
 }
 
 /**
- * Last segment of a path, accepting either separator.
+ * Last segment of a path, split on the path's own separators.
  *
  * @param p - A path.
  * @returns The final non-empty segment, or `p` when it has none.
  */
 export function baseName(p: string): string {
-  return p.split(/[\\/]/).filter(Boolean).pop() ?? p;
+  return p.split(separatorsFor(p)).filter(Boolean).pop() ?? p;
 }
 
 /**
@@ -50,8 +68,11 @@ export function baseName(p: string): string {
 export function dirName(p: string): string {
   // A UNC share root (`\\server\share`) is itself a root: it has no parent.
   if (/^\\\\[^\\/]+[\\/][^\\/]+[\\/]*$/.test(p)) return p;
-  const trimmed = p.replace(/[\\/]+$/, '');
-  const idx = Math.max(trimmed.lastIndexOf('/'), trimmed.lastIndexOf('\\'));
+  const windows = pathSeparatorFor(p) === '\\';
+  const trimmed = p.replace(windows ? /[\\/]+$/ : /\/+$/, '');
+  const idx = windows
+    ? Math.max(trimmed.lastIndexOf('/'), trimmed.lastIndexOf('\\'))
+    : trimmed.lastIndexOf('/');
   if (idx < 0) return p;
   const parent = trimmed.slice(0, idx);
   // Keep the root's separator: "/a" → "/", "C:\a" → "C:\".

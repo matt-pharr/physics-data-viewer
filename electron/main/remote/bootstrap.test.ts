@@ -20,6 +20,14 @@ import type { SshControl } from "./ssh-mux";
 import { TEST_PDV_VERSION } from "../test-helpers";
 
 const FAKE_SSH = path.join(__dirname, "__fixtures__", "fake-ssh.cjs");
+
+/**
+ * The fixture needs `/bin/sh`, and the bundles are built with whatever `tar`
+ * is on PATH — on Windows usually Git's GNU tar, which reads the `C:` in a
+ * path as a remote host. Remote hosts are linux anyway, so the shell-backed
+ * suites run on POSIX only (CI covers them on Linux and macOS).
+ */
+const describePosix = describe.skipIf(process.platform === "win32");
 const control: SshControl = { host: "feyn", controlPath: "/tmp/pdv-bootstrap-test.sock" };
 
 let dir: string;
@@ -85,7 +93,7 @@ afterEach(() => {
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-describe("probeHost", () => {
+describePosix("probeHost", () => {
   it("reports what the host is", async () => {
     const probe = await probeHost(control, opts());
     expect(probe.sys).toBe(os.platform() === "darwin" ? "Darwin" : "Linux");
@@ -150,7 +158,7 @@ describe("probeHost", () => {
   }, 30_000);
 });
 
-describe("uploadFile", () => {
+describePosix("uploadFile", () => {
   it("transfers a file and reports progress", async () => {
     const source = path.join(dir, "payload.bin");
     fs.writeFileSync(source, Buffer.alloc(256 * 1024, 7));
@@ -169,7 +177,7 @@ describe("uploadFile", () => {
   }, 30_000);
 });
 
-describe("installBundle", () => {
+describePosix("installBundle", () => {
   it("installs, verifies and self-checks", async () => {
     const { tarball, sha256 } = makeBundle();
     const stages: string[] = [];
@@ -277,7 +285,7 @@ describe("installBundle", () => {
   }, 60_000);
 });
 
-describe("remoteServerCommand", () => {
+describePosix("remoteServerCommand", () => {
   it("hands the server every bundled-path variable, $HOME-expanded", () => {
     // Executed under a real shell against a staged install, because the env
     // the *server process* receives is the contract — not the string. The

@@ -25,6 +25,10 @@ describe('joinPath', () => {
     expect(joinPath('/home/me/PDV_projects', 'test')).toBe('/home/me/PDV_projects/test');
   });
 
+  it('keeps forward slashes on a Windows path spelled with them', () => {
+    expect(joinPath('c:/Users/me', 'test')).toBe('c:/Users/me/test');
+  });
+
   it('does not double a trailing separator', () => {
     expect(joinPath('C:\\', 'test')).toBe('C:\\test');
     expect(joinPath('/', 'test')).toBe('/test');
@@ -48,5 +52,10 @@ describe('baseName / dirName', () => {
     expect(baseName('/home/me/proj/')).toBe('proj');
     expect(dirName('/home/me/proj')).toBe('/home/me');
     expect(dirName('/proj')).toBe('/');
+  });
+
+  it('treat a backslash in a POSIX path as part of the name', () => {
+    expect(baseName('/home/me/a\\b')).toBe('a\\b');
+    expect(dirName('/home/me/a\\b')).toBe('/home/me');
   });
 });

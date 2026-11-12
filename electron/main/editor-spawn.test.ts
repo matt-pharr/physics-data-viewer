@@ -55,6 +55,36 @@ describe("toPlatformSpawn (Windows)", () => {
     expect(findOnWindowsPath("missing", env)).toBeNull();
   });
 
+  it("skips PATHEXT matches spawn cannot run", () => {
+    // A real PATHEXT lists .js/.vbs/…; an earlier foo.js must not shadow a
+    // runnable foo.exe further down PATH.
+    const scriptDir = fs.mkdtempSync(path.join(os.tmpdir(), "pdv-js-"));
+    try {
+      fs.writeFileSync(path.join(scriptDir, "wt.js"), "");
+      const withJs = { ...env, PATH: `${scriptDir};${binDir}`, PATHEXT: ".js;.exe" };
+      expect(findOnWindowsPath("wt", withJs)).toBe(path.join(binDir, "wt.exe"));
+    } finally {
+      fs.rmSync(scriptDir, { recursive: true, force: true });
+    }
+  });
+
+  // App Execution Aliases exist only on Windows; stat refuses them (EACCES).
+  const aliasDir = path.join(process.env.LOCALAPPDATA ?? "", "Microsoft", "WindowsApps");
+  const alias = ["wt.exe", "winget.exe", "python.exe"].find((name) => {
+    try {
+      return fs.lstatSync(path.join(aliasDir, name)).isSymbolicLink();
+    } catch {
+      return false;
+    }
+  });
+  it.skipIf(process.platform !== "win32" || !alias)(
+    "resolves an App Execution Alias that stat refuses",
+    () => {
+      const aliasEnv = { ...env, PATH: aliasDir };
+      expect(findOnWindowsPath(alias!, aliasEnv)).toBe(path.join(aliasDir, alias!));
+    },
+  );
+
   it("accepts double-quoted PATH entries", () => {
     const quoted = { ...env, PATH: `"${binDir}"` };
     expect(findOnWindowsPath("code", quoted)).toBe(path.join(binDir, "code.cmd"));
