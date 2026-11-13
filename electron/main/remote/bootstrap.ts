@@ -38,6 +38,7 @@ import * as fs from "fs";
 import {
   baseSshArgs,
   execViaSsh,
+  resolveDefaultSshBinary,
   type SshControl,
   type SshMuxOptions,
 } from "./ssh-mux";
@@ -307,7 +308,7 @@ export async function uploadFile(
   ];
 
   return await new Promise<boolean>((resolve) => {
-    const child = spawn(options.sshPath ?? "ssh", args, {
+    const child = spawn(options.sshPath ?? resolveDefaultSshBinary(), args, {
       stdio: ["pipe", "ignore", "pipe"],
     });
     let transferred = 0;

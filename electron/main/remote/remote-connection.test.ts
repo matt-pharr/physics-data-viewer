@@ -467,3 +467,29 @@ describe.skipIf(process.platform === "win32")("disconnect", () => {
     await expect(manager.disconnect()).resolves.toBeUndefined();
   });
 });
+
+describe("Windows Git for Windows SSH requirement", () => {
+  it.runIf(process.platform === "win32")(
+    "raises a clear warning and suggests installing Git for Windows when usr\\bin\\ssh.exe is absent",
+    async () => {
+      setEnv("PATH", "C:\\Windows\\System32\\OpenSSH");
+      setEnv("Path", "C:\\Windows\\System32\\OpenSSH");
+      setEnv("LOCALAPPDATA", "");
+      setEnv("ProgramFiles", "");
+      setEnv("ProgramFiles(x86)", "");
+      setEnv("USERPROFILE", "");
+
+      const manager = makeManager({ sshPath: undefined });
+      const result = await manager.connect("flux");
+
+      expect(result.ok).toBe(false);
+      expect(result.failure).toBe("ssh-unsupported");
+      expect(result.message).toMatch(/Git for Windows/i);
+      expect(result.message).toContain("https://git-scm.com/download/win");
+      expect(statuses.at(-1)).toMatchObject({
+        phase: "failed",
+        host: "flux",
+      });
+    },
+  );
+});

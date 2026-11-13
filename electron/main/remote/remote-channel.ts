@@ -25,7 +25,12 @@
 import { spawn, type ChildProcess } from "child_process";
 import type { Readable, Writable } from "stream";
 
-import { baseSshArgs, type SshControl, type SshMuxOptions } from "./ssh-mux";
+import {
+  baseSshArgs,
+  resolveDefaultSshBinary,
+  type SshControl,
+  type SshMuxOptions,
+} from "./ssh-mux";
 
 /** A channel to a remote session: the RPC streams plus a teardown. */
 export interface RemoteSessionChannel {
@@ -92,7 +97,7 @@ export function openSessionChannel(
       (opts.create ? " --create" : ""),
   ];
 
-  const child = spawn(opts.sshPath ?? "ssh", args, {
+  const child = spawn(opts.sshPath ?? resolveDefaultSshBinary(), args, {
     // stdin/stdout are the protocol; stderr is diagnostics and must stay
     // out of the frame stream.
     stdio: ["pipe", "pipe", "pipe"],
