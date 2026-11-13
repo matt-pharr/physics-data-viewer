@@ -3,7 +3,8 @@
  *
  * Presents a project name text field and a location picker that opens the
  * native OS directory chooser. The final save directory is
- * `<location>/<sanitized-name>/`. The dialog creates the folder automatically.
+ * `<location>/<sanitized-name>/`, joined with the location's own separator
+ * (`\` for Windows paths). The dialog creates the folder automatically.
  *
  * Follows the standard modal-overlay pattern used by CreateScriptDialog,
  * ImportModuleDialog, etc.
@@ -12,6 +13,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { pickServerPath } from '../../services/pick-path';
 import { useModalKeyboard } from '../../hooks/useModalKeyboard';
+import { joinPath } from '../../utils/path';
 
 interface SaveAsDialogProps {
   /** Default parent directory shown when the dialog opens (e.g. parent of currentProjectDir). */
@@ -64,10 +66,7 @@ export const SaveAsDialog: React.FC<SaveAsDialogProps> = ({
 
   const handleSubmit = () => {
     if (!canSave) return;
-    // Build the full save directory path: <location>/<sanitizedName>
-    const sep = location.endsWith('/') || location.endsWith('\\') ? '' : '/';
-    const saveDir = `${location}${sep}${sanitized}`;
-    onSave(name.trim(), saveDir);
+    onSave(name.trim(), joinPath(location, sanitized));
   };
 
   const handleKeyDown = useModalKeyboard({ onSubmit: handleSubmit, onCancel });
@@ -118,7 +117,7 @@ export const SaveAsDialog: React.FC<SaveAsDialogProps> = ({
 
           {canSave && (
             <div className="save-as-hint">
-              Will save to: <code>{location}{location.endsWith('/') ? '' : '/'}{sanitized}</code>
+              Will save to: <code>{joinPath(location, sanitized)}</code>
             </div>
           )}
 

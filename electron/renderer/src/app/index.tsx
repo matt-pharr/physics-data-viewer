@@ -71,6 +71,7 @@ import { useWelcomeState } from './useWelcomeState';
 import { useThemeManager } from './useThemeManager';
 import { useTreeAction } from '../hooks/useTreeAction';
 import { useStore } from '../store';
+import { baseName } from '../utils/path';
 
 type KernelStatus = 'idle' | 'starting' | 'ready' | 'error';
 type CodeCellExecutionError = {
@@ -337,9 +338,7 @@ const App: React.FC = () => {
 
   useEffect(() => {
     const projectName = currentProjectName
-      ?? (currentProjectDir
-        ? currentProjectDir.split('/').filter(Boolean).pop() ?? 'Unsaved Project'
-        : 'Unsaved Project');
+      ?? (currentProjectDir ? baseName(currentProjectDir) : 'Unsaved Project');
     document.title = `PDV: ${projectName}`;
   }, [currentProjectDir, currentProjectName]);
 
@@ -1636,9 +1635,7 @@ const App: React.FC = () => {
   }, [kernelStatus, activeLanguage, executeOpenProject, executeRecoverUnsaved]);
 
   const projectTitle = currentProjectName
-    ?? (currentProjectDir
-      ? currentProjectDir.split('/').filter(Boolean).pop() ?? 'Unsaved Project'
-      : 'Unsaved Project');
+    ?? (currentProjectDir ? baseName(currentProjectDir) : 'Unsaved Project');
 
   return (
     <div className="app">

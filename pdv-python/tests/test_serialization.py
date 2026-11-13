@@ -756,6 +756,7 @@ class TestAddFile:
         import pdv.comms as comms_mod
 
         monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("USERPROFILE", str(tmp_path))
         source = tmp_path / "mesh.h5"
         source.write_bytes(b"tilde-content")
 

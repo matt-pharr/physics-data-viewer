@@ -23,6 +23,8 @@ import {
   controlPathFor,
   ensureControlDir,
   execViaSsh,
+  findGitForWindowsSsh,
+  resolveDefaultSshBinary,
   resolveSshControl,
   stopMaster,
   type SshControl,
@@ -108,7 +110,7 @@ describe("controlPathFor", () => {
     expect(result.startsWith(userData)).toBe(false);
   });
 
-  it("survives a control directory containing a space, end to end", async () => {
+  it.skipIf(process.platform === "win32")("survives a control directory containing a space, end to end", async () => {
     // Not hypothetical: Electron's userData on macOS is
     // `~/Library/Application Support/<app>`. ssh parses an -o value as
     // config-file syntax and splits it on whitespace, so an unquoted path
@@ -139,7 +141,7 @@ describe("controlPathFor", () => {
     expect(path.dirname(result)).toBe(dir);
   });
 
-  it("ensureControlDir creates an owner-only directory", () => {
+  it.skipIf(process.platform === "win32")("ensureControlDir creates an owner-only directory", () => {
     const target = path.join(dir, "sockets");
     ensureControlDir(target);
     expect(fs.statSync(target).isDirectory()).toBe(true);
@@ -147,7 +149,7 @@ describe("controlPathFor", () => {
   });
 });
 
-describe("checkMaster", () => {
+describe.skipIf(process.platform === "win32")("checkMaster", () => {
   it("reports a live master", async () => {
     setEnv("FAKE_SSH_MASTER", "alive");
     await expect(checkMaster(control, opts())).resolves.toBe("alive");
@@ -179,7 +181,7 @@ describe("checkMaster", () => {
   });
 });
 
-describe("resolveSshControl", () => {
+describe.skipIf(process.platform === "win32")("resolveSshControl", () => {
   it("inherits the user's own master when one is already running", async () => {
     setEnv("FAKE_SSH_MASTER", "alive");
     const resolved = await resolveSshControl("flux", dir, opts());
@@ -208,7 +210,7 @@ describe("resolveSshControl", () => {
   });
 });
 
-describe("stopMaster", () => {
+describe.skipIf(process.platform === "win32")("stopMaster", () => {
   it("reports success when ssh accepts the stop", async () => {
     setEnv("FAKE_SSH_MASTER", "alive");
     await expect(stopMaster(control, opts())).resolves.toBe(true);
@@ -220,7 +222,7 @@ describe("stopMaster", () => {
   });
 });
 
-describe("execViaSsh", () => {
+describe.skipIf(process.platform === "win32")("execViaSsh", () => {
   it("runs a command and returns its output and exit code", async () => {
     const result = await execViaSsh(control, "echo hello", opts());
     expect(result).toMatchObject({ ok: true, exitCode: 0, failure: null });
@@ -344,5 +346,47 @@ describe("execViaSsh", () => {
     const withB = lines.find((l) => l.includes("echo b")) ?? "";
     expect(withA).toContain("BatchMode=yes");
     expect(withB).not.toContain("BatchMode=yes");
+  });
+});
+
+describe("findGitForWindowsSsh & resolveDefaultSshBinary", () => {
+  it("derives Git's usr\\bin\\ssh.exe from a Git\\cmd PATH entry and ignores System32\\OpenSSH", () => {
+    const env: NodeJS.ProcessEnv = {
+      PATH: "C:\\Windows\\System32\\OpenSSH;C:\\Custom\\Git\\cmd",
+      LOCALAPPDATA: "",
+      ProgramFiles: "",
+      "ProgramFiles(x86)": "",
+      USERPROFILE: "",
+    };
+    const found = findGitForWindowsSsh(
+      env,
+      (p) => p === "C:\\Custom\\Git\\usr\\bin\\ssh.exe",
+    );
+    expect(found).toBe("C:\\Custom\\Git\\usr\\bin\\ssh.exe");
+  });
+
+  it("checks standard LocalAppData and ProgramFiles Git roots when not on PATH", () => {
+    const env: NodeJS.ProcessEnv = {
+      PATH: "C:\\Windows\\System32\\OpenSSH",
+      LOCALAPPDATA: "C:\\Users\\alice\\AppData\\Local",
+      ProgramFiles: "C:\\Program Files",
+      "ProgramFiles(x86)": "",
+      USERPROFILE: "",
+    };
+    const expected = "C:\\Users\\alice\\AppData\\Local\\Programs\\Git\\usr\\bin\\ssh.exe";
+    expect(findGitForWindowsSsh(env, (p) => p === expected)).toBe(expected);
+  });
+
+  it("returns null when Git for Windows is not installed", () => {
+    const env: NodeJS.ProcessEnv = {
+      PATH: "C:\\Windows\\System32\\OpenSSH",
+      LOCALAPPDATA: "",
+      ProgramFiles: "",
+      "ProgramFiles(x86)": "",
+      USERPROFILE: "",
+    };
+    expect(findGitForWindowsSsh(env, () => false)).toBeNull();
+    expect(resolveDefaultSshBinary("win32", env, () => false)).toBe("ssh");
+    expect(resolveDefaultSshBinary("linux", env, () => true)).toBe("ssh");
   });
 });

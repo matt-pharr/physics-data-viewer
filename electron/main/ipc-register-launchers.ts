@@ -38,6 +38,7 @@ import {
   buildEditorSpawn,
   loginShellCommand,
   resolveEditorSpawn,
+  toPlatformSpawn,
   wrapInTerminalPreset,
 } from "./editor-spawn";
 import { IPC, type LauncherCheck, type McpStatus, type ScriptOperationResult } from "./ipc";
@@ -59,7 +60,8 @@ import type { SshControl } from "./remote/ssh-mux";
  * @param label - Short label used in error logs (e.g. `"agent"`).
  */
 function spawnDetached(spec: { file: string; args: string[] }, label: string): void {
-  const child = spawn(spec.file, spec.args, { detached: true, stdio: "ignore" });
+  const { file, args, ...winOpts } = toPlatformSpawn(spec);
+  const child = spawn(file, args, { detached: true, stdio: "ignore", ...winOpts });
   child.on("error", (err) => {
     const msg =
       err && (err as NodeJS.ErrnoException).code === "ENOENT"
@@ -213,7 +215,8 @@ export function registerLaunchersIpcHandlers(
     }
 
     try {
-      const child = spawn(spawnSpec.file, spawnSpec.args, { detached: true, stdio: "ignore" });
+      const { file, args, ...winOpts } = toPlatformSpawn(spawnSpec);
+      const child = spawn(file, args, { detached: true, stdio: "ignore", ...winOpts });
       child.on("error", (err) => {
         const msg = err && (err as NodeJS.ErrnoException).code === "ENOENT"
           ? `Editor command not found: "${spawnSpec.file}". Configure your editor in Settings → General.`

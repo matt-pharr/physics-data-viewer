@@ -83,6 +83,12 @@ export const GeneralTab: React.FC<GeneralTabProps> = ({
 }) => {
   /** Transient status message under the "Clear autosave data" button. */
   const [clearAutosaveStatus, setClearAutosaveStatus] = useState<string | null>(null);
+  // The default lives on the session's host: Windows spelling only for a
+  // local session on Windows (remote hosts are POSIX).
+  const defaultWorkingDirLabel =
+    !remoteHost && PLATFORM === 'win32'
+      ? 'Default (%USERPROFILE%\\.PDV\\working\\)'
+      : 'Default (~/.PDV/working/)';
 
   return (
     <div className="settings-general">
@@ -226,7 +232,7 @@ export const GeneralTab: React.FC<GeneralTabProps> = ({
         <label htmlFor="sg-working-dir">Working directory</label>
         <div className="settings-general-dir-row">
           <span className="settings-general-dir-path" title={workingDirBase}>
-            {workingDirBase || 'Default (~/.PDV/working/)'}
+            {workingDirBase || defaultWorkingDirLabel}
           </span>
           <button
             className="btn btn-secondary btn-sm"

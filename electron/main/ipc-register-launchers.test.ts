@@ -27,6 +27,12 @@ vi.mock("electron", () => ({
   ipcMain: { handle: ipcRegistry.ipcHandle, removeHandler: vi.fn() },
 }));
 vi.mock("child_process", () => childProcessMocks);
+// The Windows PATHEXT/cmd.exe adaptation is covered in editor-spawn.test.ts;
+// identity here keeps these assertions independent of the host's PATH.
+vi.mock("./editor-spawn", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./editor-spawn")>()),
+  toPlatformSpawn: (spec: { file: string; args: string[] }) => spec,
+}));
 
 import type { PDVConfig } from "./config";
 import { IPC } from "./ipc";
@@ -280,8 +286,13 @@ describe("launchers.openTerminal", () => {
       string[],
     ];
     const argv = [file, ...args].join(" ");
-    expect(argv).toContain("sh -c");
-    expect(argv).toContain("cd '/tmp/wd'; exec");
+    // A local login shell is built for the host OS (loginShellCommand).
+    if (process.platform === "win32") {
+      expect(argv).toContain("cmd.exe /K cd /d /tmp/wd");
+    } else {
+      expect(argv).toContain("sh -c");
+      expect(argv).toContain("cd '/tmp/wd'; exec");
+    }
   });
 
   it("pins ssh-carried launches to the recorded session node", async () => {

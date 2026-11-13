@@ -49,6 +49,7 @@
 import {
   checkMaster,
   controlPathOption,
+  resolveDefaultSshBinary,
   type SshMuxOptions,
 } from "./ssh-mux";
 
@@ -372,7 +373,7 @@ export function establishMasterInteractive(
 
   let child: PtyProcess;
   try {
-    child = pty.spawn(options.sshPath ?? "ssh", buildMasterArgs(options), {
+    child = pty.spawn(options.sshPath ?? resolveDefaultSshBinary(), buildMasterArgs(options), {
       name: "xterm-256color",
       cols: 100,
       rows: 30,

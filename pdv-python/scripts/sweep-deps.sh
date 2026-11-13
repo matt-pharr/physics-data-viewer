@@ -93,7 +93,11 @@ run_cell() {
         echo "  -> package install FAILED (see $log)"
         return
     fi
-    if [ ! -x "$venv/bin/python" ]; then
+    local py_bin="$venv/bin/python"
+    if [ ! -x "$py_bin" ] && [ -x "$venv/Scripts/python.exe" ]; then
+        py_bin="$venv/Scripts/python.exe"
+    fi
+    if [ ! -x "$py_bin" ]; then
         echo "$py,$extras,$res,no,,,,,,," >> "$RESULTS"
         echo "  -> venv missing (see $log)"
         return
@@ -105,7 +109,7 @@ run_cell() {
     echo "### pytest" >> "$log"
     local start end dur
     start=$(date +%s)
-    VIRTUAL_ENV="$venv" "$venv/bin/python" -m pytest "$PROJECT_DIR/tests" -q --no-header \
+    VIRTUAL_ENV="$venv" "$py_bin" -m pytest "$PROJECT_DIR/tests" -q --no-header \
         --tb=line -o cache_dir="$WORKDIR/.pcache" \
         >> "$log" 2>&1
     local pytest_rc=$?

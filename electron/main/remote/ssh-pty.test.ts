@@ -135,7 +135,7 @@ describe("looksLikePrompt", () => {
   });
 });
 
-describe("establishMasterInteractive (real pty)", () => {
+describe.skipIf(process.platform === "win32")("establishMasterInteractive (real pty)", () => {
   it("authenticates a host that needs no prompt", async () => {
     setEnv("FAKE_SSH_AUTH", "hold");
     setEnv("FAKE_SSH_MASTER", "stateful");

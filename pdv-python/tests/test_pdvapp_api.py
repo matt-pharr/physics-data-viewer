@@ -94,6 +94,7 @@ class TestAddFile:
 
     def test_tilde_expansion(self, tree_with_comm, tmp_path, monkeypatch):
         monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("USERPROFILE", str(tmp_path))
         source = tmp_path / "doc.txt"
         source.write_text("hello")
 

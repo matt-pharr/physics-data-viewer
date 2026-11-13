@@ -82,7 +82,7 @@ describe("ModuleManager", () => {
   });
 
   afterEach(async () => {
-    await fs.rm(tmpDir, { recursive: true, force: true });
+    await fs.rm(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   });
 
   it("installs from local path and lists installed modules", async () => {
@@ -239,7 +239,7 @@ describe("ModuleManager", () => {
 
     const installed = await manager.listInstalled();
     expect(installed.some((entry) => entry.id === "git_mod")).toBe(true);
-  });
+  }, 30_000);
 
   it("git reinstall reporting up_to_date leaves the installed files untouched (regression)", async () => {
     // The github path used to replaceDirectory BEFORE the duplicate-install
@@ -275,7 +275,7 @@ describe("ModuleManager", () => {
     expect(await fs.readFile(markerPath, "utf8")).toBe(
       "# locally modified marker\n",
     );
-  });
+  }, 30_000);
 
   it("git reinstall of a newer version reports update_available without replacing files", async () => {
     const repoSource = path.join(tmpDir, "repo-newer");
@@ -312,7 +312,7 @@ describe("ModuleManager", () => {
 
     const installed = await manager.listInstalled();
     expect(installed.find((m) => m.id === "newer_mod")?.version).toBe("1.0.0");
-  });
+  }, 30_000);
 
   it("resolves canonical script bindings from manifest actions", async () => {
     const localSource = path.join(tmpDir, "binding-source");

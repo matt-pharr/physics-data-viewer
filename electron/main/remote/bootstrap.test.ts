@@ -20,6 +20,14 @@ import type { SshControl } from "./ssh-mux";
 import { TEST_PDV_VERSION } from "../test-helpers";
 
 const FAKE_SSH = path.join(__dirname, "__fixtures__", "fake-ssh.cjs");
+
+/**
+ * The fixture needs `/bin/sh`, and the bundles are built with whatever `tar`
+ * is on PATH — on Windows usually Git's GNU tar, which reads the `C:` in a
+ * path as a remote host. Remote hosts are linux anyway, so the shell-backed
+ * suites run on POSIX only (CI covers them on Linux and macOS).
+ */
+const describePosix = describe.skipIf(process.platform === "win32");
 const control: SshControl = { host: "feyn", controlPath: "/tmp/pdv-bootstrap-test.sock" };
 
 let dir: string;
@@ -40,7 +48,10 @@ function opts(extra: Record<string, unknown> = {}) {
  * Build a tarball shaped like a real bundle, with a stub `node` that emits a
  * self-check verdict — so the install path is exercised to its last step.
  */
-function makeBundle(selfCheckOk = true): { tarball: string; sha256: string } {
+function makeBundle(
+  selfCheckOk = true,
+  execMode = 0o755,
+): { tarball: string; sha256: string } {
   const stage = path.join(dir, "stage");
   fs.mkdirSync(path.join(stage, "node", "bin"), { recursive: true });
   fs.mkdirSync(path.join(stage, "node_modules", "zeromq"), { recursive: true });
@@ -53,8 +64,12 @@ function makeBundle(selfCheckOk = true): { tarball: string; sha256: string } {
   fs.writeFileSync(
     path.join(stage, "node", "bin", "node"),
     `#!/bin/sh\necho '${verdict}'\nexit ${selfCheckOk ? 0 : 1}\n`,
-    { mode: 0o755 },
   );
+  fs.mkdirSync(path.join(stage, "resources", "uv"), { recursive: true });
+  fs.writeFileSync(path.join(stage, "resources", "uv", "uv"), "#!/bin/sh\n");
+  // Explicit chmod: writeFileSync's mode is filtered by the umask.
+  fs.chmodSync(path.join(stage, "node", "bin", "node"), execMode);
+  fs.chmodSync(path.join(stage, "resources", "uv", "uv"), execMode);
   const tarball = path.join(dir, "bundle.tar.gz");
   execFileSync("tar", ["-czf", tarball, "-C", stage, "."]);
   return { tarball, sha256: sha256File(tarball) };
@@ -78,7 +93,7 @@ afterEach(() => {
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-describe("probeHost", () => {
+describePosix("probeHost", () => {
   it("reports what the host is", async () => {
     const probe = await probeHost(control, opts());
     expect(probe.sys).toBe(os.platform() === "darwin" ? "Darwin" : "Linux");
@@ -143,7 +158,7 @@ describe("probeHost", () => {
   }, 30_000);
 });
 
-describe("uploadFile", () => {
+describePosix("uploadFile", () => {
   it("transfers a file and reports progress", async () => {
     const source = path.join(dir, "payload.bin");
     fs.writeFileSync(source, Buffer.alloc(256 * 1024, 7));
@@ -162,7 +177,7 @@ describe("uploadFile", () => {
   }, 30_000);
 });
 
-describe("installBundle", () => {
+describePosix("installBundle", () => {
   it("installs, verifies and self-checks", async () => {
     const { tarball, sha256 } = makeBundle();
     const stages: string[] = [];
@@ -178,6 +193,17 @@ describe("installBundle", () => {
     // one round trip instead of re-running everything.
     expect(fs.existsSync(path.join(home, ".pdv-server", TEST_PDV_VERSION, ".selfcheck.json"))).toBe(true);
     expect(stages).toEqual(expect.arrayContaining(["uploading", "verifying", "installing", "checking"]));
+  }, 60_000);
+
+  it("makes node and uv executable even when the tarball does not", async () => {
+    // A bundle built on Windows carries every file as 0644.
+    const { tarball, sha256 } = makeBundle(true, 0o644);
+    const result = await installBundle(control, tarball, sha256, opts());
+    expect(result.ok).toBe(true);
+    const target = path.join(home, ".pdv-server", TEST_PDV_VERSION);
+    for (const rel of ["node/bin/node", "resources/uv/uv"]) {
+      expect(fs.statSync(path.join(target, rel)).mode & 0o111).not.toBe(0);
+    }
   }, 60_000);
 
   it("leaves no staging or upload debris behind", async () => {
@@ -259,7 +285,7 @@ describe("installBundle", () => {
   }, 60_000);
 });
 
-describe("remoteServerCommand", () => {
+describePosix("remoteServerCommand", () => {
   it("hands the server every bundled-path variable, $HOME-expanded", () => {
     // Executed under a real shell against a staged install, because the env
     // the *server process* receives is the contract — not the string. The

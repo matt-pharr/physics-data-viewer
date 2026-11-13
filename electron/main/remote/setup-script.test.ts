@@ -41,10 +41,10 @@ afterEach(() => {
 
 describe("localSetupScriptPath", () => {
   it("keys the master copy on the sanitized host alias", () => {
-    expect(localSetupScriptPath("/d", "feyn")).toBe("/d/feyn.sh");
-    expect(localSetupScriptPath("/d", "flux.pppl.gov")).toBe("/d/flux.pppl.gov.sh");
+    expect(localSetupScriptPath("/d", "feyn")).toBe(path.join("/d", "feyn.sh"));
+    expect(localSetupScriptPath("/d", "flux.pppl.gov")).toBe(path.join("/d", "flux.pppl.gov.sh"));
     expect(localSetupScriptPath("/d", "evil/../host name")).toBe(
-      "/d/evil_.._host_name.sh",
+      path.join("/d", "evil_.._host_name.sh"),
     );
   });
 });

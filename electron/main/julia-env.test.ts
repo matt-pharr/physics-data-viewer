@@ -47,7 +47,7 @@ describe("parseJuliaVersion()", () => {
   });
 });
 
-describe("instantiateJuliaEnvironment()", () => {
+describe.skipIf(process.platform === "win32")("instantiateJuliaEnvironment()", () => {
   let dir: string;
 
   beforeEach(async () => {

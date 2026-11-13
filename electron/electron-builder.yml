@@ -1,6 +1,7 @@
 appId: com.pdv.physics-data-viewer
 productName: PDV
 copyright: Copyright © 2026
+npmRebuild: false
 
 publish:
   provider: github
@@ -26,6 +27,7 @@ files:
       # weight in every build.
       - "!dist/server-bundle/**"
       - renderer/dist/**/*
+      - assets/pdv-icon.ico
       - package.json
       - node_modules/**/*
       - "!node_modules/**/*.{ts,map,md}"
@@ -170,3 +172,33 @@ linux:
     - target: rpm
       arch:
         - x64
+
+# ---------------------------------------------------------------------------
+# Windows
+# ---------------------------------------------------------------------------
+win:
+  icon: assets/pdv-icon.ico
+  # Per-platform uv binary, fetched by scripts/fetch-uv.mjs (ARCHITECTURE.md §10.5.6).
+  # Resolved at runtime as <Resources>/uv/uv.exe by uv-runner.ts.
+  extraResources:
+    - from: resources/uv/win32-x64
+      to: uv
+    # App-managed pdv-python wheel, built by scripts/build-pdv-wheel.mjs (§10.5.7).
+    - from: resources/pdv-python-wheel
+      to: pdv-python-wheel
+  target:
+    - target: nsis
+      arch:
+        - x64
+    - target: zip
+      arch:
+        - x64
+
+# Assisted per-user installer — never requires administrator privileges
+# (installs to %LocalAppData%\Programs\PDV by default, with a directory picker).
+nsis:
+  oneClick: false
+  perMachine: false
+  allowElevation: false
+  allowToChangeInstallationDirectory: true
+  packElevateHelper: false

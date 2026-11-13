@@ -275,6 +275,8 @@ for (const arch of arches) {
     }
     copyInto(resolvedNodeDir, path.join(stage, "node"));
     const nodeBin = path.join(stage, "node", "bin", "node");
+    // A no-op on a Windows build host (no exec bit on NTFS); the installer in
+    // main/remote/bootstrap.ts chmods node and uv on the host regardless.
     if (fs.existsSync(nodeBin)) fs.chmodSync(nodeBin, 0o755);
     nodeVersion = fs.existsSync(path.join(resolvedNodeDir, "version"))
       ? fs.readFileSync(path.join(resolvedNodeDir, "version"), "utf8").trim()

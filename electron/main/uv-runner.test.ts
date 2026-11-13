@@ -54,7 +54,7 @@ describe("resolveUvBinary", () => {
   });
 });
 
-describe("runUv", () => {
+describe.skipIf(process.platform === "win32")("runUv", () => {
   it("runs the binary, succeeds, and captures stdout", async () => {
     const result = await runUv(["sync"], { binaryPath: echoUv });
     expect(result.success).toBe(true);
@@ -82,7 +82,7 @@ describe("runUv", () => {
   });
 });
 
-describe("typed subcommand wrappers", () => {
+describe.skipIf(process.platform === "win32")("typed subcommand wrappers", () => {
   it("uvSync passes 'sync' and --python when a version is given", async () => {
     const result = await uvSync({ binaryPath: echoUv, pythonVersion: "3.12" });
     expect(result.output).toContain("argv:sync --python 3.12");

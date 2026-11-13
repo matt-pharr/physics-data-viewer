@@ -39,7 +39,7 @@ function buildOpenRecentSubmenu(): MenuItemConstructorOptions[] {
     // Show the folder name as the label, with the full path as a sublabel.
     // Remote entries carry their host in both, so two same-named projects on
     // different machines are distinguishable at a glance.
-    const folderName = entry.path.split("/").filter(Boolean).pop() ?? entry.path;
+    const folderName = entry.path.split(/[\\/]/).filter(Boolean).pop() ?? entry.path;
     return {
       label: entry.host ? `${folderName} — ${entry.host}` : folderName,
       sublabel: entry.host ? `${entry.host}:${entry.path}` : entry.path,

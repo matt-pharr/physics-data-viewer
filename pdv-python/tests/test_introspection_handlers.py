@@ -328,12 +328,15 @@ class TestHandleResolvePath:
         payload = mock_comm._sent[0]["payload"]
         assert set(payload["tree_paths"]) == {"a.first", "b.second"}
 
-    def test_reverse_unknown_file_returns_empty_tree_paths(self, tree_with_comm):
+    def test_reverse_unknown_file_returns_empty_tree_paths(
+        self, tree_with_comm, tmp_path
+    ):
         """Reverse: a file path with no owning node returns an empty list."""
         mock_comm = _make_mock_comm()
+        unknown_path = str(tmp_path / "nonexistent" / "tree" / "deadbeef0000" / "foo.py")
         msg = _make_msg(
             "pdv.tree.resolve_path",
-            {"path": "/nonexistent/tree/deadbeef0000/foo.py"},
+            {"path": unknown_path},
         )
         with (
             patch.object(comms_mod, "_comm", mock_comm),

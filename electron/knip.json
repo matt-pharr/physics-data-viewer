@@ -21,6 +21,7 @@
   ],
   "ignore": [
     "renderer/src/vite-env.d.ts",
+    "renderer/src/types/index.ts",
     "main/pdv-protocol.ts"
   ],
   "ignoreExportsUsedInFile": true

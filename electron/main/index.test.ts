@@ -242,6 +242,11 @@ vi.mock("./module-manager", () => ({
   }),
 }));
 
+vi.mock("./editor-spawn", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./editor-spawn")>()),
+  toPlatformSpawn: (spec: { file: string; args: string[] }) => spec,
+}));
+
 function getHandler(channel: string): InvokeHandler {
   const handler = mocks.handlers.get(channel);
   if (!handler) {
@@ -1292,8 +1297,8 @@ describe("Step 5 IPC handlers", () => {
     const save = getHandler(IPC.project.save);
     await save({}, "/tmp/project", { tabs: [], activeTabId: 1 });
 
-    const scriptsDest = path.join("/tmp/project", "modules", "my_mod", "scripts/run.py");
-    const libDest = path.join("/tmp/project", "modules", "my_mod", "lib/helpers.py");
+    const scriptsDest = path.join(path.resolve("/tmp/project"), "modules", "my_mod", "scripts/run.py");
+    const libDest = path.join(path.resolve("/tmp/project"), "modules", "my_mod", "lib/helpers.py");
     expect(mocks.fsMkdir).toHaveBeenCalledWith(path.dirname(scriptsDest), { recursive: true });
     expect(mocks.fsMkdir).toHaveBeenCalledWith(path.dirname(libDest), { recursive: true });
     // Atomic copy: real call lands at `<dest>.tmp`; a rename then promotes
@@ -1360,7 +1365,7 @@ describe("Step 5 IPC handlers", () => {
     // Strip the suffix here so the assertions can talk about effective paths.
     const stripTmp = (p: string): string => p.endsWith(".tmp") ? p.slice(0, -".tmp".length) : p;
     const manifestWrites = (mocks.fsWriteFile as unknown as ReturnType<typeof vi.fn>).mock.calls
-      .filter((c: unknown[]) => stripTmp(String(c[0])).includes("modules/toy/"));
+      .filter((c: unknown[]) => stripTmp(String(c[0])).replace(/\\/g, "/").includes("modules/toy/"));
     const paths = manifestWrites.map((c) => stripTmp(String((c as unknown[])[0])));
     expect(paths.some((p) => p.endsWith("pdv-module.json"))).toBe(true);
     expect(paths.some((p) => p.endsWith("module-index.json"))).toBe(true);
@@ -1622,13 +1627,13 @@ describe("Step 5 IPC handlers", () => {
     // Atomic write — target path is `<final>.tmp` then renamed onto the
     // destination. The renderer-visible artifact is unchanged.
     expect(mocks.fsWriteFile).toHaveBeenCalledWith(
-      "/tmp/project/project.json.tmp",
+      path.join("/tmp/project", "project.json.tmp"),
       expect.stringContaining('"module_id": "demo-module"'),
       "utf8"
     );
     expect(mocks.fsRename).toHaveBeenCalledWith(
-      "/tmp/project/project.json.tmp",
-      "/tmp/project/project.json",
+      path.join("/tmp/project", "project.json.tmp"),
+      path.join("/tmp/project", "project.json"),
     );
     expect(commRouter.request).toHaveBeenCalledWith(
       PDVMessageType.MODULE_REGISTER,
@@ -1787,7 +1792,7 @@ describe("Step 5 IPC handlers", () => {
     expect(result.status).toBe("exported");
     expect(result.destination).toBe("/tmp/pdv-global/modules/packages/toy");
     expect(mocks.fsCp).toHaveBeenCalledWith(
-      "/tmp/project/modules/toy",
+      path.join("/tmp/project", "modules", "toy"),
       "/tmp/pdv-global/modules/packages/toy",
       { recursive: true, force: true },
     );
@@ -2109,13 +2114,13 @@ describe("Step 5 IPC handlers", () => {
     expect(result.success).toBe(true);
     // Atomic write — writeFile goes to `.tmp`, rename swaps onto the destination.
     expect(mocks.fsWriteFile).toHaveBeenCalledWith(
-      "/tmp/project/project.json.tmp",
+      path.join("/tmp/project", "project.json.tmp"),
       expect.stringContaining('"threshold": 9'),
       "utf8"
     );
     expect(mocks.fsRename).toHaveBeenCalledWith(
-      "/tmp/project/project.json.tmp",
-      "/tmp/project/project.json",
+      path.join("/tmp/project", "project.json.tmp"),
+      path.join("/tmp/project", "project.json"),
     );
   });
 
@@ -2461,11 +2466,14 @@ describe("Step 5 IPC handlers", () => {
   });
 
   it("autosave:scanWorkingDirs filters out the active session's working dir", async () => {
-    const { configStore } = await setup();
+    const { configStore, projectManager } = await setup();
     // Pin workingDirBase to /tmp so it matches the mock createWorkingDir
-    // result ("/tmp/pdv-test"); without this they live in different roots
-    // and the filter has nothing to filter.
+    // result (path.join("/tmp", "pdv-test")); without this they live in
+    // different roots and the filter has nothing to filter.
     (configStore.set as unknown as (key: string, value: unknown) => void)("workingDirBase", "/tmp");
+    (projectManager.createWorkingDir as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      path.join("/tmp", "pdv-test"),
+    );
 
     const start = getHandler(IPC.kernels.start);
     await start({}, { language: "python" });
@@ -2489,8 +2497,8 @@ describe("Step 5 IPC handlers", () => {
     // /tmp/pdv-test is the active working dir so it must be hidden from
     // the welcome screen. /tmp/pdv-stale stays.
     const dirs = result.map((r) => r.dir);
-    expect(dirs).not.toContain("/tmp/pdv-test");
-    expect(dirs).toContain("/tmp/pdv-stale");
+    expect(dirs).not.toContain(path.join("/tmp", "pdv-test"));
+    expect(dirs).toContain(path.join("/tmp", "pdv-stale"));
   });
 
   it("unwireServer detaches the kernel:executionState listener", async () => {

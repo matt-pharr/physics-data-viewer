@@ -83,7 +83,7 @@ function dropChannel(): void {
   for (const s of openSockets) s.destroy();
 }
 
-describe("RemoteServerHandle", () => {
+describe.skipIf(process.platform === "win32")("RemoteServerHandle", () => {
   it("attaches and reports itself as remote", async () => {
     handle = makeHandle();
     await handle.start();

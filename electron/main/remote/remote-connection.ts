@@ -45,6 +45,7 @@ import {
   controlPathFor,
   ensureControlDir,
   execViaSsh,
+  findGitForWindowsSsh,
   resolveSshControl,
   stopMaster,
   type SshControl,
@@ -393,6 +394,15 @@ export class RemoteConnectionManager {
     const attemptId = crypto.randomBytes(8).toString("hex");
     this.status = { phase: "connecting", host, attemptId };
     this.emit({ phase: "connecting", host, attemptId, message: `Connecting to ${host}…` });
+
+    if (process.platform === "win32" && !this.options.sshPath && !findGitForWindowsSsh()) {
+      const warning =
+        "Remote connections on Windows require Git for Windows's OpenSSH (usr\\bin\\ssh.exe) " +
+        "because Windows's built-in OpenSSH does not support connection multiplexing (ControlMaster). " +
+        "Please install Git for Windows from https://git-scm.com/download/win and try again.";
+      console.warn(`[remote] ${warning}`);
+      return this.fail(host, attemptId, "ssh-unsupported", warning);
+    }
 
     try {
       ensureControlDir(this.options.controlDir);

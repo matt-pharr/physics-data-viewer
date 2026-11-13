@@ -88,7 +88,7 @@ function makePush(): { push: PushSender; sent: Array<[string, unknown]> } {
 // findJuliaupBinary / juliaupStatus
 // ---------------------------------------------------------------------------
 
-describe("findJuliaupBinary()", () => {
+describe.skipIf(process.platform === "win32")("findJuliaupBinary()", () => {
   it("finds ~/.juliaup/bin/juliaup when PATH has none", async () => {
     process.env.PATH = path.join(dir, "empty-bin");
     const home = path.join(dir, "home");
@@ -120,7 +120,7 @@ describe("findJuliaupBinary()", () => {
 // juliaupAdd
 // ---------------------------------------------------------------------------
 
-describe("juliaupAdd()", () => {
+describe.skipIf(process.platform === "win32")("juliaupAdd()", () => {
   it("runs `juliaup add <channel>` and streams ANSI-stripped output", async () => {
     const stub = await writeStub(
       "bin/juliaup",
@@ -190,7 +190,7 @@ describe("juliaupAdd()", () => {
 // ---------------------------------------------------------------------------
 
 describe("installJuliaup()", () => {
-  it("runs the official installer pipeline (stubbed curl feeds sh)", async () => {
+  it.skipIf(process.platform === "win32")("runs the official installer pipeline (stubbed curl feeds sh)", async () => {
     // The real command is `curl -fsSL <url> | sh -s -- --yes`; the stub curl
     // emits a script instead of downloading, exercising the actual pipeline.
     const curl = await writeStub(
@@ -229,7 +229,7 @@ describe("installJuliaup()", () => {
 // juliaMinor / checkJuliaVersionForLoad
 // ---------------------------------------------------------------------------
 
-describe("ensureJuliaVersionReady()", () => {
+describe.skipIf(process.platform === "win32")("ensureJuliaVersionReady()", () => {
   /** Probe stub body reporting a launch-ready runtime for the app version. */
   const readyProbeBody = [
     'echo "PDV_JULIA_VERSION=1.10.4"',
@@ -361,7 +361,7 @@ describe("juliaMinor()", () => {
   });
 });
 
-describe("checkJuliaVersionForLoad()", () => {
+describe.skipIf(process.platform === "win32")("checkJuliaVersionForLoad()", () => {
   async function makeSaveDir(manifestBody: string | null): Promise<string> {
     const saveDir = path.join(dir, "save");
     await fs.mkdir(saveDir, { recursive: true });

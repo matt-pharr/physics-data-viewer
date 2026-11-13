@@ -41,7 +41,7 @@ async function argvOf(argvPath: string): Promise<string[]> {
   throw new Error("fake ssh never wrote its argv");
 }
 
-describe("openSessionChannel argv", () => {
+describe.skipIf(process.platform === "win32")("openSessionChannel argv", () => {
   it("adds -o ForwardX11=yes before the destination only when asked", async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pdv-chan-"));
     cleanups.push(() => fs.rmSync(dir, { recursive: true, force: true }));

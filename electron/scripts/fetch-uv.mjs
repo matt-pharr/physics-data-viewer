@@ -12,7 +12,7 @@
  * uv-runner.ts resolves it.
  *
  * Usage:
- *   node scripts/fetch-uv.mjs           # fetch every packaging target (default)
+ *   node scripts/fetch-uv.mjs           # host-OS packaging targets + host + linux remote (default)
  *   node scripts/fetch-uv.mjs --host    # fetch only the host platform (dev)
  *   node scripts/fetch-uv.mjs --all     # fetch every known target
  *
@@ -49,10 +49,25 @@ const TARGETS = {
 };
 
 /** Targets fetched by default — keep in sync with electron-builder.yml. */
-const PACKAGED_TARGETS = ["darwin-arm64", "linux-x64"];
+const PACKAGED_TARGETS = ["darwin-arm64", "linux-x64", "win32-x64"];
+
+/**
+ * Targets the remote server bundle ships (build-server-bundle.mjs). Remote
+ * hosts are always linux, whatever OS the app is built on, and the remote
+ * server has no PATH fallback for uv — a bundle without one cannot start a
+ * Python kernel on a fresh host. Both arches, matching the Node runtimes
+ * fetch-remote-node.mjs provides.
+ */
+const REMOTE_TARGETS = ["linux-x64", "linux-arm64"];
 
 /**
  * Decide which targets to fetch from the CLI flags.
+ *
+ * The default set is the packaged targets for the host OS (electron-builder
+ * only packages for the OS it runs on), the host itself, so `npm run build`
+ * on any supported OS leaves a uv that dev mode and build-pdv-wheel.mjs can
+ * actually execute, and the linux {@link REMOTE_TARGETS} for the remote
+ * server bundle.
  *
  * @returns Array of platform keys.
  */
@@ -61,15 +76,45 @@ function selectTargets() {
   if (args.includes("--all")) {
     return Object.keys(TARGETS);
   }
+  const hostKey = `${process.platform}-${process.arch}`;
   if (args.includes("--host")) {
-    const key = `${process.platform}-${process.arch}`;
-    if (!TARGETS[key]) {
-      console.error(`[fetch-uv] Unsupported host platform: ${key}`);
+    if (!TARGETS[hostKey]) {
+      console.error(`[fetch-uv] Unsupported host platform: ${hostKey}`);
       process.exit(1);
     }
-    return [key];
+    return [hostKey];
   }
-  return PACKAGED_TARGETS;
+  const targets = PACKAGED_TARGETS.filter((key) =>
+    key.startsWith(`${process.platform}-`)
+  );
+  if (TARGETS[hostKey]) targets.push(hostKey);
+  targets.push(...REMOTE_TARGETS);
+  return [...new Set(targets)];
+}
+
+/**
+ * Extract a `.zip` or `.tar.gz` archive into a directory.
+ *
+ * On a Windows build host both formats go through the bsdtar that ships as
+ * `System32\tar.exe` (Windows 10 1803+). The absolute path matters: a
+ * Git-for-Windows or MSYS `tar` earlier on PATH is GNU tar, which cannot
+ * read zip and treats the `C:` in a Windows path as a remote host — and the
+ * linux tarball is fetched on Windows too, for the remote server bundle.
+ *
+ * @param {string} archivePath - The archive file.
+ * @param {string} destDir - Directory to extract into.
+ * @returns {void}
+ */
+function extractArchive(archivePath, destDir) {
+  if (process.platform === "win32") {
+    const systemRoot = process.env.SystemRoot ?? "C:\\Windows";
+    const tar = path.join(systemRoot, "System32", "tar.exe");
+    execFileSync(tar, ["-xf", archivePath, "-C", destDir], { stdio: "inherit" });
+  } else if (archivePath.endsWith(".zip")) {
+    execFileSync("unzip", ["-o", archivePath, "-d", destDir], { stdio: "inherit" });
+  } else {
+    execFileSync("tar", ["-xzf", archivePath, "-C", destDir], { stdio: "inherit" });
+  }
 }
 
 /**
@@ -134,11 +179,7 @@ async function fetchTarget(platformKey) {
   try {
     const archivePath = path.join(tmp, archiveName);
     fs.writeFileSync(archivePath, archive);
-    if (isWindows) {
-      execFileSync("unzip", ["-o", archivePath, "-d", tmp], { stdio: "inherit" });
-    } else {
-      execFileSync("tar", ["-xzf", archivePath, "-C", tmp], { stdio: "inherit" });
-    }
+    extractArchive(archivePath, tmp);
     // uv archives extract either to `uv-<triple>/uv[.exe]` or, for some
     // release layouts, to `uv[.exe]` at the archive root.
     const candidates = [

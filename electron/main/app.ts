@@ -56,6 +56,12 @@ function getWindowChromeOptions(): BrowserWindowConstructorOptions {
       frame: false,
     };
   }
+  if (process.platform === "win32") {
+    const iconPath = path.join(__dirname, "..", "..", "assets", "pdv-icon.ico");
+    if (fsSync.existsSync(iconPath)) {
+      return { icon: iconPath };
+    }
+  }
   return {};
 }
 

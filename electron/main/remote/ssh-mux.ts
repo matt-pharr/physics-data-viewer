@@ -76,6 +76,101 @@ const DEFAULT_CONNECT_TIMEOUT_SECONDS = 30;
 /** Default milliseconds before a remote command is abandoned. */
 const DEFAULT_EXEC_TIMEOUT_MS = 60_000;
 
+/**
+ * Locate Git for Windows's MSYS2 `ssh.exe` (`<GitRoot>\usr\bin\ssh.exe`).
+ *
+ * Windows's built-in OpenSSH (`C:\Windows\System32\OpenSSH\ssh.exe`) is built
+ * without `mux.c`, so `ControlMaster`, `ControlPath`, and `-O check` all fail
+ * with `getsockname failed: Not a socket`. Git for Windows ships MSYS2 OpenSSH
+ * under `usr\bin\ssh.exe`, which supports full connection multiplexing, but
+ * the Git installer typically adds only `<GitRoot>\cmd` to `PATH`.
+ *
+ * @param env - Environment variables to inspect (injectable for tests).
+ * @param existsSync - Filesystem existence check (injectable for tests).
+ * @returns Absolute path to Git for Windows's `ssh.exe`, or `null` if not found.
+ */
+export function findGitForWindowsSsh(
+  env: NodeJS.ProcessEnv = process.env,
+  existsSync: (p: string) => boolean = fs.existsSync,
+): string | null {
+  const candidates: string[] = [];
+  const rawPath = env.PATH ?? env.Path ?? "";
+
+  for (const part of rawPath.split(";")) {
+    const trimmed = part.trim().replace(/^"+|"+$/g, "");
+    if (!trimmed) continue;
+    const norm = path.win32.normalize(trimmed).replace(/[\\/]$/, "");
+    const lower = norm.toLowerCase();
+    if (lower.includes("\\system32\\openssh")) continue;
+
+    if (lower.endsWith("\\usr\\bin")) {
+      candidates.push(path.win32.join(norm, "ssh.exe"));
+    } else if (lower.endsWith("\\mingw64\\bin") || lower.endsWith("\\mingw32\\bin")) {
+      const gitRoot = path.win32.dirname(path.win32.dirname(norm));
+      candidates.push(path.win32.join(gitRoot, "usr", "bin", "ssh.exe"));
+    } else if (lower.endsWith("\\cmd") || lower.endsWith("\\bin")) {
+      const gitRoot = path.win32.dirname(norm);
+      candidates.push(path.win32.join(gitRoot, "usr", "bin", "ssh.exe"));
+    }
+  }
+
+  const localAppData = env.LOCALAPPDATA;
+  if (localAppData) {
+    candidates.push(
+      path.win32.join(localAppData, "Programs", "Git", "usr", "bin", "ssh.exe"),
+    );
+  }
+  const programFiles = env.ProgramFiles ?? "C:\\Program Files";
+  if (programFiles) {
+    candidates.push(path.win32.join(programFiles, "Git", "usr", "bin", "ssh.exe"));
+  }
+  const programFilesX86 = env["ProgramFiles(x86)"] ?? "C:\\Program Files (x86)";
+  if (programFilesX86) {
+    candidates.push(path.win32.join(programFilesX86, "Git", "usr", "bin", "ssh.exe"));
+  }
+  const userProfile = env.USERPROFILE ?? os.homedir();
+  if (userProfile) {
+    candidates.push(
+      path.win32.join(userProfile, "scoop", "apps", "git", "current", "usr", "bin", "ssh.exe"),
+    );
+  }
+
+  const seen = new Set<string>();
+  for (const candidate of candidates) {
+    const key = candidate.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    try {
+      if (existsSync(candidate)) return candidate;
+    } catch {
+      // Ignore inaccessible candidate paths.
+    }
+  }
+  return null;
+}
+
+/**
+ * Resolve the default `ssh` executable when no override is supplied.
+ *
+ * On Windows, prefers Git for Windows's `usr\bin\ssh.exe` (which supports
+ * `ControlMaster` multiplexing) over `System32\OpenSSH\ssh.exe`.
+ *
+ * @param platform - Target platform (defaults to `process.platform`).
+ * @param env - Environment variables to inspect.
+ * @param existsSync - Filesystem existence check.
+ * @returns Executable path or `"ssh"`.
+ */
+export function resolveDefaultSshBinary(
+  platform: NodeJS.Platform = process.platform,
+  env: NodeJS.ProcessEnv = process.env,
+  existsSync: (p: string) => boolean = fs.existsSync,
+): string {
+  if (platform === "win32") {
+    return findGitForWindowsSsh(env, existsSync) ?? "ssh";
+  }
+  return "ssh";
+}
+
 /** How a host's channels reach their ControlMaster. */
 export interface SshControl {
   /** The alias or `user@host` destination passed to `ssh`. */
@@ -172,7 +267,7 @@ interface RawRun {
  * @returns The raw run, never rejected.
  */
 function runSsh(args: string[], options: SshMuxOptions): Promise<RawRun> {
-  const binary = options.sshPath ?? "ssh";
+  const binary = options.sshPath ?? resolveDefaultSshBinary();
   const timeoutMs = options.timeoutMs ?? DEFAULT_EXEC_TIMEOUT_MS;
   return new Promise<RawRun>((resolve) => {
     let stdout = "";
@@ -293,7 +388,9 @@ export function controlPathFor(host: string, controlDir: string): string {
  * @returns The option string, quoted so spaces survive ssh's parser.
  */
 export function controlPathOption(controlPath: string): string {
-  return `ControlPath="${controlPath}"`;
+  const normalized =
+    process.platform === "win32" ? controlPath.replace(/\\/g, "/") : controlPath;
+  return `ControlPath="${normalized}"`;
 }
 
 /**

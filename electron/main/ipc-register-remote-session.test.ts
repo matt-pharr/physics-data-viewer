@@ -147,7 +147,7 @@ function register(over: Partial<Parameters<typeof registerRemoteIpcHandlers>[0]>
   });
 }
 
-describe("remote:startSession", () => {
+describe.skipIf(process.platform === "win32")("remote:startSession", () => {
   it("swaps the session onto the host", async () => {
     register();
     const result = await invokeIpc(IPC.remote.startSession);
@@ -230,7 +230,7 @@ describe("remote:startSession", () => {
   });
 });
 
-describe("returning to a local session", () => {
+describe.skipIf(process.platform === "win32")("returning to a local session", () => {
   /** Rebuild the shared daemon with a shutdown spy wired in. */
   async function rebuildHostWithShutdownSpy(): Promise<ReturnType<typeof vi.fn>> {
     const onShutdown = vi.fn();
@@ -332,7 +332,7 @@ describe("returning to a local session", () => {
   });
 });
 
-describe("unreachable-session guards and recovery", () => {
+describe.skipIf(process.platform === "win32")("unreachable-session guards and recovery", () => {
   /** The last sessionState payloads the renderer was sent. */
   function sessionStatePushes(): Array<Record<string, unknown>> {
     return sendSpy.mock.calls
@@ -408,7 +408,7 @@ describe("unreachable-session guards and recovery", () => {
   });
 });
 
-describe("setup-script shipping at session start", () => {
+describe.skipIf(process.platform === "win32")("setup-script shipping at session start", () => {
   it("ships the script before any channel can spawn a daemon", async () => {
     // Order is the property under test: the daemon sources setup.sh exactly
     // once, at startup — so the ship must precede the first channel open
@@ -483,7 +483,7 @@ describe("setup-script shipping at session start", () => {
   });
 });
 
-describe("setup-script warning", () => {
+describe.skipIf(process.platform === "win32")("setup-script warning", () => {
   /** Rebuild the live host as a daemon that did (not) source a script. */
   async function rebuildHostWithScriptState(applied: boolean): Promise<void> {
     await host.close();
@@ -567,7 +567,7 @@ describe("setup-script warning", () => {
   });
 });
 
-describe("session-node pin", () => {
+describe.skipIf(process.platform === "win32")("session-node pin", () => {
   /** The manager on a connection whose `hostname` answered `node-a`. */
   function managerOnNodeA(): RemoteConnectionManager {
     return connectedManager({

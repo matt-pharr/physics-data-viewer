@@ -33,8 +33,9 @@ describe("electron-builder.yml extraResources", () => {
 
   it("bundles the pdv-python wheel and uv binary on every desktop platform (§10.5.6–7)", () => {
     const macBlock = configText.slice(configText.indexOf("mac:"), configText.indexOf("dmg:"));
-    const linuxBlock = configText.slice(configText.indexOf("linux:"));
-    for (const block of [macBlock, linuxBlock]) {
+    const linuxBlock = configText.slice(configText.indexOf("linux:"), configText.indexOf("win:"));
+    const winBlock = configText.slice(configText.indexOf("win:"));
+    for (const block of [macBlock, linuxBlock, winBlock]) {
       expect(block).toContain("to: uv");
       expect(block).toContain("to: pdv-python-wheel");
     }
@@ -99,5 +100,19 @@ describe("electron-builder.yml extraResources", () => {
     // in packaged builds — never in dev — which is the worst way to find out.
     const unpackBlock = configText.slice(configText.indexOf("asarUnpack:"));
     expect(unpackBlock).toMatch(/- "node_modules\/node-pty\/\*\*"/);
+  });
+
+  it("configures Windows icon and per-user NSIS installer without admin elevation", () => {
+    const winBlock = configText.slice(
+      configText.indexOf("win:"),
+      configText.indexOf("nsis:"),
+    );
+    expect(winBlock).toContain("icon: assets/pdv-icon.ico");
+    const nsisBlock = configText.slice(configText.indexOf("nsis:"));
+    expect(nsisBlock).toContain("oneClick: false");
+    expect(nsisBlock).toContain("perMachine: false");
+    expect(nsisBlock).toContain("allowElevation: false");
+    expect(nsisBlock).toContain("allowToChangeInstallationDirectory: true");
+    expect(nsisBlock).toContain("packElevateHelper: false");
   });
 });

@@ -7,13 +7,18 @@
  *   `vim` / `nvim` / `nano` etc. land in a real terminal window across
  *   macOS, Linux, and Windows.
  *
+ * - Adapt a final spawn spec to Windows (`toPlatformSpawn`): PATHEXT lookup
+ *   and `cmd.exe` routing for `.cmd`/`.bat` shims such as VS Code's `code`.
+ *
  * Non-responsibilities:
  * - Opening processes directly. Callers pass the returned spawn spec to
  *   `child_process.spawn(..., { shell: false })`. The expander emits argv
- *   directly — no shell layer is involved in the launch.
+ *   directly — no shell layer is involved in the launch, except the
+ *   explicitly-quoted `cmd.exe /c` that Windows batch files require.
  * - Reading/writing project or config files.
  */
 
+import * as fs from "fs";
 import * as path from "path";
 
 /**
@@ -573,6 +578,166 @@ export function wrapInTerminalPreset(
   return expandTerminalTemplate(template, command, args, platform);
 }
 
+/** A spawn spec plus the `child_process.spawn` options it requires. */
+export interface PlatformSpawnSpec {
+  file: string;
+  args: string[];
+  /** Set when the args are pre-quoted for `cmd.exe` (Windows only). */
+  windowsVerbatimArguments?: boolean;
+  /** Set when an intermediate `cmd.exe` console should not flash (Windows only). */
+  windowsHide?: boolean;
+}
+
+/** Characters `cmd.exe` treats specially; escaped with `^` (cross-spawn's set). */
+const CMD_META_CHARS = /([()\][%!^"`<>&|;, *?])/g;
+
+/**
+ * Quote one argv element for a `cmd.exe /d /s /c "<line>"` invocation:
+ * MSVCRT double-quote rules first (so the target sees the original string),
+ * then every cmd metacharacter — including the quotes themselves — is
+ * `^`-escaped so cmd passes the line through without interpreting `&`, `|`,
+ * `%`, … in paths.
+ *
+ * Single-escaping is sufficient for paths and plain flags, which is all the
+ * launchers pass. It is not for an argument containing a literal `"` sent to
+ * a shim that re-expands `%*` (VS Code's `code.cmd`, npm cmd-shims): the
+ * shim's second cmd parse sees the MSVCRT `\"` as a bare quote, flips its
+ * quote state, and later metacharacters run unprotected. Windows filenames
+ * cannot contain `"`; anything that can must not come through here.
+ *
+ * @param arg - Argv element.
+ * @returns The escaped token.
+ */
+function quoteForCmd(arg: string): string {
+  const quoted = arg.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\*)$/, "$1$1");
+  return `"${quoted}"`.replace(CMD_META_CHARS, "^$1");
+}
+
+/**
+ * `PATHEXT` extensions {@link toPlatformSpawn} can actually launch. A real
+ * `PATHEXT` also lists `.VBS;.JS;.WSF;.MSC;…`, which cmd opens through file
+ * associations but `spawn` cannot run; matching one would shadow a runnable
+ * `.exe` later on `PATH`.
+ */
+const SPAWNABLE_EXTS = new Set([".com", ".exe", ".bat", ".cmd"]);
+
+/**
+ * Whether `candidate` exists as a link-like entry even though `stat` refused
+ * it — an App Execution Alias. `lstat` reads the reparse point itself, so it
+ * succeeds there, but still fails for a directory the user cannot read at
+ * all (where every probe is EACCES and nothing should match).
+ *
+ * @param candidate - Path that `stat` failed on with EACCES.
+ * @returns True when the entry exists.
+ */
+function isAppExecutionAlias(candidate: string): boolean {
+  try {
+    return fs.lstatSync(candidate).isSymbolicLink();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Locate `command` the way `cmd.exe` would: through `PATH` with each
+ * `PATHEXT` extension, restricted to {@link SPAWNABLE_EXTS}. A command that
+ * already carries such an extension, or contains a path separator, is probed
+ * as given. `PATH` entries may be double-quoted (legal, and needed for
+ * directories containing `;`). An explicit path with no executable extension
+ * is only probed with each suffix, never bare: Windows cannot execute an
+ * extensionless file, so the caller falls through to spawn's own error.
+ *
+ * App Execution Aliases (`%LOCALAPPDATA%\Microsoft\WindowsApps\wt.exe`, the
+ * Store `python.exe`, …) are reparse points that `stat` refuses with EACCES
+ * although CreateProcess runs them fine, so an `.exe`/`.com` candidate that
+ * fails that way counts as found when `lstat` confirms it exists.
+ *
+ * @param command - Executable name or path.
+ * @param env - Environment to read `PATH` / `PATHEXT` from.
+ * @returns Absolute path of the first match, or null when none exists.
+ */
+export function findOnWindowsPath(
+  command: string,
+  env: NodeJS.ProcessEnv = process.env,
+): string | null {
+  const exts = (env.PATHEXT ?? ".COM;.EXE;.BAT;.CMD")
+    .split(";")
+    .filter((e) => SPAWNABLE_EXTS.has(e.toLowerCase()));
+  const ext = path.win32.extname(command).toLowerCase();
+  const names = exts.some((e) => e.toLowerCase() === ext)
+    ? [command]
+    : exts.map((e) => command + e);
+  const dirs = /[\\/]/.test(command)
+    ? [""]
+    : (env.PATH ?? env.Path ?? "")
+        .split(";")
+        .map((dir) => dir.replace(/^"(.*)"$/, "$1"))
+        .filter(Boolean);
+  for (const dir of dirs) {
+    for (const name of names) {
+      const candidate = dir ? path.join(dir, name) : name;
+      try {
+        if (fs.statSync(candidate).isFile()) return candidate;
+      } catch (err) {
+        if (
+          (err as NodeJS.ErrnoException).code === "EACCES" &&
+          /\.(exe|com)$/i.test(candidate) &&
+          isAppExecutionAlias(candidate)
+        ) {
+          return candidate;
+        }
+        /* try next candidate */
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Adapt a launcher spawn spec to the host OS.
+ *
+ * POSIX specs pass through unchanged. On Windows, `child_process.spawn`
+ * without a shell neither consults `PATHEXT` (so `code` never finds
+ * `code.cmd`) nor runs `.cmd`/`.bat` files at all (refused since the 2024
+ * BatBadBut fix). Many launchers are exactly such shims — VS Code's `code`,
+ * npm-installed CLIs — so the command is resolved through `PATH`/`PATHEXT`,
+ * and a batch-file match is run via `cmd.exe /d /s /c` with every token
+ * escaped by {@link quoteForCmd}.
+ *
+ * @param spec - Executable and argv as built by the launcher helpers.
+ * @param platform - Target platform (defaults to `process.platform`).
+ * @param env - Environment for the PATH lookup (defaults to `process.env`).
+ * @returns The spec to spawn, with any spawn options it requires.
+ */
+export function toPlatformSpawn(
+  spec: { file: string; args: string[] },
+  platform: NodeJS.Platform = process.platform,
+  env: NodeJS.ProcessEnv = process.env,
+): PlatformSpawnSpec {
+  if (platform !== "win32") return spec;
+  const resolved = findOnWindowsPath(spec.file, env);
+  if (!resolved) return spec;
+  if (
+    /(?:^|[\\/])cmd\.exe$/i.test(resolved) &&
+    spec.args.length === 2 &&
+    /^\/[ck]$/i.test(spec.args[0])
+  ) {
+    return {
+      file: resolved,
+      args: ["/d", "/s", spec.args[0], `"${spec.args[1]}"`],
+      windowsVerbatimArguments: true,
+    };
+  }
+  if (!/\.(cmd|bat)$/i.test(resolved)) return { file: resolved, args: spec.args };
+  const line = [resolved.replace(CMD_META_CHARS, "^$1"), ...spec.args.map(quoteForCmd)].join(" ");
+  return {
+    file: env.ComSpec ?? env.COMSPEC ?? "cmd.exe",
+    args: ["/d", "/s", "/c", `"${line}"`],
+    windowsVerbatimArguments: true,
+    windowsHide: true,
+  };
+}
+
 /**
  * Spawn spec for an interactive login shell in a directory, suitable for
  * wrapping with {@link wrapInTerminalPreset}.
@@ -591,9 +756,13 @@ export function loginShellCommand(
   platform: NodeJS.Platform = process.platform,
 ): { file: string; args: string[] } {
   if (platform === "win32") {
-    return workingDir
-      ? { file: "cmd.exe", args: ["/K", `cd /d ${workingDir}`] }
-      : { file: "cmd.exe", args: [] };
+    if (!workingDir) {
+      return { file: "cmd.exe", args: [] };
+    }
+    const quotedDir = /[ &|<>^();,!]/.test(workingDir)
+      ? `"${workingDir.replace(/"/g, '""')}"`
+      : workingDir;
+    return { file: "cmd.exe", args: ["/K", `cd /d ${quotedDir}`] };
   }
   const cd = workingDir ? `cd ${posixShellQuote(workingDir)}; ` : "";
   return { file: "sh", args: ["-c", `${cd}exec "\${SHELL:-sh}" -l`] };
