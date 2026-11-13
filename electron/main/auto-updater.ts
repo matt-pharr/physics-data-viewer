@@ -96,7 +96,10 @@ export function getUpdateStatus(): UpdateStatus | null {
 function canAutoUpdate(): boolean {
   if (process.platform === "darwin") return true;
   if (process.platform === "linux" && !!process.env.APPIMAGE) return true;
-  if (process.platform === "win32" && !process.env.PORTABLE_EXECUTABLE_FILE) return true;
+  if (process.platform === "win32") {
+    if (process.env.PORTABLE_EXECUTABLE_FILE) return false;
+    return fs.existsSync(path.join(path.dirname(process.execPath), "Uninstall PDV.exe"));
+  }
   return false;
 }
 

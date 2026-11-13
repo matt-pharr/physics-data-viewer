@@ -51,11 +51,25 @@ export async function isExecutableOnPath(bin: string): Promise<boolean> {
 
   const probe = async (candidate: string): Promise<boolean> => {
     for (const ext of exts) {
+      const full = candidate + ext;
       try {
         if (isWindows) {
-          await fs.access(candidate + ext, fs.constants.F_OK);
+          try {
+            await fs.access(full, fs.constants.F_OK);
+          } catch (err) {
+            // Windows Store App Execution Aliases (%LOCALAPPDATA%\Microsoft\WindowsApps\wt.exe,
+            // python.exe, etc.) are NTFS reparse points where access/stat throws EACCES,
+            // while lstat succeeds on the link itself and CreateProcess launches them cleanly.
+            if (
+              (err as NodeJS.ErrnoException).code === "EACCES" &&
+              (await fs.lstat(full)).isSymbolicLink()
+            ) {
+              return true;
+            }
+            throw err;
+          }
         } else {
-          await fs.access(candidate + ext, fs.constants.X_OK);
+          await fs.access(full, fs.constants.X_OK);
         }
         return true;
       } catch {
@@ -68,7 +82,10 @@ export async function isExecutableOnPath(bin: string): Promise<boolean> {
   if (bin.includes("/") || (isWindows && bin.includes("\\"))) {
     return probe(bin);
   }
-  const dirs = (process.env.PATH ?? "").split(path.delimiter).filter(Boolean);
+  const dirs = (process.env.PATH ?? process.env.Path ?? "")
+    .split(path.delimiter)
+    .map((dir) => (isWindows ? dir.replace(/^"(.*)"$/, "$1") : dir))
+    .filter(Boolean);
   for (const dir of dirs) {
     if (await probe(path.join(dir, bin))) return true;
   }

@@ -118,6 +118,21 @@ describe("toPlatformSpawn (Windows)", () => {
     expect(toPlatformSpawn(spec, "win32", env)).toBe(spec);
   });
 
+  it("wraps direct cmd.exe /c or /K invocations with /d /s and windowsVerbatimArguments", () => {
+    fs.writeFileSync(path.join(binDir, "cmd.exe"), "");
+    const line = 'cd /d "C:\\My Work" && claude --mcp-config "C:\\My Work\\.pdv-mcp.json"';
+    const spec = toPlatformSpawn(
+      { file: "cmd", args: ["/c", line] },
+      "win32",
+      env,
+    );
+    expect(spec).toEqual({
+      file: path.join(binDir, "cmd.exe"),
+      args: ["/d", "/s", "/c", `"${line}"`],
+      windowsVerbatimArguments: true,
+    });
+  });
+
   // The string assertions above can't tell whether cmd.exe actually parses
   // the line back into the original argv, so on Windows run it for real:
   // a shim forwarding %* the way code.cmd and npm cmd-shims do.
@@ -648,6 +663,13 @@ describe("loginShellCommand", () => {
     expect(loginShellCommand("C:\\work", "win32")).toEqual({
       file: "cmd.exe",
       args: ["/K", "cd /d C:\\work"],
+    });
+  });
+
+  it("quotes a Windows working directory containing spaces or cmd metacharacters", () => {
+    expect(loginShellCommand("C:\\my work & play", "win32")).toEqual({
+      file: "cmd.exe",
+      args: ["/K", 'cd /d "C:\\my work & play"'],
     });
   });
 });

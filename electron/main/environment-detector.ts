@@ -220,7 +220,7 @@ export class EnvironmentDetector {
     // 2. Active conda environment.
     const condaPrefix = process.env.CONDA_PREFIX;
     if (condaPrefix) {
-      const pythonPath = _pythonInPrefix(condaPrefix);
+      const pythonPath = _condaPythonInPrefix(condaPrefix);
       const env = await _probeEnv(pythonPath, "conda");
       if (env) add(env);
     }
@@ -228,7 +228,7 @@ export class EnvironmentDetector {
     // 3. Active virtualenv.
     const virtualEnv = process.env.VIRTUAL_ENV;
     if (virtualEnv) {
-      const pythonPath = _pythonInPrefix(virtualEnv);
+      const pythonPath = _venvPythonInPrefix(virtualEnv);
       const env = await _probeEnv(pythonPath, "venv");
       if (env) add(env);
     }
@@ -237,7 +237,7 @@ export class EnvironmentDetector {
     const condaEnvs = await _listCondaEnvs();
     for (const prefix of condaEnvs) {
       if (prefix === condaPrefix) continue; // already added above
-      const pythonPath = _pythonInPrefix(prefix);
+      const pythonPath = _condaPythonInPrefix(prefix);
       const env = await _probeEnv(pythonPath, "conda");
       if (env) add(env);
     }
@@ -686,16 +686,52 @@ export class EnvironmentDetector {
 // ---------------------------------------------------------------------------
 
 /**
- * Return the platform-appropriate Python path inside a virtualenv / conda
- * prefix directory.
+ * Return the platform-appropriate Python path inside a conda prefix directory.
  *
- * @param prefix - Root directory of the environment.
+ * Conda on Windows places `python.exe` at the prefix root (`<prefix>\python.exe`),
+ * whereas POSIX Conda uses `<prefix>/bin/python`.
+ *
+ * @param prefix - Root directory of the conda environment.
  * @returns Absolute path to the Python executable.
  */
-function _pythonInPrefix(prefix: string): string {
+function _condaPythonInPrefix(prefix: string): string {
   return process.platform === "win32"
     ? path.join(prefix, "python.exe")
     : path.join(prefix, "bin", "python");
+}
+
+/**
+ * Return the platform-appropriate Python path inside a standard virtualenv
+ * (`python -m venv`, `virtualenv`, `uv venv`).
+ *
+ * Windows virtualenvs place `python.exe` inside `<prefix>\Scripts\python.exe`,
+ * whereas POSIX virtualenvs use `<prefix>/bin/python`.
+ *
+ * @param prefix - Root directory of the virtualenv.
+ * @returns Absolute path to the Python executable.
+ */
+function _venvPythonInPrefix(prefix: string): string {
+  return process.platform === "win32"
+    ? path.join(prefix, "Scripts", "python.exe")
+    : path.join(prefix, "bin", "python");
+}
+
+/**
+ * Derive the environment root prefix from a Python executable path.
+ *
+ * Handles POSIX `<prefix>/bin/python`, Windows venv `<prefix>\Scripts\python.exe`,
+ * and Windows Conda `<prefix>\python.exe`.
+ *
+ * @param pythonPath - Path to the Python executable.
+ * @returns The environment prefix directory.
+ */
+function _envPrefixFromPython(pythonPath: string): string {
+  const dir = path.dirname(path.resolve(pythonPath));
+  const base = path.basename(dir).toLowerCase();
+  if (base === "bin" || base === "scripts") {
+    return path.dirname(dir);
+  }
+  return dir;
 }
 
 /**
@@ -715,7 +751,7 @@ function _inferKind(pythonPath: string): EnvironmentKind {
   if (resolved.startsWith(pyenvRoot + path.sep)) return "pyenv";
 
   // conda: check if the prefix contains conda-meta/
-  const prefix = path.dirname(path.dirname(resolved)); // strip bin/python
+  const prefix = _envPrefixFromPython(resolved);
   if (fs.existsSync(path.join(prefix, "conda-meta"))) return "conda";
 
   // venv: check for pyvenv.cfg in the prefix
@@ -773,6 +809,13 @@ const CONDA_ROOT_CANDIDATES = [
   path.join(os.homedir(), "miniforge3"),
   path.join(os.homedir(), "mambaforge"),
   path.join(os.homedir(), "anaconda3"),
+  ...(process.platform === "win32" && process.env.LOCALAPPDATA
+    ? [
+        path.join(process.env.LOCALAPPDATA, "miniconda3"),
+        path.join(process.env.LOCALAPPDATA, "miniforge3"),
+        path.join(process.env.LOCALAPPDATA, "anaconda3"),
+      ]
+    : []),
   "/opt/miniconda3",
   "/opt/miniforge3",
   "/opt/anaconda3",
@@ -815,7 +858,7 @@ async function _listCondaEnvsViaCommand(): Promise<string[]> {
 function _listCondaEnvsViaFilesystem(): string[] {
   const results: string[] = [];
   for (const root of CONDA_ROOT_CANDIDATES) {
-    if (!fs.existsSync(path.join(root, "bin", "python"))) continue;
+    if (!fs.existsSync(_condaPythonInPrefix(root))) continue;
     // Base environment.
     results.push(root);
     // Named environments.
@@ -825,7 +868,7 @@ function _listCondaEnvsViaFilesystem(): string[] {
       for (const entry of entries) {
         if (!entry.isDirectory()) continue;
         const envPath = path.join(envsDir, entry.name);
-        if (fs.existsSync(path.join(envPath, "bin", "python"))) {
+        if (fs.existsSync(_condaPythonInPrefix(envPath))) {
           results.push(envPath);
         }
       }
@@ -854,7 +897,7 @@ function _makeLabel(
       return `Configured — Python ${version} (${pythonPath})`;
     case "conda": {
       // Try to extract the env name from the prefix path.
-      const envName = path.basename(path.dirname(path.dirname(pythonPath)));
+      const envName = path.basename(_envPrefixFromPython(pythonPath));
       return `conda: ${envName} — Python ${version}`;
     }
     case "venv":

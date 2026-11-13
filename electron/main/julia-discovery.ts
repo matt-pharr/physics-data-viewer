@@ -226,13 +226,27 @@ export function resolveJuliaShim(
     : findOnPath(juliaPath);
   if (!absolute) return juliaPath;
   let real: string;
+  let isWinStoreShim = false;
   try {
     real = fs.realpathSync(absolute);
-  } catch {
-    return juliaPath;
+  } catch (err) {
+    if (
+      process.platform === "win32" &&
+      (err as NodeJS.ErrnoException).code === "EACCES" &&
+      isAppExecutionAlias(absolute)
+    ) {
+      real = path.resolve(absolute);
+      isWinStoreShim = true;
+    } else {
+      return juliaPath;
+    }
   }
   const base = path.basename(real).toLowerCase();
-  if (base !== "julialauncher" && base !== "julialauncher.exe") {
+  if (
+    !isWinStoreShim &&
+    base !== "julialauncher" &&
+    base !== "julialauncher.exe"
+  ) {
     // Not the shim — keep the caller's path, upgraded to absolute when it
     // was a bare command name.
     return absolute;
@@ -242,16 +256,16 @@ export function resolveJuliaShim(
   // defeat the bypass exactly when the user linked their default, PR #347
   // review). Guard against a channel linked back to the shim itself.
   const fallback = listJuliaupChannels(juliaupDir).find((c) => c.isDefault);
-  if (!fallback) return juliaPath;
+  if (!fallback) return isWinStoreShim ? absolute : juliaPath;
   try {
     const fallbackBase = path
       .basename(fs.realpathSync(fallback.juliaPath))
       .toLowerCase();
     if (fallbackBase === "julialauncher" || fallbackBase === "julialauncher.exe") {
-      return juliaPath;
+      return isWinStoreShim ? absolute : juliaPath;
     }
   } catch {
-    return juliaPath;
+    return isWinStoreShim ? absolute : juliaPath;
   }
   return fallback.juliaPath;
 }
@@ -439,12 +453,8 @@ export async function listJuliaRuntimes(
   const candidates: Candidate[] = [];
   const seen = new Set<string>();
   const add = (c: Candidate): void => {
-    let key = c.juliaPath;
-    try {
-      key = fs.realpathSync(c.juliaPath);
-    } catch {
-      return; // nonexistent — skip
-    }
+    const key = resolveCanonicalKey(c.juliaPath);
+    if (!key) return; // nonexistent — skip
     if (seen.has(key)) return;
     seen.add(key);
     candidates.push(c);
@@ -501,12 +511,10 @@ export async function checkJuliaRuntime(
   if (!probe) return null;
   // Recover the juliaup channel identity when the path is a channel binary,
   // so re-checks keep the same label/kind the discovery list showed.
+  const resolvedKey = resolveCanonicalKey(resolved);
   const channel = listJuliaupChannels(juliaupDir).find((c) => {
-    try {
-      return fs.realpathSync(c.juliaPath) === fs.realpathSync(resolved);
-    } catch {
-      return false;
-    }
+    const channelKey = resolveCanonicalKey(c.juliaPath);
+    return channelKey !== null && channelKey === resolvedKey;
   });
   return enrichRuntime(
     channel
@@ -700,21 +708,62 @@ function _installPDVKernelExclusive(
 // ---------------------------------------------------------------------------
 
 /**
+ * Check whether a path is a Windows App Execution Alias (`%LOCALAPPDATA%\Microsoft\WindowsApps\*.exe`),
+ * where `stat`/`realpathSync` fail with `EACCES` even though `lstatSync` and `CreateProcess` succeed.
+ */
+function isAppExecutionAlias(candidate: string): boolean {
+  try {
+    return fs.lstatSync(candidate).isSymbolicLink();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Resolve a canonical deduplication key for an executable path, falling back
+ * to `path.resolve` for Windows App Execution Aliases where `realpathSync`
+ * throws `EACCES`. Returns null if the path does not exist.
+ */
+function resolveCanonicalKey(executablePath: string): string | null {
+  try {
+    return fs.realpathSync(executablePath);
+  } catch (err) {
+    if (
+      process.platform === "win32" &&
+      (err as NodeJS.ErrnoException).code === "EACCES" &&
+      isAppExecutionAlias(executablePath)
+    ) {
+      return path.resolve(executablePath);
+    }
+    return null;
+  }
+}
+
+/**
  * Resolve a bare command name against `PATH`.
  *
  * @param name - Command basename (e.g. `"julia"`).
  * @returns Absolute path to the first existing match, or null.
  */
 function findOnPath(name: string): string | null {
-  if (path.isAbsolute(name)) return fs.existsSync(name) ? name : null;
-  for (const dir of (process.env.PATH ?? "").split(path.delimiter)) {
+  if (path.isAbsolute(name)) {
+    return resolveCanonicalKey(name) !== null ? name : null;
+  }
+  const names =
+    process.platform === "win32" && !path.extname(name)
+      ? [name + ".exe", name]
+      : [name];
+  for (const rawDir of (process.env.PATH ?? "").split(path.delimiter)) {
+    const dir = rawDir.replace(/^"(.*)"$/, "$1");
     if (!dir) continue;
-    const candidate = path.join(dir, name);
-    try {
-      fs.accessSync(candidate, fs.constants.X_OK);
-      return candidate;
-    } catch {
-      /* keep looking */
+    for (const n of names) {
+      const candidate = path.join(dir, n);
+      try {
+        fs.accessSync(candidate, fs.constants.X_OK);
+        return candidate;
+      } catch {
+        /* keep looking */
+      }
     }
   }
   return null;

@@ -717,6 +717,17 @@ export function toPlatformSpawn(
   if (platform !== "win32") return spec;
   const resolved = findOnWindowsPath(spec.file, env);
   if (!resolved) return spec;
+  if (
+    /(?:^|[\\/])cmd\.exe$/i.test(resolved) &&
+    spec.args.length === 2 &&
+    /^\/[ck]$/i.test(spec.args[0])
+  ) {
+    return {
+      file: resolved,
+      args: ["/d", "/s", spec.args[0], `"${spec.args[1]}"`],
+      windowsVerbatimArguments: true,
+    };
+  }
   if (!/\.(cmd|bat)$/i.test(resolved)) return { file: resolved, args: spec.args };
   const line = [resolved.replace(CMD_META_CHARS, "^$1"), ...spec.args.map(quoteForCmd)].join(" ");
   return {
@@ -745,9 +756,13 @@ export function loginShellCommand(
   platform: NodeJS.Platform = process.platform,
 ): { file: string; args: string[] } {
   if (platform === "win32") {
-    return workingDir
-      ? { file: "cmd.exe", args: ["/K", `cd /d ${workingDir}`] }
-      : { file: "cmd.exe", args: [] };
+    if (!workingDir) {
+      return { file: "cmd.exe", args: [] };
+    }
+    const quotedDir = /[ &|<>^();,!]/.test(workingDir)
+      ? `"${workingDir.replace(/"/g, '""')}"`
+      : workingDir;
+    return { file: "cmd.exe", args: ["/K", `cd /d ${quotedDir}`] };
   }
   const cd = workingDir ? `cd ${posixShellQuote(workingDir)}; ` : "";
   return { file: "sh", args: ["-c", `${cd}exec "\${SHELL:-sh}" -l`] };
