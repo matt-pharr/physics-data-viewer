@@ -23,7 +23,7 @@
       
       
       <link rel="icon" href="../../assets/pdv-icon.svg">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.1">
     
     
       
@@ -31,10 +31,10 @@
       
     
     
-      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      <link rel="stylesheet" href="../../assets/stylesheets/main.57a0d79d.min.css">
       
         
-        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.fb2fffe2.min.css">
       
       
 
@@ -5052,12 +5052,12 @@ Everything on zeromq's runtime require path (<code>zeromq</code>, <code>cmake-ts
 <h3 id="32-message-envelope">3.2 Message Envelope<a class="headerlink" href="#32-message-envelope" title="Permanent link">&para;</a></h3>
 <p>Every PDV message — whether sent by the app or by the kernel — has the following JSON structure:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="p">{</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span><span class="nt">&quot;pdv_version&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;0.2.0&quot;</span><span class="p">,</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">  </span><span class="nt">&quot;msg_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;&lt;uuid-v4&gt;&quot;</span><span class="p">,</span>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">  </span><span class="nt">&quot;in_reply_to&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;&lt;uuid-v4-or-null&gt;&quot;</span><span class="p">,</span>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="w">  </span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;&lt;message-type-string&gt;&quot;</span><span class="p">,</span>
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="w">  </span><span class="nt">&quot;status&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;ok | error&quot;</span><span class="p">,</span>
-<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="w">  </span><span class="nt">&quot;payload&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="p">}</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span><span class="nt">"pdv_version"</span><span class="p">:</span><span class="w"> </span><span class="s2">"0.2.0"</span><span class="p">,</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">  </span><span class="nt">"msg_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"&lt;uuid-v4&gt;"</span><span class="p">,</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">  </span><span class="nt">"in_reply_to"</span><span class="p">:</span><span class="w"> </span><span class="s2">"&lt;uuid-v4-or-null&gt;"</span><span class="p">,</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="w">  </span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"&lt;message-type-string&gt;"</span><span class="p">,</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="w">  </span><span class="nt">"status"</span><span class="p">:</span><span class="w"> </span><span class="s2">"ok | error"</span><span class="p">,</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="w">  </span><span class="nt">"payload"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="p">}</span>
 <a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="p">}</span>
 </code></pre></div>
 <table>
@@ -5535,8 +5535,8 @@ Everything on zeromq's runtime require path (<code>zeromq</code>, <code>cmake-ts
 <h3 id="35-error-payload">3.5 Error Payload<a class="headerlink" href="#35-error-payload" title="Permanent link">&para;</a></h3>
 <p>When <code>status</code> is <code>"error"</code>, the payload always has this shape:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="p">{</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span><span class="nt">&quot;code&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;tree.path_not_found&quot;</span><span class="p">,</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">  </span><span class="nt">&quot;message&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;No node exists at path: data.waveforms.xyz&quot;</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span><span class="nt">"code"</span><span class="p">:</span><span class="w"> </span><span class="s2">"tree.path_not_found"</span><span class="p">,</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">  </span><span class="nt">"message"</span><span class="p">:</span><span class="w"> </span><span class="s2">"No node exists at path: data.waveforms.xyz"</span>
 <a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="p">}</span>
 </code></pre></div>
 <p><code>code</code> is a machine-readable dot-namespaced string. <code>message</code> is a human-readable string suitable for display in the UI. The app must never display raw <code>code</code> to the user.</p>
@@ -5565,17 +5565,17 @@ Everything on zeromq's runtime require path (<code>zeromq</code>, <code>cmake-ts
 <a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a>    ├─► App opens ZeroMQ sockets (shell, iopub, control, hb, query)
 <a id="__codelineno-3-14" name="__codelineno-3-14" href="#__codelineno-3-14"></a>    │
 <a id="__codelineno-3-15" name="__codelineno-3-15" href="#__codelineno-3-15"></a>    ├─► App waits for pdv.ready comm (timeout: 15 seconds)
-<a id="__codelineno-3-16" name="__codelineno-3-16" href="#__codelineno-3-16"></a>    │       Timeout → display error: &quot;Kernel did not start. Is pdv-python installed?&quot;
+<a id="__codelineno-3-16" name="__codelineno-3-16" href="#__codelineno-3-16"></a>    │       Timeout → display error: "Kernel did not start. Is pdv-python installed?"
 <a id="__codelineno-3-17" name="__codelineno-3-17" href="#__codelineno-3-17"></a>    │
 <a id="__codelineno-3-18" name="__codelineno-3-18" href="#__codelineno-3-18"></a>    ├─► App sends pdv.init comm:
-<a id="__codelineno-3-19" name="__codelineno-3-19" href="#__codelineno-3-19"></a>    │       payload: { working_dir: &quot;/tmp/pdv-&lt;uuid&gt;&quot;, pdv_version: &quot;&lt;app-version&gt;&quot;,
+<a id="__codelineno-3-19" name="__codelineno-3-19" href="#__codelineno-3-19"></a>    │       payload: { working_dir: "/tmp/pdv-&lt;uuid&gt;", pdv_version: "&lt;app-version&gt;",
 <a id="__codelineno-3-20" name="__codelineno-3-20" href="#__codelineno-3-20"></a>    │                  query_port: &lt;allocated-port&gt; }
 <a id="__codelineno-3-21" name="__codelineno-3-21" href="#__codelineno-3-21"></a>    │       The kernel starts the QueryServer daemon thread on the given port.
 <a id="__codelineno-3-22" name="__codelineno-3-22" href="#__codelineno-3-22"></a>    │
 <a id="__codelineno-3-23" name="__codelineno-3-23" href="#__codelineno-3-23"></a>    ├─► App waits for pdv.init.response (timeout: 30 seconds, the comm default)
 <a id="__codelineno-3-24" name="__codelineno-3-24" href="#__codelineno-3-24"></a>    │       status: error → display error with message
 <a id="__codelineno-3-25" name="__codelineno-3-25" href="#__codelineno-3-25"></a>    │
-<a id="__codelineno-3-26" name="__codelineno-3-26" href="#__codelineno-3-26"></a>    ├─► App attaches QueryRouter to kernel&#39;s query socket
+<a id="__codelineno-3-26" name="__codelineno-3-26" href="#__codelineno-3-26"></a>    ├─► App attaches QueryRouter to kernel's query socket
 <a id="__codelineno-3-27" name="__codelineno-3-27" href="#__codelineno-3-27"></a>    │
 <a id="__codelineno-3-28" name="__codelineno-3-28" href="#__codelineno-3-28"></a>    └─► Kernel is ready. UI unlocks.
 <a id="__codelineno-3-29" name="__codelineno-3-29" href="#__codelineno-3-29"></a>            If a project was selected, it is loaded now.
@@ -5588,7 +5588,7 @@ Everything on zeromq's runtime require path (<code>zeromq</code>, <code>cmake-ts
 <div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>User selects a save directory
 <a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>    │
 <a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>    ├─► App sends pdv.project.load comm:
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>    │       payload: { save_dir: &quot;/path/to/project&quot; }
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>    │       payload: { save_dir: "/path/to/project" }
 <a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>    │
 <a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>    ├─► Kernel:
 <a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>    │       1. Reads project.json manifest
@@ -5623,10 +5623,10 @@ Everything on zeromq's runtime require path (<code>zeromq</code>, <code>cmake-ts
 <p>The renderer is never aware of the low-level <code>pdv.ready → pdv.init → pdv.init.response</code> handshake. That exchange is entirely encapsulated inside the main process's <code>kernels.start()</code> IPC handler: the handler spawns the subprocess, runs the full handshake sequence, and only resolves its promise once <code>pdv.init.response</code> has been received with <code>status: 'ok'</code>.</p>
 <p>From the renderer's perspective, kernel startup is simply:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="c1">// Renderer (app/index.tsx) — triggered by WelcomeScreen action, not on mount</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="nx">setKernelStatus</span><span class="p">(</span><span class="s1">&#39;starting&#39;</span><span class="p">);</span><span class="w"> </span><span class="c1">// locks UI — code cell, tree, namespace all disabled</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="nx">setKernelStatus</span><span class="p">(</span><span class="s1">'starting'</span><span class="p">);</span><span class="w"> </span><span class="c1">// locks UI — code cell, tree, namespace all disabled</span>
 <a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="kd">const</span><span class="w"> </span><span class="nx">info</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">await</span><span class="w"> </span><span class="nb">window</span><span class="p">.</span><span class="nx">pdv</span><span class="p">.</span><span class="nx">kernels</span><span class="p">.</span><span class="nx">start</span><span class="p">(</span><span class="nx">spec</span><span class="p">);</span>
 <a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="nx">setCurrentKernelId</span><span class="p">(</span><span class="nx">info</span><span class="p">.</span><span class="nx">id</span><span class="p">);</span>
-<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="nx">setKernelStatus</span><span class="p">(</span><span class="s1">&#39;ready&#39;</span><span class="p">);</span><span class="w">   </span><span class="c1">// unlocks UI</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="nx">setKernelStatus</span><span class="p">(</span><span class="s1">'ready'</span><span class="p">);</span><span class="w">   </span><span class="c1">// unlocks UI</span>
 <a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="c1">// If a pending project action exists, it executes now</span>
 </code></pre></div>
 <p>The renderer shows a loading / disabled state for all panels while <code>start()</code> is pending. On rejection (timeout or init error), the renderer displays the error string from the rejected promise.</p>
@@ -5758,13 +5758,13 @@ Everything on zeromq's runtime require path (<code>zeromq</code>, <code>cmake-ts
 <h3 id="54-protected-namespace">5.4 Protected Namespace<a class="headerlink" href="#54-protected-namespace" title="Permanent link">&para;</a></h3>
 <p>The IPython user namespace is replaced with a subclass of <code>dict</code> that overrides <code>__setitem__</code>:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="k">class</span><span class="w"> </span><span class="nc">PDVNamespace</span><span class="p">(</span><span class="nb">dict</span><span class="p">):</span>
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>    <span class="n">_PROTECTED</span> <span class="o">=</span> <span class="nb">frozenset</span><span class="p">({</span><span class="s1">&#39;pdv_tree&#39;</span><span class="p">})</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>    <span class="n">_PROTECTED</span> <span class="o">=</span> <span class="nb">frozenset</span><span class="p">({</span><span class="s1">'pdv_tree'</span><span class="p">})</span>
 <a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>
 <a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>    <span class="k">def</span><span class="w"> </span><span class="fm">__setitem__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">key</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
 <a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>        <span class="k">if</span> <span class="n">key</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_PROTECTED</span><span class="p">:</span>
 <a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a>            <span class="k">raise</span> <span class="n">PDVProtectedNameError</span><span class="p">(</span>
-<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a>                <span class="sa">f</span><span class="s2">&quot;&#39;</span><span class="si">{</span><span class="n">key</span><span class="si">}</span><span class="s2">&#39; is a protected PDV object and cannot be reassigned. &quot;</span>
-<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a>                <span class="sa">f</span><span class="s2">&quot;Use pdv_tree[&#39;key&#39;] = value to store data in the tree.&quot;</span>
+<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a>                <span class="sa">f</span><span class="s2">"'</span><span class="si">{</span><span class="n">key</span><span class="si">}</span><span class="s2">' is a protected PDV object and cannot be reassigned. "</span>
+<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a>                <span class="sa">f</span><span class="s2">"Use pdv_tree['key'] = value to store data in the tree."</span>
 <a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a>            <span class="p">)</span>
 <a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a>        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__setitem__</span><span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="n">value</span><span class="p">)</span>
 </code></pre></div>
@@ -5810,16 +5810,16 @@ Everything on zeromq's runtime require path (<code>zeromq</code>, <code>cmake-ts
 <p><code>PDVScript.run(tree, **kwargs)</code> loads the module fresh (no import cache), calls <code>module.run(tree, **kwargs)</code>, and returns the result dict.</p>
 <h4 id="script-file-format">Script File Format<a class="headerlink" href="#script-file-format" title="Permanent link">&para;</a></h4>
 <p>Every PDV script is a plain Python file with a module-level docstring and a single <code>run()</code> function:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="sd">&quot;&quot;&quot;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="sd">"""</span>
 <a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="sd">fit_model.py</span>
 <a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="sd">created by user on host at 14:32</span>
 <a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="sd">Description: Fit a Gaussian to the waveform data.</span>
-<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="sd">&quot;&quot;&quot;</span>
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="sd">"""</span>
 <a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="k">def</span><span class="w"> </span><span class="nf">run</span><span class="p">(</span><span class="n">pdv_tree</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span> <span class="n">amplitude</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">1.0</span><span class="p">,</span> <span class="n">sigma</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">0.1</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
 <a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a>    <span class="c1"># pdv_tree is injected by PDVScript.run() — never supplied by the caller</span>
-<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a>    <span class="n">data</span> <span class="o">=</span> <span class="n">pdv_tree</span><span class="p">[</span><span class="s2">&quot;waveforms.ch1&quot;</span><span class="p">]</span>
+<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a>    <span class="n">data</span> <span class="o">=</span> <span class="n">pdv_tree</span><span class="p">[</span><span class="s2">"waveforms.ch1"</span><span class="p">]</span>
 <a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a>    <span class="c1"># ... analysis ...</span>
-<a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a>    <span class="k">return</span> <span class="p">{</span><span class="s2">&quot;fit_amplitude&quot;</span><span class="p">:</span> <span class="n">amplitude</span><span class="p">}</span>
+<a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a>    <span class="k">return</span> <span class="p">{</span><span class="s2">"fit_amplitude"</span><span class="p">:</span> <span class="n">amplitude</span><span class="p">}</span>
 </code></pre></div>
 <p>Rules:
 - The function <strong>must</strong> be named <code>run</code>.
@@ -5829,9 +5829,9 @@ Everything on zeromq's runtime require path (<code>zeromq</code>, <code>cmake-ts
 <p>Julia scripts follow the same contract with keyword parameters (<code>pdv_tree</code> is a
 <code>PDVTree</code>, an <code>AbstractDict</code> subtype — annotate <code>::AbstractDict</code>, not <code>::Dict</code>):</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="k">function</span><span class="w"> </span><span class="n">run</span><span class="p">(</span><span class="n">pdv_tree</span><span class="o">::</span><span class="kt">AbstractDict</span><span class="p">;</span><span class="w"> </span><span class="n">amplitude</span><span class="o">::</span><span class="kt">Float64</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">1.0</span><span class="p">,</span><span class="w"> </span><span class="n">sigma</span><span class="o">::</span><span class="kt">Float64</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">0.1</span><span class="p">)</span>
-<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="w">    </span><span class="n">data</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">pdv_tree</span><span class="p">[</span><span class="s">&quot;waveforms.ch1&quot;</span><span class="p">]</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="w">    </span><span class="n">data</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">pdv_tree</span><span class="p">[</span><span class="s">"waveforms.ch1"</span><span class="p">]</span>
 <a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="w">    </span><span class="c"># ... analysis ...</span>
-<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="kt">Dict</span><span class="p">(</span><span class="s">&quot;fit_amplitude&quot;</span><span class="w"> </span><span class="o">=&gt;</span><span class="w"> </span><span class="n">amplitude</span><span class="p">)</span>
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="kt">Dict</span><span class="p">(</span><span class="s">"fit_amplitude"</span><span class="w"> </span><span class="o">=&gt;</span><span class="w"> </span><span class="n">amplitude</span><span class="p">)</span>
 <a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="k">end</span>
 </code></pre></div>
 <p>Only keyword parameters are user-facing on Julia (positional parameters cannot be
@@ -5840,10 +5840,10 @@ source with <code>Meta.parseall</code>, never executing it — same rule as the 
 <h4 id="scriptparameter-descriptor">ScriptParameter Descriptor<a class="headerlink" href="#scriptparameter-descriptor" title="Permanent link">&para;</a></h4>
 <p>When a <code>PDVScript</code> is constructed (at registration time), <code>pdv</code> inspects the <code>run()</code> function's signature via <code>inspect.signature</code> and extracts all parameters except <code>pdv_tree</code>. Each becomes a <code>ScriptParameter</code> descriptor stored on the <code>PDVScript</code> and included in the <code>NodeDescriptor</code> returned by <code>pdv.tree.list.response</code>:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="p">{</span>
-<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="w">  </span><span class="nt">&quot;name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;amplitude&quot;</span><span class="p">,</span>
-<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="w">  </span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;float&quot;</span><span class="p">,</span>
-<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="w">  </span><span class="nt">&quot;default&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">1.0</span><span class="p">,</span>
-<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="w">  </span><span class="nt">&quot;required&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="w">  </span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"amplitude"</span><span class="p">,</span>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="w">  </span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"float"</span><span class="p">,</span>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="w">  </span><span class="nt">"default"</span><span class="p">:</span><span class="w"> </span><span class="mf">1.0</span><span class="p">,</span>
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="w">  </span><span class="nt">"required"</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span>
 <a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="p">}</span>
 </code></pre></div>
 <p>A parameter is <code>required</code> if it has no default value. <code>type</code> is the string representation of the annotation (e.g. <code>"float"</code>, <code>"int"</code>, <code>"str"</code>), or <code>"any"</code> if unannotated. If the script file cannot be parsed (syntax error, <code>run()</code> missing), registration still succeeds but <code>params</code> is an empty list.</p>
@@ -6080,7 +6080,7 @@ source with <code>Meta.parseall</code>, never executing it — same rule as the 
 <p><strong>Structure</strong> (UUID-based — see §6.3):
 <div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>~/.PDV/working/pdv-&lt;random&gt;/
 <a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>    session.lock              ← { pid, createdAt } for orphan detection
-<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>    code-cells.json           ← per-session autosave of the renderer&#39;s cell tabs
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>    code-cells.json           ← per-session autosave of the renderer's cell tabs
 <a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a>    pyproject.toml            ← (uv-mode only) materialized from the save dir — see §10.5.3
 <a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a>    uv.lock                   ← (uv-mode only) materialized from the save dir — see §10.5.3
 <a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a>    .venv/                    ← (uv-mode only) project venv built by uv sync; never persisted
@@ -6106,8 +6106,8 @@ source with <code>Meta.parseall</code>, never executing it — same rule as the 
 <a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>    project.json              ← project manifest (owned by Electron main process)
 <a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>    tree-index.json           ← tree node registry (owned by kernel, written at save time)
 <a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a>    code-cells.json           ← code cell tab state (owned by Electron main process)
-<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a>    pyproject.toml            ← (optional) per-project deps, only when environment.mode == &quot;uv&quot; (§10.5)
-<a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a>    uv.lock                   ← (optional) uv lock file, only when environment.mode == &quot;uv&quot; (§10.5)
+<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a>    pyproject.toml            ← (optional) per-project deps, only when environment.mode == "uv" (§10.5)
+<a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a>    uv.lock                   ← (optional) uv lock file, only when environment.mode == "uv" (§10.5)
 <a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a>    modules/                  ← project-local module copies (one subdir per module_id)
 <a id="__codelineno-12-8" name="__codelineno-12-8" href="#__codelineno-12-8"></a>        n_pendulum/
 <a id="__codelineno-12-9" name="__codelineno-12-9" href="#__codelineno-12-9"></a>            pdv-module.json       ← v4 manifest (written by main process, §5.13)
@@ -6131,26 +6131,26 @@ source with <code>Meta.parseall</code>, never executing it — same rule as the 
 <p>Each <code>modules/&lt;id&gt;/</code> subdirectory is maintained authoritatively by <code>project:save</code>: §5.13's save-time sync copies edited files from the working directory into it, then the manifest writer stamps <code>pdv-module.json</code> and <code>module-index.json</code> from the current in-memory <code>PDVModule</code> state. In-session modules (workflow B, origin <code>"in_session"</code> in the manifest) get their directory created on first save; imported modules get it at import time and updated on every subsequent save.</p>
 <p><strong><code>project.json</code> schema</strong> (current version <code>"1.2"</code>; <code>"1.1"</code> manifests remain readable and are upgraded in place on next save — see §10.5.5):
 <div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="p">{</span>
-<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="w">  </span><span class="nt">&quot;schema_version&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;1.2&quot;</span><span class="p">,</span>
-<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="w">  </span><span class="nt">&quot;saved_at&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;&lt;iso8601&gt;&quot;</span><span class="p">,</span>
-<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="w">  </span><span class="nt">&quot;pdv_version&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;&lt;app-version&gt;&quot;</span><span class="p">,</span>
-<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a><span class="w">  </span><span class="nt">&quot;project_name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;My Project&quot;</span><span class="p">,</span>
-<a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a><span class="w">  </span><span class="nt">&quot;language&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;python&quot;</span><span class="p">,</span>
-<a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a><span class="w">  </span><span class="nt">&quot;interpreter_path&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;/path/to/python3&quot;</span><span class="p">,</span>
-<a id="__codelineno-13-8" name="__codelineno-13-8" href="#__codelineno-13-8"></a><span class="w">  </span><span class="nt">&quot;environment&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
-<a id="__codelineno-13-9" name="__codelineno-13-9" href="#__codelineno-13-9"></a><span class="w">    </span><span class="nt">&quot;mode&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;shared&quot;</span>
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="w">  </span><span class="nt">"schema_version"</span><span class="p">:</span><span class="w"> </span><span class="s2">"1.2"</span><span class="p">,</span>
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="w">  </span><span class="nt">"saved_at"</span><span class="p">:</span><span class="w"> </span><span class="s2">"&lt;iso8601&gt;"</span><span class="p">,</span>
+<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="w">  </span><span class="nt">"pdv_version"</span><span class="p">:</span><span class="w"> </span><span class="s2">"&lt;app-version&gt;"</span><span class="p">,</span>
+<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a><span class="w">  </span><span class="nt">"project_name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"My Project"</span><span class="p">,</span>
+<a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a><span class="w">  </span><span class="nt">"language"</span><span class="p">:</span><span class="w"> </span><span class="s2">"python"</span><span class="p">,</span>
+<a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a><span class="w">  </span><span class="nt">"interpreter_path"</span><span class="p">:</span><span class="w"> </span><span class="s2">"/path/to/python3"</span><span class="p">,</span>
+<a id="__codelineno-13-8" name="__codelineno-13-8" href="#__codelineno-13-8"></a><span class="w">  </span><span class="nt">"environment"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-13-9" name="__codelineno-13-9" href="#__codelineno-13-9"></a><span class="w">    </span><span class="nt">"mode"</span><span class="p">:</span><span class="w"> </span><span class="s2">"shared"</span>
 <a id="__codelineno-13-10" name="__codelineno-13-10" href="#__codelineno-13-10"></a><span class="w">  </span><span class="p">},</span>
-<a id="__codelineno-13-11" name="__codelineno-13-11" href="#__codelineno-13-11"></a><span class="w">  </span><span class="nt">&quot;tree_checksum&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;&lt;sha256 of tree-index.json&gt;&quot;</span><span class="p">,</span>
-<a id="__codelineno-13-12" name="__codelineno-13-12" href="#__codelineno-13-12"></a><span class="w">  </span><span class="nt">&quot;modules&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<a id="__codelineno-13-11" name="__codelineno-13-11" href="#__codelineno-13-11"></a><span class="w">  </span><span class="nt">"tree_checksum"</span><span class="p">:</span><span class="w"> </span><span class="s2">"&lt;sha256 of tree-index.json&gt;"</span><span class="p">,</span>
+<a id="__codelineno-13-12" name="__codelineno-13-12" href="#__codelineno-13-12"></a><span class="w">  </span><span class="nt">"modules"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
 <a id="__codelineno-13-13" name="__codelineno-13-13" href="#__codelineno-13-13"></a><span class="w">    </span><span class="p">{</span>
-<a id="__codelineno-13-14" name="__codelineno-13-14" href="#__codelineno-13-14"></a><span class="w">      </span><span class="nt">&quot;module_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;n_pendulum&quot;</span><span class="p">,</span>
-<a id="__codelineno-13-15" name="__codelineno-13-15" href="#__codelineno-13-15"></a><span class="w">      </span><span class="nt">&quot;alias&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;n_pendulum&quot;</span><span class="p">,</span>
-<a id="__codelineno-13-16" name="__codelineno-13-16" href="#__codelineno-13-16"></a><span class="w">      </span><span class="nt">&quot;version&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;2.0.0&quot;</span><span class="p">,</span>
-<a id="__codelineno-13-17" name="__codelineno-13-17" href="#__codelineno-13-17"></a><span class="w">      </span><span class="nt">&quot;revision&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;&lt;optional hash&gt;&quot;</span>
+<a id="__codelineno-13-14" name="__codelineno-13-14" href="#__codelineno-13-14"></a><span class="w">      </span><span class="nt">"module_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"n_pendulum"</span><span class="p">,</span>
+<a id="__codelineno-13-15" name="__codelineno-13-15" href="#__codelineno-13-15"></a><span class="w">      </span><span class="nt">"alias"</span><span class="p">:</span><span class="w"> </span><span class="s2">"n_pendulum"</span><span class="p">,</span>
+<a id="__codelineno-13-16" name="__codelineno-13-16" href="#__codelineno-13-16"></a><span class="w">      </span><span class="nt">"version"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2.0.0"</span><span class="p">,</span>
+<a id="__codelineno-13-17" name="__codelineno-13-17" href="#__codelineno-13-17"></a><span class="w">      </span><span class="nt">"revision"</span><span class="p">:</span><span class="w"> </span><span class="s2">"&lt;optional hash&gt;"</span>
 <a id="__codelineno-13-18" name="__codelineno-13-18" href="#__codelineno-13-18"></a><span class="w">    </span><span class="p">}</span>
 <a id="__codelineno-13-19" name="__codelineno-13-19" href="#__codelineno-13-19"></a><span class="w">  </span><span class="p">],</span>
-<a id="__codelineno-13-20" name="__codelineno-13-20" href="#__codelineno-13-20"></a><span class="w">  </span><span class="nt">&quot;module_settings&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
-<a id="__codelineno-13-21" name="__codelineno-13-21" href="#__codelineno-13-21"></a><span class="w">    </span><span class="nt">&quot;n_pendulum&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;key&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;value&quot;</span><span class="w"> </span><span class="p">}</span>
+<a id="__codelineno-13-20" name="__codelineno-13-20" href="#__codelineno-13-20"></a><span class="w">  </span><span class="nt">"module_settings"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-13-21" name="__codelineno-13-21" href="#__codelineno-13-21"></a><span class="w">    </span><span class="nt">"n_pendulum"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">"key"</span><span class="p">:</span><span class="w"> </span><span class="s2">"value"</span><span class="w"> </span><span class="p">}</span>
 <a id="__codelineno-13-22" name="__codelineno-13-22" href="#__codelineno-13-22"></a><span class="w">  </span><span class="p">}</span>
 <a id="__codelineno-13-23" name="__codelineno-13-23" href="#__codelineno-13-23"></a><span class="p">}</span>
 </code></pre></div></p>
@@ -6305,12 +6305,12 @@ source with <code>Meta.parseall</code>, never executing it — same rule as the 
 <a id="__codelineno-15-40" name="__codelineno-15-40" href="#__codelineno-15-40"></a>
 <a id="__codelineno-15-41" name="__codelineno-15-41" href="#__codelineno-15-41"></a>- `launchers.agent` — `{ command?, cwd? }`. The AI-agent CLI launched by the
 <a id="__codelineno-15-42" name="__codelineno-15-42" href="#__codelineno-15-42"></a>  activity-bar agent button. The command runs inside the configured terminal
-<a id="__codelineno-15-43" name="__codelineno-15-43" href="#__codelineno-15-43"></a>  preset, in a login shell that has `cd`-ed into the project (`cwd: &#39;project&#39;`)
-<a id="__codelineno-15-44" name="__codelineno-15-44" href="#__codelineno-15-44"></a>  or session working directory (`cwd: &#39;working&#39;`). Three placeholders are
+<a id="__codelineno-15-43" name="__codelineno-15-43" href="#__codelineno-15-43"></a>  preset, in a login shell that has `cd`-ed into the project (`cwd: 'project'`)
+<a id="__codelineno-15-44" name="__codelineno-15-44" href="#__codelineno-15-44"></a>  or session working directory (`cwd: 'working'`). Three placeholders are
 <a id="__codelineno-15-45" name="__codelineno-15-45" href="#__codelineno-15-45"></a>  substituted with quoted absolute paths: `{mcpConfig}`, `{projectRoot}`,
 <a id="__codelineno-15-46" name="__codelineno-15-46" href="#__codelineno-15-46"></a>  `{workingDir}`. Before launch, `mcp/mcp-config-writer.ts` materializes a
 <a id="__codelineno-15-47" name="__codelineno-15-47" href="#__codelineno-15-47"></a>  `.pdv-mcp.json` (mode `0600`) into the kernel working directory so the agent
-<a id="__codelineno-15-48" name="__codelineno-15-48" href="#__codelineno-15-48"></a>  — Claude Code by default — connects back to PDV&#39;s MCP server. The working
+<a id="__codelineno-15-48" name="__codelineno-15-48" href="#__codelineno-15-48"></a>  — Claude Code by default — connects back to PDV's MCP server. The working
 <a id="__codelineno-15-49" name="__codelineno-15-49" href="#__codelineno-15-49"></a>  directory is ephemeral, so the embedded bearer token never lands in a
 <a id="__codelineno-15-50" name="__codelineno-15-50" href="#__codelineno-15-50"></a>  user-visible or version-controlled location.
 <a id="__codelineno-15-51" name="__codelineno-15-51" href="#__codelineno-15-51"></a>
@@ -6336,16 +6336,16 @@ source with <code>Meta.parseall</code>, never executing it — same rule as the 
 <a id="__codelineno-15-71" name="__codelineno-15-71" href="#__codelineno-15-71"></a>
 <a id="__codelineno-15-72" name="__codelineno-15-72" href="#__codelineno-15-72"></a>- `TreeNodeRow` is wrapped in `React.memo` with stable props to prevent unnecessary re-renders
 <a id="__codelineno-15-73" name="__codelineno-15-73" href="#__codelineno-15-73"></a>- Expand/collapse discards children (no expansion state persistence across sessions). Re-expanding a node always fetches fresh children from the kernel.
-<a id="__codelineno-15-74" name="__codelineno-15-74" href="#__codelineno-15-74"></a>- After code cell or script execution completes, the renderer bumps `treeRefreshToken` (in `executeImmediate`&#39;s `finally` block) so the tree does a full refetch. This runs **in addition to** push-driven updates and serves as defense in depth for the nested-dict limitation in §7.1.2 — silent sub-tree mutations during a run are caught when the cell finishes.
+<a id="__codelineno-15-74" name="__codelineno-15-74" href="#__codelineno-15-74"></a>- After code cell or script execution completes, the renderer bumps `treeRefreshToken` (in `executeImmediate`'s `finally` block) so the tree does a full refetch. This runs **in addition to** push-driven updates and serves as defense in depth for the nested-dict limitation in §7.1.2 — silent sub-tree mutations during a run are caught when the cell finishes.
 <a id="__codelineno-15-75" name="__codelineno-15-75" href="#__codelineno-15-75"></a>- Incremental updates from `pdv.tree.changed` push notifications update only affected subtrees (selective parent re-fetch)
 <a id="__codelineno-15-76" name="__codelineno-15-76" href="#__codelineno-15-76"></a>
 <a id="__codelineno-15-77" name="__codelineno-15-77" href="#__codelineno-15-77"></a>### 7.1.2 Change Notification Debouncing
 <a id="__codelineno-15-78" name="__codelineno-15-78" href="#__codelineno-15-78"></a>
-<a id="__codelineno-15-79" name="__codelineno-15-79" href="#__codelineno-15-79"></a>`PDVTree._emit_changed()` uses a **100ms debounce timer**. Rapid mutations (e.g. a script adding 1000 nodes in a loop) are batched into a single `pdv.tree.changed` notification with `change_type: &quot;batch&quot;` and all affected paths. This prevents flooding the ZeroMQ comm channel with thousands of individual notifications.
+<a id="__codelineno-15-79" name="__codelineno-15-79" href="#__codelineno-15-79"></a>`PDVTree._emit_changed()` uses a **100ms debounce timer**. Rapid mutations (e.g. a script adding 1000 nodes in a loop) are batched into a single `pdv.tree.changed` notification with `change_type: "batch"` and all affected paths. This prevents flooding the ZeroMQ comm channel with thousands of individual notifications.
 <a id="__codelineno-15-80" name="__codelineno-15-80" href="#__codelineno-15-80"></a>
 <a id="__codelineno-15-81" name="__codelineno-15-81" href="#__codelineno-15-81"></a>All mutating `dict` methods are overridden to emit notifications: `__setitem__`, `__delitem__`, `pop`, `update`, `clear`, `setdefault`, `popitem`, `__ior__` (the `|=` operator). The standard `dict.fromkeys()` classmethod is not overridden because new instances have no comm attached.
 <a id="__codelineno-15-82" name="__codelineno-15-82" href="#__codelineno-15-82"></a>
-<a id="__codelineno-15-83" name="__codelineno-15-83" href="#__codelineno-15-83"></a>**Non-root PDVTree mutations**: Only the root `PDVTree` (which has `_send_fn` attached) can emit precise-path notifications, because absolute paths are only known relative to the root. Sub-trees accessed via `pdv_tree[&#39;path&#39;]` and scratch `PDVTree` instances the user constructs locally have no awareness of their parent. To keep the renderer in sync without parent pointers or aliasing bookkeeping, every `PDVTree` instance — root or not — falls back on a class-level &quot;global ping&quot; channel. Mutations on a non-root `PDVTree` fire a single coarse `change_type: &quot;unknown&quot;` notification (with empty `changed_paths`) that signals the renderer to do a full refresh-with-expansion. The class-level send_fn is registered alongside the root&#39;s `_send_fn` in `_attach_comm` and torn down in `_detach_comm`. Plain `dict` values stored in the tree (`pdv_tree[&#39;data&#39;] = {&#39;x&#39;: 1}`) bypass this entirely — they have no emission machinery — and are caught by the 1 Hz safety-net poll instead (see §7.4).
+<a id="__codelineno-15-83" name="__codelineno-15-83" href="#__codelineno-15-83"></a>**Non-root PDVTree mutations**: Only the root `PDVTree` (which has `_send_fn` attached) can emit precise-path notifications, because absolute paths are only known relative to the root. Sub-trees accessed via `pdv_tree['path']` and scratch `PDVTree` instances the user constructs locally have no awareness of their parent. To keep the renderer in sync without parent pointers or aliasing bookkeeping, every `PDVTree` instance — root or not — falls back on a class-level "global ping" channel. Mutations on a non-root `PDVTree` fire a single coarse `change_type: "unknown"` notification (with empty `changed_paths`) that signals the renderer to do a full refresh-with-expansion. The class-level send_fn is registered alongside the root's `_send_fn` in `_attach_comm` and torn down in `_detach_comm`. Plain `dict` values stored in the tree (`pdv_tree['data'] = {'x': 1}`) bypass this entirely — they have no emission machinery — and are caught by the 1 Hz safety-net poll instead (see §7.4).
 <a id="__codelineno-15-84" name="__codelineno-15-84" href="#__codelineno-15-84"></a>
 <a id="__codelineno-15-85" name="__codelineno-15-85" href="#__codelineno-15-85"></a>### 7.2 Node Types
 <a id="__codelineno-15-86" name="__codelineno-15-86" href="#__codelineno-15-86"></a>
@@ -6358,7 +6358,7 @@ source with <code>Meta.parseall</code>, never executing it — same rule as the 
 <a id="__codelineno-15-93" name="__codelineno-15-93" href="#__codelineno-15-93"></a>| `gui` | A `PDVGui` file-backed GUI definition node | `.gui.json` file in working or save directory |
 <a id="__codelineno-15-94" name="__codelineno-15-94" href="#__codelineno-15-94"></a>| `namelist` | A `PDVNamelist` file-backed namelist definition | Namelist file in working or save directory |
 <a id="__codelineno-15-95" name="__codelineno-15-95" href="#__codelineno-15-95"></a>| `lib` | A `PDVLib` file-backed Python library provided by a module | `.py` file in working or save directory |
-<a id="__codelineno-15-96" name="__codelineno-15-96" href="#__codelineno-15-96"></a>| `file` | A generic `PDVFile` subclass (fallback for file-backed nodes that don&#39;t match a more specific type) | File in working or save directory |
+<a id="__codelineno-15-96" name="__codelineno-15-96" href="#__codelineno-15-96"></a>| `file` | A generic `PDVFile` subclass (fallback for file-backed nodes that don't match a more specific type) | File in working or save directory |
 <a id="__codelineno-15-97" name="__codelineno-15-97" href="#__codelineno-15-97"></a>| `script` | A `PDVScript` object | `.py` file in working or save directory |
 <a id="__codelineno-15-98" name="__codelineno-15-98" href="#__codelineno-15-98"></a>| `markdown` | A `PDVNote` object | `.md` file in working or save directory |
 <a id="__codelineno-15-99" name="__codelineno-15-99" href="#__codelineno-15-99"></a>| `ndarray` | NumPy array | `.npy` file |
@@ -6370,27 +6370,27 @@ source with <code>Meta.parseall</code>, never executing it — same rule as the 
 <a id="__codelineno-15-105" name="__codelineno-15-105" href="#__codelineno-15-105"></a>| `sequence` | Python list or tuple | Inline JSON |
 <a id="__codelineno-15-106" name="__codelineno-15-106" href="#__codelineno-15-106"></a>| `dataset` | xarray.Dataset (in-memory) | Pickle |
 <a id="__codelineno-15-107" name="__codelineno-15-107" href="#__codelineno-15-107"></a>| `dataarray` | xarray.DataArray (in-memory) | Pickle |
-<a id="__codelineno-15-108" name="__codelineno-15-108" href="#__codelineno-15-108"></a>| `dataset_file` | `PDVDataset` — lazy file-backed NetCDF dataset (§5.8.1) | `.nc`/`.cdf` file, copied as-is (`storage.format: &quot;netcdf&quot;`) |
-<a id="__codelineno-15-109" name="__codelineno-15-109" href="#__codelineno-15-109"></a>| `hdf5_file` | `PDVHdf5` — lazy file-backed HDF5 file (§5.8.1) | `.h5`/`.hdf5` file, copied as-is (`storage.format: &quot;hdf5&quot;`) |
+<a id="__codelineno-15-108" name="__codelineno-15-108" href="#__codelineno-15-108"></a>| `dataset_file` | `PDVDataset` — lazy file-backed NetCDF dataset (§5.8.1) | `.nc`/`.cdf` file, copied as-is (`storage.format: "netcdf"`) |
+<a id="__codelineno-15-109" name="__codelineno-15-109" href="#__codelineno-15-109"></a>| `hdf5_file` | `PDVHdf5` — lazy file-backed HDF5 file (§5.8.1) | `.h5`/`.hdf5` file, copied as-is (`storage.format: "hdf5"`) |
 <a id="__codelineno-15-110" name="__codelineno-15-110" href="#__codelineno-15-110"></a>| `hdf5_group` | Virtual child: group inside an open HDF5 file | Runtime-only — never written to tree-index.json |
 <a id="__codelineno-15-111" name="__codelineno-15-111" href="#__codelineno-15-111"></a>| `hdf5_dataset` | Virtual child: dataset inside an open HDF5 file | Runtime-only — never written to tree-index.json |
 <a id="__codelineno-15-112" name="__codelineno-15-112" href="#__codelineno-15-112"></a>
-<a id="__codelineno-15-113" name="__codelineno-15-113" href="#__codelineno-15-113"></a>`mapping` and `sequence` containers are expandable in the tree panel. The `pdv.tree.list` handler descends into either kind, returning one descriptor per child. Sequence children carry stringified-int keys (`&quot;0&quot;`, `&quot;1&quot;`, …) and a `parent_is_opaque: true` flag; the renderer suppresses rename / move / duplicate / delete on those rows since the tree-mutation handlers can&#39;t address a child by key inside a non-dict parent. Sequence children remain navigable from Python: a numeric segment in a dot-path indexes into a list or tuple value (e.g. `tree[&quot;records.0.name&quot;]` resolves through a list of dicts). Negative indices are supported (`tree[&quot;xs.-1&quot;]` returns the last element).
+<a id="__codelineno-15-113" name="__codelineno-15-113" href="#__codelineno-15-113"></a>`mapping` and `sequence` containers are expandable in the tree panel. The `pdv.tree.list` handler descends into either kind, returning one descriptor per child. Sequence children carry stringified-int keys (`"0"`, `"1"`, …) and a `parent_is_opaque: true` flag; the renderer suppresses rename / move / duplicate / delete on those rows since the tree-mutation handlers can't address a child by key inside a non-dict parent. Sequence children remain navigable from Python: a numeric segment in a dot-path indexes into a list or tuple value (e.g. `tree["records.0.name"]` resolves through a list of dicts). Negative indices are supported (`tree["xs.-1"]` returns the last element).
 <a id="__codelineno-15-114" name="__codelineno-15-114" href="#__codelineno-15-114"></a>
-<a id="__codelineno-15-115" name="__codelineno-15-115" href="#__codelineno-15-115"></a>On Julia sessions, **NamedTuples ride the `mapping` kind** — they are the idiomatic &quot;results bundle&quot; (a nested dictionary in spirit), so they expand in the tree with field-name keys, dot-paths resolve through them (`tree[&quot;run.fields.b&quot;]`), and the chip reads `NamedTuple`. Their children carry `parent_is_opaque` (NamedTuples are immutable — no structural mutations), and they persist as a single `.jls` leaf rather than the composite mapping split so the concrete NamedTuple type survives save/load (§10.6-era fidelity rule: a per-child split would reload as a Dict).
+<a id="__codelineno-15-115" name="__codelineno-15-115" href="#__codelineno-15-115"></a>On Julia sessions, **NamedTuples ride the `mapping` kind** — they are the idiomatic "results bundle" (a nested dictionary in spirit), so they expand in the tree with field-name keys, dot-paths resolve through them (`tree["run.fields.b"]`), and the chip reads `NamedTuple`. Their children carry `parent_is_opaque` (NamedTuples are immutable — no structural mutations), and they persist as a single `.jls` leaf rather than the composite mapping split so the concrete NamedTuple type survives save/load (§10.6-era fidelity rule: a per-child split would reload as a Dict).
 <a id="__codelineno-15-116" name="__codelineno-15-116" href="#__codelineno-15-116"></a>
-<a id="__codelineno-15-117" name="__codelineno-15-117" href="#__codelineno-15-117"></a>**Virtual-children protocol.** Beyond dicts and sequences, some values expose children that are *not* real tree entries — a live `xarray.Dataset`&#39;s variables, or the contents of a `PDVDataset`/`PDVHdf5` file read from its header on demand. These all flow through one dispatch point, `pdv/virtual.py`: PDV-owned classes implement `__pdv_children__()` / `__pdv_child__(key)` / `__pdv_has_children__()` directly, while foreign types (live `xr.Dataset`, `h5py.Group`) are matched by predicate in a registry of `VirtualAdapter`s (guarded via `sys.modules`, never triggering an import). `handle_tree_list`, per-child `has_children` computation, and dot-path resolution (`PDVTree._resolve_nested`) all dispatch through `get_virtual_adapter()`, so a new expandable type needs only an adapter (or the dunders) — no handler changes. Adapter enumeration failures (missing optional dependency, corrupt/missing file) surface as a `tree.load_error` response with an actionable message; they never crash the listing.
+<a id="__codelineno-15-117" name="__codelineno-15-117" href="#__codelineno-15-117"></a>**Virtual-children protocol.** Beyond dicts and sequences, some values expose children that are *not* real tree entries — a live `xarray.Dataset`'s variables, or the contents of a `PDVDataset`/`PDVHdf5` file read from its header on demand. These all flow through one dispatch point, `pdv/virtual.py`: PDV-owned classes implement `__pdv_children__()` / `__pdv_child__(key)` / `__pdv_has_children__()` directly, while foreign types (live `xr.Dataset`, `h5py.Group`) are matched by predicate in a registry of `VirtualAdapter`s (guarded via `sys.modules`, never triggering an import). `handle_tree_list`, per-child `has_children` computation, and dot-path resolution (`PDVTree._resolve_nested`) all dispatch through `get_virtual_adapter()`, so a new expandable type needs only an adapter (or the dunders) — no handler changes. Adapter enumeration failures (missing optional dependency, corrupt/missing file) surface as a `tree.load_error` response with an actionable message; they never crash the listing.
 <a id="__codelineno-15-118" name="__codelineno-15-118" href="#__codelineno-15-118"></a>
-<a id="__codelineno-15-119" name="__codelineno-15-119" href="#__codelineno-15-119"></a>Every adapter-served child is tagged `parent_is_opaque: true` (same suppression semantics as sequence children — the tree-mutation handlers can&#39;t address a child by key inside a non-dict parent). `dataset` and `dataset_file` rows enumerate data variables in insertion order **followed by coordinates**; coordinate rows additionally carry `is_coord: true`, which the renderer shows as a `coord` chip with muted styling so grids read as supporting context under the variables. (Through v0.2.x coords were omitted from live-Dataset listings; the file-backed dataset feature unified both on vars + coords.) `hdf5_group` children expand recursively to arbitrary depth; `dataarray` and `hdf5_dataset` are leaves — dot-paths cannot descend past one (`tree[&quot;ds.var.0&quot;]` raises `PDVKeyError`). xarray and h5py are optional dependencies; PDV runs unchanged when they aren&#39;t installed.
+<a id="__codelineno-15-119" name="__codelineno-15-119" href="#__codelineno-15-119"></a>Every adapter-served child is tagged `parent_is_opaque: true` (same suppression semantics as sequence children — the tree-mutation handlers can't address a child by key inside a non-dict parent). `dataset` and `dataset_file` rows enumerate data variables in insertion order **followed by coordinates**; coordinate rows additionally carry `is_coord: true`, which the renderer shows as a `coord` chip with muted styling so grids read as supporting context under the variables. (Through v0.2.x coords were omitted from live-Dataset listings; the file-backed dataset feature unified both on vars + coords.) `hdf5_group` children expand recursively to arbitrary depth; `dataarray` and `hdf5_dataset` are leaves — dot-paths cannot descend past one (`tree["ds.var.0"]` raises `PDVKeyError`). xarray and h5py are optional dependencies; PDV runs unchanged when they aren't installed.
 <a id="__codelineno-15-120" name="__codelineno-15-120" href="#__codelineno-15-120"></a>| `binary` | bytes / bytearray | `.bin` file |
 <a id="__codelineno-15-121" name="__codelineno-15-121" href="#__codelineno-15-121"></a>| `unknown` | Unrecognized type | Custom serializer file (if a module registered one for the type), otherwise `.pickle` (only if `trusted=True`) |
 <a id="__codelineno-15-122" name="__codelineno-15-122" href="#__codelineno-15-122"></a>
 <a id="__codelineno-15-123" name="__codelineno-15-123" href="#__codelineno-15-123"></a>**Custom serializer hook.** Module developers can register save/load
-<a id="__codelineno-15-124" name="__codelineno-15-124" href="#__codelineno-15-124"></a>callbacks for a class via `pdv.register_serializer(MyClass, format=&quot;my_fmt&quot;,
-<a id="__codelineno-15-125" name="__codelineno-15-125" href="#__codelineno-15-125"></a>extension=&quot;.h5&quot;, save=..., load=...)`. PDV chooses the on-disk filename and
+<a id="__codelineno-15-124" name="__codelineno-15-124" href="#__codelineno-15-124"></a>callbacks for a class via `pdv.register_serializer(MyClass, format="my_fmt",
+<a id="__codelineno-15-125" name="__codelineno-15-125" href="#__codelineno-15-125"></a>extension=".h5", save=..., load=...)`. PDV chooses the on-disk filename and
 <a id="__codelineno-15-126" name="__codelineno-15-126" href="#__codelineno-15-126"></a>passes the absolute path to the callbacks; the module just reads or writes
 <a id="__codelineno-15-127" name="__codelineno-15-127" href="#__codelineno-15-127"></a>that file. Lookup walks `type(value).__mro__` so subclasses inherit. The
-<a id="__codelineno-15-128" name="__codelineno-15-128" href="#__codelineno-15-128"></a>node&#39;s `type` field stays `&quot;unknown&quot;`, but `storage.format` carries the
+<a id="__codelineno-15-128" name="__codelineno-15-128" href="#__codelineno-15-128"></a>node's `type` field stays `"unknown"`, but `storage.format` carries the
 <a id="__codelineno-15-129" name="__codelineno-15-129" href="#__codelineno-15-129"></a>registered name and `metadata` records `python_type` and `serializer`. Format
 <a id="__codelineno-15-130" name="__codelineno-15-130" href="#__codelineno-15-130"></a>names must be unique and must not collide with builtin formats. The module
 <a id="__codelineno-15-131" name="__codelineno-15-131" href="#__codelineno-15-131"></a>that registered the serializer must be imported before a project that
@@ -6400,17 +6400,17 @@ source with <code>Meta.parseall</code>, never executing it — same rule as the 
 <a id="__codelineno-15-135" name="__codelineno-15-135" href="#__codelineno-15-135"></a>**Dunder-protocol hook.** Classes the package author defines can opt into PDV
 <a id="__codelineno-15-136" name="__codelineno-15-136" href="#__codelineno-15-136"></a>compatibility without calling `register_serializer` by implementing
 <a id="__codelineno-15-137" name="__codelineno-15-137" href="#__codelineno-15-137"></a>`__pdv_format__`, `__pdv_serialize__`, and `__pdv_deserialize__` (required as
-<a id="__codelineno-15-138" name="__codelineno-15-138" href="#__codelineno-15-138"></a>a set; partial trios are silently treated as &quot;no protocol&quot; so the same dunder
+<a id="__codelineno-15-138" name="__codelineno-15-138" href="#__codelineno-15-138"></a>a set; partial trios are silently treated as "no protocol" so the same dunder
 <a id="__codelineno-15-139" name="__codelineno-15-139" href="#__codelineno-15-139"></a>names may be used for unrelated purposes). Optional companion methods:
 <a id="__codelineno-15-140" name="__codelineno-15-140" href="#__codelineno-15-140"></a>`__pdv_preview__`, `__pdv_handle__`, `__pdv_digest__`. Lookup walks
 <a id="__codelineno-15-141" name="__codelineno-15-141" href="#__codelineno-15-141"></a>`type(value).__mro__` via standard attribute access. `register_serializer` and
 <a id="__codelineno-15-142" name="__codelineno-15-142" href="#__codelineno-15-142"></a>`@pdv.handle` win over the corresponding dunder when both are present —
-<a id="__codelineno-15-143" name="__codelineno-15-143" href="#__codelineno-15-143"></a>explicit registration is for wrapping types you don&#39;t own; the dunder protocol
-<a id="__codelineno-15-144" name="__codelineno-15-144" href="#__codelineno-15-144"></a>is for types you do. Load-time class recovery uses the descriptor&#39;s
+<a id="__codelineno-15-143" name="__codelineno-15-143" href="#__codelineno-15-143"></a>explicit registration is for wrapping types you don't own; the dunder protocol
+<a id="__codelineno-15-144" name="__codelineno-15-144" href="#__codelineno-15-144"></a>is for types you do. Load-time class recovery uses the descriptor's
 <a id="__codelineno-15-145" name="__codelineno-15-145" href="#__codelineno-15-145"></a>`metadata.python_type` field with `importlib.import_module`; the defining
 <a id="__codelineno-15-146" name="__codelineno-15-146" href="#__codelineno-15-146"></a>package must be installed (no need to be imported beforehand). Reserved and
 <a id="__codelineno-15-147" name="__codelineno-15-147" href="#__codelineno-15-147"></a>registered-serializer format names are rejected at save time. Dunder-served
-<a id="__codelineno-15-148" name="__codelineno-15-148" href="#__codelineno-15-148"></a>nodes carry `metadata.serializer = &quot;dunder:&lt;class_name&gt;&quot;` in `tree-index.json`
+<a id="__codelineno-15-148" name="__codelineno-15-148" href="#__codelineno-15-148"></a>nodes carry `metadata.serializer = "dunder:&lt;class_name&gt;"` in `tree-index.json`
 <a id="__codelineno-15-149" name="__codelineno-15-149" href="#__codelineno-15-149"></a>to distinguish them from `register_serializer`-served nodes. Implementation
 <a id="__codelineno-15-150" name="__codelineno-15-150" href="#__codelineno-15-150"></a>lives in `pdv/serializers.py` (`find_for_value_dunder`,
 <a id="__codelineno-15-151" name="__codelineno-15-151" href="#__codelineno-15-151"></a>`find_for_format_dunder`) with integration points in `pdv/serialization.py`,
@@ -6427,16 +6427,16 @@ source with <code>Meta.parseall</code>, never executing it — same rule as the 
 <a id="__codelineno-15-162" name="__codelineno-15-162" href="#__codelineno-15-162"></a>**Common fields (all types):**
 <a id="__codelineno-15-163" name="__codelineno-15-163" href="#__codelineno-15-163"></a>```json
 <a id="__codelineno-15-164" name="__codelineno-15-164" href="#__codelineno-15-164"></a>{
-<a id="__codelineno-15-165" name="__codelineno-15-165" href="#__codelineno-15-165"></a>  &quot;id&quot;: &quot;data.waveforms.ch1&quot;,
-<a id="__codelineno-15-166" name="__codelineno-15-166" href="#__codelineno-15-166"></a>  &quot;path&quot;: &quot;data.waveforms.ch1&quot;,
-<a id="__codelineno-15-167" name="__codelineno-15-167" href="#__codelineno-15-167"></a>  &quot;key&quot;: &quot;ch1&quot;,
-<a id="__codelineno-15-168" name="__codelineno-15-168" href="#__codelineno-15-168"></a>  &quot;parent_path&quot;: &quot;data.waveforms&quot;,
-<a id="__codelineno-15-169" name="__codelineno-15-169" href="#__codelineno-15-169"></a>  &quot;type&quot;: &quot;ndarray&quot;,
-<a id="__codelineno-15-170" name="__codelineno-15-170" href="#__codelineno-15-170"></a>  &quot;has_children&quot;: false,
-<a id="__codelineno-15-171" name="__codelineno-15-171" href="#__codelineno-15-171"></a>  &quot;lazy&quot;: false,
-<a id="__codelineno-15-172" name="__codelineno-15-172" href="#__codelineno-15-172"></a>  &quot;updated_at&quot;: &quot;&lt;iso8601&gt;&quot;,
-<a id="__codelineno-15-173" name="__codelineno-15-173" href="#__codelineno-15-173"></a>  &quot;storage&quot;: { },
-<a id="__codelineno-15-174" name="__codelineno-15-174" href="#__codelineno-15-174"></a>  &quot;metadata&quot;: { &quot;preview&quot;: &quot;...&quot; }
+<a id="__codelineno-15-165" name="__codelineno-15-165" href="#__codelineno-15-165"></a>  "id": "data.waveforms.ch1",
+<a id="__codelineno-15-166" name="__codelineno-15-166" href="#__codelineno-15-166"></a>  "path": "data.waveforms.ch1",
+<a id="__codelineno-15-167" name="__codelineno-15-167" href="#__codelineno-15-167"></a>  "key": "ch1",
+<a id="__codelineno-15-168" name="__codelineno-15-168" href="#__codelineno-15-168"></a>  "parent_path": "data.waveforms",
+<a id="__codelineno-15-169" name="__codelineno-15-169" href="#__codelineno-15-169"></a>  "type": "ndarray",
+<a id="__codelineno-15-170" name="__codelineno-15-170" href="#__codelineno-15-170"></a>  "has_children": false,
+<a id="__codelineno-15-171" name="__codelineno-15-171" href="#__codelineno-15-171"></a>  "lazy": false,
+<a id="__codelineno-15-172" name="__codelineno-15-172" href="#__codelineno-15-172"></a>  "updated_at": "&lt;iso8601&gt;",
+<a id="__codelineno-15-173" name="__codelineno-15-173" href="#__codelineno-15-173"></a>  "storage": { },
+<a id="__codelineno-15-174" name="__codelineno-15-174" href="#__codelineno-15-174"></a>  "metadata": { "preview": "..." }
 <a id="__codelineno-15-175" name="__codelineno-15-175" href="#__codelineno-15-175"></a>}
 </code></pre></div></p>
 <table>
@@ -6502,94 +6502,94 @@ source with <code>Meta.parseall</code>, never executing it — same rule as the 
 <p>Scalar and small inline values use <code>"backend": "inline"</code> and store the value directly in <code>"value"</code>.</p>
 <p><strong>ndarray metadata:</strong>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="p">{</span>
-<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="w">  </span><span class="nt">&quot;metadata&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
-<a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a><span class="w">    </span><span class="nt">&quot;shape&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="mi">1024</span><span class="p">,</span><span class="w"> </span><span class="mi">4</span><span class="p">],</span>
-<a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a><span class="w">    </span><span class="nt">&quot;dtype&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;float64&quot;</span><span class="p">,</span>
-<a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a><span class="w">    </span><span class="nt">&quot;size_bytes&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">32768</span><span class="p">,</span>
-<a id="__codelineno-16-6" name="__codelineno-16-6" href="#__codelineno-16-6"></a><span class="w">    </span><span class="nt">&quot;preview&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;float64 array (1024 × 4)&quot;</span>
+<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="w">  </span><span class="nt">"metadata"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a><span class="w">    </span><span class="nt">"shape"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="mi">1024</span><span class="p">,</span><span class="w"> </span><span class="mi">4</span><span class="p">],</span>
+<a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a><span class="w">    </span><span class="nt">"dtype"</span><span class="p">:</span><span class="w"> </span><span class="s2">"float64"</span><span class="p">,</span>
+<a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a><span class="w">    </span><span class="nt">"size_bytes"</span><span class="p">:</span><span class="w"> </span><span class="mi">32768</span><span class="p">,</span>
+<a id="__codelineno-16-6" name="__codelineno-16-6" href="#__codelineno-16-6"></a><span class="w">    </span><span class="nt">"preview"</span><span class="p">:</span><span class="w"> </span><span class="s2">"float64 array (1024 × 4)"</span>
 <a id="__codelineno-16-7" name="__codelineno-16-7" href="#__codelineno-16-7"></a><span class="w">  </span><span class="p">}</span>
 <a id="__codelineno-16-8" name="__codelineno-16-8" href="#__codelineno-16-8"></a><span class="p">}</span>
 </code></pre></div></p>
 <p><strong>dataframe / series metadata:</strong>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="p">{</span>
-<a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a><span class="w">  </span><span class="nt">&quot;metadata&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
-<a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a><span class="w">    </span><span class="nt">&quot;shape&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="mi">100</span><span class="p">,</span><span class="w"> </span><span class="mi">5</span><span class="p">],</span>
-<a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a><span class="w">    </span><span class="nt">&quot;preview&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;DataFrame (100 × 5)&quot;</span>
+<a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a><span class="w">  </span><span class="nt">"metadata"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a><span class="w">    </span><span class="nt">"shape"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="mi">100</span><span class="p">,</span><span class="w"> </span><span class="mi">5</span><span class="p">],</span>
+<a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a><span class="w">    </span><span class="nt">"preview"</span><span class="p">:</span><span class="w"> </span><span class="s2">"DataFrame (100 × 5)"</span>
 <a id="__codelineno-17-5" name="__codelineno-17-5" href="#__codelineno-17-5"></a><span class="w">  </span><span class="p">}</span>
 <a id="__codelineno-17-6" name="__codelineno-17-6" href="#__codelineno-17-6"></a><span class="p">}</span>
 </code></pre></div></p>
 <p><strong>Script metadata:</strong>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a><span class="p">{</span>
-<a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a><span class="w">  </span><span class="nt">&quot;metadata&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
-<a id="__codelineno-18-3" name="__codelineno-18-3" href="#__codelineno-18-3"></a><span class="w">    </span><span class="nt">&quot;language&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;python&quot;</span><span class="p">,</span>
-<a id="__codelineno-18-4" name="__codelineno-18-4" href="#__codelineno-18-4"></a><span class="w">    </span><span class="nt">&quot;doc&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Fit a Gaussian to the waveform data.&quot;</span><span class="p">,</span>
-<a id="__codelineno-18-5" name="__codelineno-18-5" href="#__codelineno-18-5"></a><span class="w">    </span><span class="nt">&quot;preview&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Fit a Gaussian to the waveform data.&quot;</span>
+<a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a><span class="w">  </span><span class="nt">"metadata"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-18-3" name="__codelineno-18-3" href="#__codelineno-18-3"></a><span class="w">    </span><span class="nt">"language"</span><span class="p">:</span><span class="w"> </span><span class="s2">"python"</span><span class="p">,</span>
+<a id="__codelineno-18-4" name="__codelineno-18-4" href="#__codelineno-18-4"></a><span class="w">    </span><span class="nt">"doc"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Fit a Gaussian to the waveform data."</span><span class="p">,</span>
+<a id="__codelineno-18-5" name="__codelineno-18-5" href="#__codelineno-18-5"></a><span class="w">    </span><span class="nt">"preview"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Fit a Gaussian to the waveform data."</span>
 <a id="__codelineno-18-6" name="__codelineno-18-6" href="#__codelineno-18-6"></a><span class="w">  </span><span class="p">}</span>
 <a id="__codelineno-18-7" name="__codelineno-18-7" href="#__codelineno-18-7"></a><span class="p">}</span>
 </code></pre></div></p>
 <p>Note: <code>params</code> (the <code>ScriptParameter</code> array) is NOT stored in <code>tree-index.json</code> metadata. It is re-extracted from the script's <code>run()</code> signature at registration time and included only in <code>pdv.tree.list</code> responses. See §5.7 for the <code>ScriptParameter</code> descriptor shape.</p>
 <p><strong>Markdown metadata:</strong>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a><span class="p">{</span>
-<a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a><span class="w">  </span><span class="nt">&quot;metadata&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
-<a id="__codelineno-19-3" name="__codelineno-19-3" href="#__codelineno-19-3"></a><span class="w">    </span><span class="nt">&quot;language&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;markdown&quot;</span><span class="p">,</span>
-<a id="__codelineno-19-4" name="__codelineno-19-4" href="#__codelineno-19-4"></a><span class="w">    </span><span class="nt">&quot;title&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;My Note Title&quot;</span><span class="p">,</span>
-<a id="__codelineno-19-5" name="__codelineno-19-5" href="#__codelineno-19-5"></a><span class="w">    </span><span class="nt">&quot;preview&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;My Note Title&quot;</span>
+<a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a><span class="w">  </span><span class="nt">"metadata"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-19-3" name="__codelineno-19-3" href="#__codelineno-19-3"></a><span class="w">    </span><span class="nt">"language"</span><span class="p">:</span><span class="w"> </span><span class="s2">"markdown"</span><span class="p">,</span>
+<a id="__codelineno-19-4" name="__codelineno-19-4" href="#__codelineno-19-4"></a><span class="w">    </span><span class="nt">"title"</span><span class="p">:</span><span class="w"> </span><span class="s2">"My Note Title"</span><span class="p">,</span>
+<a id="__codelineno-19-5" name="__codelineno-19-5" href="#__codelineno-19-5"></a><span class="w">    </span><span class="nt">"preview"</span><span class="p">:</span><span class="w"> </span><span class="s2">"My Note Title"</span>
 <a id="__codelineno-19-6" name="__codelineno-19-6" href="#__codelineno-19-6"></a><span class="w">  </span><span class="p">}</span>
 <a id="__codelineno-19-7" name="__codelineno-19-7" href="#__codelineno-19-7"></a><span class="p">}</span>
 </code></pre></div></p>
 <p><strong>Module metadata:</strong>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a><span class="p">{</span>
-<a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a><span class="w">  </span><span class="nt">&quot;metadata&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
-<a id="__codelineno-20-3" name="__codelineno-20-3" href="#__codelineno-20-3"></a><span class="w">    </span><span class="nt">&quot;module_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;n_pendulum&quot;</span><span class="p">,</span>
-<a id="__codelineno-20-4" name="__codelineno-20-4" href="#__codelineno-20-4"></a><span class="w">    </span><span class="nt">&quot;name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;N-Pendulum&quot;</span><span class="p">,</span>
-<a id="__codelineno-20-5" name="__codelineno-20-5" href="#__codelineno-20-5"></a><span class="w">    </span><span class="nt">&quot;version&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;2.0.0&quot;</span><span class="p">,</span>
-<a id="__codelineno-20-6" name="__codelineno-20-6" href="#__codelineno-20-6"></a><span class="w">    </span><span class="nt">&quot;preview&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;N-Pendulum v2.0.0&quot;</span>
+<a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a><span class="w">  </span><span class="nt">"metadata"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-20-3" name="__codelineno-20-3" href="#__codelineno-20-3"></a><span class="w">    </span><span class="nt">"module_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"n_pendulum"</span><span class="p">,</span>
+<a id="__codelineno-20-4" name="__codelineno-20-4" href="#__codelineno-20-4"></a><span class="w">    </span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"N-Pendulum"</span><span class="p">,</span>
+<a id="__codelineno-20-5" name="__codelineno-20-5" href="#__codelineno-20-5"></a><span class="w">    </span><span class="nt">"version"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2.0.0"</span><span class="p">,</span>
+<a id="__codelineno-20-6" name="__codelineno-20-6" href="#__codelineno-20-6"></a><span class="w">    </span><span class="nt">"preview"</span><span class="p">:</span><span class="w"> </span><span class="s2">"N-Pendulum v2.0.0"</span>
 <a id="__codelineno-20-7" name="__codelineno-20-7" href="#__codelineno-20-7"></a><span class="w">  </span><span class="p">}</span>
 <a id="__codelineno-20-8" name="__codelineno-20-8" href="#__codelineno-20-8"></a><span class="p">}</span>
 </code></pre></div></p>
 <p>Module <code>storage</code> uses inline backend with <code>format: "module_meta"</code> and <code>value: { module_id, name, version }</code>.</p>
 <p><strong>GUI metadata:</strong>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a><span class="p">{</span>
-<a id="__codelineno-21-2" name="__codelineno-21-2" href="#__codelineno-21-2"></a><span class="w">  </span><span class="nt">&quot;metadata&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
-<a id="__codelineno-21-3" name="__codelineno-21-3" href="#__codelineno-21-3"></a><span class="w">    </span><span class="nt">&quot;language&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;json&quot;</span><span class="p">,</span>
-<a id="__codelineno-21-4" name="__codelineno-21-4" href="#__codelineno-21-4"></a><span class="w">    </span><span class="nt">&quot;module_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;n_pendulum&quot;</span><span class="p">,</span>
-<a id="__codelineno-21-5" name="__codelineno-21-5" href="#__codelineno-21-5"></a><span class="w">    </span><span class="nt">&quot;preview&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;GUI&quot;</span>
+<a id="__codelineno-21-2" name="__codelineno-21-2" href="#__codelineno-21-2"></a><span class="w">  </span><span class="nt">"metadata"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-21-3" name="__codelineno-21-3" href="#__codelineno-21-3"></a><span class="w">    </span><span class="nt">"language"</span><span class="p">:</span><span class="w"> </span><span class="s2">"json"</span><span class="p">,</span>
+<a id="__codelineno-21-4" name="__codelineno-21-4" href="#__codelineno-21-4"></a><span class="w">    </span><span class="nt">"module_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"n_pendulum"</span><span class="p">,</span>
+<a id="__codelineno-21-5" name="__codelineno-21-5" href="#__codelineno-21-5"></a><span class="w">    </span><span class="nt">"preview"</span><span class="p">:</span><span class="w"> </span><span class="s2">"GUI"</span>
 <a id="__codelineno-21-6" name="__codelineno-21-6" href="#__codelineno-21-6"></a><span class="w">  </span><span class="p">}</span>
 <a id="__codelineno-21-7" name="__codelineno-21-7" href="#__codelineno-21-7"></a><span class="p">}</span>
 </code></pre></div></p>
 <p><strong>Namelist metadata:</strong>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a><span class="p">{</span>
-<a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a><span class="w">  </span><span class="nt">&quot;metadata&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
-<a id="__codelineno-22-3" name="__codelineno-22-3" href="#__codelineno-22-3"></a><span class="w">    </span><span class="nt">&quot;module_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;n_pendulum&quot;</span><span class="p">,</span>
-<a id="__codelineno-22-4" name="__codelineno-22-4" href="#__codelineno-22-4"></a><span class="w">    </span><span class="nt">&quot;namelist_format&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;fortran&quot;</span><span class="p">,</span>
-<a id="__codelineno-22-5" name="__codelineno-22-5" href="#__codelineno-22-5"></a><span class="w">    </span><span class="nt">&quot;language&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;namelist&quot;</span><span class="p">,</span>
-<a id="__codelineno-22-6" name="__codelineno-22-6" href="#__codelineno-22-6"></a><span class="w">    </span><span class="nt">&quot;preview&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Namelist (fortran)&quot;</span>
+<a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a><span class="w">  </span><span class="nt">"metadata"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-22-3" name="__codelineno-22-3" href="#__codelineno-22-3"></a><span class="w">    </span><span class="nt">"module_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"n_pendulum"</span><span class="p">,</span>
+<a id="__codelineno-22-4" name="__codelineno-22-4" href="#__codelineno-22-4"></a><span class="w">    </span><span class="nt">"namelist_format"</span><span class="p">:</span><span class="w"> </span><span class="s2">"fortran"</span><span class="p">,</span>
+<a id="__codelineno-22-5" name="__codelineno-22-5" href="#__codelineno-22-5"></a><span class="w">    </span><span class="nt">"language"</span><span class="p">:</span><span class="w"> </span><span class="s2">"namelist"</span><span class="p">,</span>
+<a id="__codelineno-22-6" name="__codelineno-22-6" href="#__codelineno-22-6"></a><span class="w">    </span><span class="nt">"preview"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Namelist (fortran)"</span>
 <a id="__codelineno-22-7" name="__codelineno-22-7" href="#__codelineno-22-7"></a><span class="w">  </span><span class="p">}</span>
 <a id="__codelineno-22-8" name="__codelineno-22-8" href="#__codelineno-22-8"></a><span class="p">}</span>
 </code></pre></div></p>
 <p><strong>Lib metadata:</strong>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a><span class="p">{</span>
-<a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a><span class="w">  </span><span class="nt">&quot;metadata&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
-<a id="__codelineno-23-3" name="__codelineno-23-3" href="#__codelineno-23-3"></a><span class="w">    </span><span class="nt">&quot;language&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;python&quot;</span><span class="p">,</span>
-<a id="__codelineno-23-4" name="__codelineno-23-4" href="#__codelineno-23-4"></a><span class="w">    </span><span class="nt">&quot;module_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;n_pendulum&quot;</span><span class="p">,</span>
-<a id="__codelineno-23-5" name="__codelineno-23-5" href="#__codelineno-23-5"></a><span class="w">    </span><span class="nt">&quot;preview&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Library (n_pendulum.py)&quot;</span>
+<a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a><span class="w">  </span><span class="nt">"metadata"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-23-3" name="__codelineno-23-3" href="#__codelineno-23-3"></a><span class="w">    </span><span class="nt">"language"</span><span class="p">:</span><span class="w"> </span><span class="s2">"python"</span><span class="p">,</span>
+<a id="__codelineno-23-4" name="__codelineno-23-4" href="#__codelineno-23-4"></a><span class="w">    </span><span class="nt">"module_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"n_pendulum"</span><span class="p">,</span>
+<a id="__codelineno-23-5" name="__codelineno-23-5" href="#__codelineno-23-5"></a><span class="w">    </span><span class="nt">"preview"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Library (n_pendulum.py)"</span>
 <a id="__codelineno-23-6" name="__codelineno-23-6" href="#__codelineno-23-6"></a><span class="w">  </span><span class="p">}</span>
 <a id="__codelineno-23-7" name="__codelineno-23-7" href="#__codelineno-23-7"></a><span class="p">}</span>
 </code></pre></div></p>
 <p><strong>Data file metadata</strong> (<code>dataset_file</code> / <code>hdf5_file</code>):
 <div class="highlight"><pre><span></span><code><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a><span class="p">{</span>
-<a id="__codelineno-24-2" name="__codelineno-24-2" href="#__codelineno-24-2"></a><span class="w">  </span><span class="nt">&quot;metadata&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
-<a id="__codelineno-24-3" name="__codelineno-24-3" href="#__codelineno-24-3"></a><span class="w">    </span><span class="nt">&quot;preview&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;gpec_output.nc — 12 vars, 4 coords&quot;</span>
+<a id="__codelineno-24-2" name="__codelineno-24-2" href="#__codelineno-24-2"></a><span class="w">  </span><span class="nt">"metadata"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-24-3" name="__codelineno-24-3" href="#__codelineno-24-3"></a><span class="w">    </span><span class="nt">"preview"</span><span class="p">:</span><span class="w"> </span><span class="s2">"gpec_output.nc — 12 vars, 4 coords"</span>
 <a id="__codelineno-24-4" name="__codelineno-24-4" href="#__codelineno-24-4"></a><span class="w">  </span><span class="p">}</span>
 <a id="__codelineno-24-5" name="__codelineno-24-5" href="#__codelineno-24-5"></a><span class="p">}</span>
 </code></pre></div></p>
 <p>Deliberately preview-only: variable names, shapes, and dtypes are <em>not</em> cached in <code>tree-index.json</code> — the tree panel re-reads them from the file header on every expansion (§5.8.1), so the index can never go stale against the file. <code>storage.format</code> is <code>"netcdf"</code> or <code>"hdf5"</code> and the file is copied as-is on save.</p>
 <p><strong>Unknown-kind metadata</strong> (registered serializer or dunder protocol):
 <div class="highlight"><pre><span></span><code><a id="__codelineno-25-1" name="__codelineno-25-1" href="#__codelineno-25-1"></a><span class="p">{</span>
-<a id="__codelineno-25-2" name="__codelineno-25-2" href="#__codelineno-25-2"></a><span class="w">  </span><span class="nt">&quot;metadata&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
-<a id="__codelineno-25-3" name="__codelineno-25-3" href="#__codelineno-25-3"></a><span class="w">    </span><span class="nt">&quot;preview&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;GEqdsk(R0=1.8, B0=2.1)&quot;</span><span class="p">,</span>
-<a id="__codelineno-25-4" name="__codelineno-25-4" href="#__codelineno-25-4"></a><span class="w">    </span><span class="nt">&quot;python_type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;mypkg.geqdsk.GEqdskData&quot;</span><span class="p">,</span>
-<a id="__codelineno-25-5" name="__codelineno-25-5" href="#__codelineno-25-5"></a><span class="w">    </span><span class="nt">&quot;serializer&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;dunder:mypkg.geqdsk.GEqdskData&quot;</span>
+<a id="__codelineno-25-2" name="__codelineno-25-2" href="#__codelineno-25-2"></a><span class="w">  </span><span class="nt">"metadata"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-25-3" name="__codelineno-25-3" href="#__codelineno-25-3"></a><span class="w">    </span><span class="nt">"preview"</span><span class="p">:</span><span class="w"> </span><span class="s2">"GEqdsk(R0=1.8, B0=2.1)"</span><span class="p">,</span>
+<a id="__codelineno-25-4" name="__codelineno-25-4" href="#__codelineno-25-4"></a><span class="w">    </span><span class="nt">"python_type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"mypkg.geqdsk.GEqdskData"</span><span class="p">,</span>
+<a id="__codelineno-25-5" name="__codelineno-25-5" href="#__codelineno-25-5"></a><span class="w">    </span><span class="nt">"serializer"</span><span class="p">:</span><span class="w"> </span><span class="s2">"dunder:mypkg.geqdsk.GEqdskData"</span>
 <a id="__codelineno-25-6" name="__codelineno-25-6" href="#__codelineno-25-6"></a><span class="w">  </span><span class="p">}</span>
 <a id="__codelineno-25-7" name="__codelineno-25-7" href="#__codelineno-25-7"></a><span class="p">}</span>
 </code></pre></div></p>
@@ -6597,16 +6597,16 @@ source with <code>Meta.parseall</code>, never executing it — same rule as the 
 <h4 id="732-pdvtreelist-response-descriptor-runtime">7.3.2 <code>pdv.tree.list</code> Response Descriptor (Runtime)<a class="headerlink" href="#732-pdvtreelist-response-descriptor-runtime" title="Permanent link">&para;</a></h4>
 <p>The <code>pdv.tree.list</code> handler builds descriptors on-the-fly from live tree state. These are simpler — no <code>storage</code>, <code>metadata</code>, or <code>updated_at</code>. Type-specific fields are at top level alongside common fields.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-26-1" name="__codelineno-26-1" href="#__codelineno-26-1"></a><span class="p">{</span>
-<a id="__codelineno-26-2" name="__codelineno-26-2" href="#__codelineno-26-2"></a><span class="w">  </span><span class="nt">&quot;id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;data.waveforms.ch1&quot;</span><span class="p">,</span>
-<a id="__codelineno-26-3" name="__codelineno-26-3" href="#__codelineno-26-3"></a><span class="w">  </span><span class="nt">&quot;path&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;data.waveforms.ch1&quot;</span><span class="p">,</span>
-<a id="__codelineno-26-4" name="__codelineno-26-4" href="#__codelineno-26-4"></a><span class="w">  </span><span class="nt">&quot;key&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;ch1&quot;</span><span class="p">,</span>
-<a id="__codelineno-26-5" name="__codelineno-26-5" href="#__codelineno-26-5"></a><span class="w">  </span><span class="nt">&quot;parent_path&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;data.waveforms&quot;</span><span class="p">,</span>
-<a id="__codelineno-26-6" name="__codelineno-26-6" href="#__codelineno-26-6"></a><span class="w">  </span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;ndarray&quot;</span><span class="p">,</span>
-<a id="__codelineno-26-7" name="__codelineno-26-7" href="#__codelineno-26-7"></a><span class="w">  </span><span class="nt">&quot;has_children&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">,</span>
-<a id="__codelineno-26-8" name="__codelineno-26-8" href="#__codelineno-26-8"></a><span class="w">  </span><span class="nt">&quot;lazy&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">,</span>
-<a id="__codelineno-26-9" name="__codelineno-26-9" href="#__codelineno-26-9"></a><span class="w">  </span><span class="nt">&quot;preview&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;float64 array (1024 × 4)&quot;</span><span class="p">,</span>
-<a id="__codelineno-26-10" name="__codelineno-26-10" href="#__codelineno-26-10"></a><span class="w">  </span><span class="nt">&quot;python_type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;numpy.ndarray&quot;</span><span class="p">,</span>
-<a id="__codelineno-26-11" name="__codelineno-26-11" href="#__codelineno-26-11"></a><span class="w">  </span><span class="nt">&quot;has_handler&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span>
+<a id="__codelineno-26-2" name="__codelineno-26-2" href="#__codelineno-26-2"></a><span class="w">  </span><span class="nt">"id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"data.waveforms.ch1"</span><span class="p">,</span>
+<a id="__codelineno-26-3" name="__codelineno-26-3" href="#__codelineno-26-3"></a><span class="w">  </span><span class="nt">"path"</span><span class="p">:</span><span class="w"> </span><span class="s2">"data.waveforms.ch1"</span><span class="p">,</span>
+<a id="__codelineno-26-4" name="__codelineno-26-4" href="#__codelineno-26-4"></a><span class="w">  </span><span class="nt">"key"</span><span class="p">:</span><span class="w"> </span><span class="s2">"ch1"</span><span class="p">,</span>
+<a id="__codelineno-26-5" name="__codelineno-26-5" href="#__codelineno-26-5"></a><span class="w">  </span><span class="nt">"parent_path"</span><span class="p">:</span><span class="w"> </span><span class="s2">"data.waveforms"</span><span class="p">,</span>
+<a id="__codelineno-26-6" name="__codelineno-26-6" href="#__codelineno-26-6"></a><span class="w">  </span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"ndarray"</span><span class="p">,</span>
+<a id="__codelineno-26-7" name="__codelineno-26-7" href="#__codelineno-26-7"></a><span class="w">  </span><span class="nt">"has_children"</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">,</span>
+<a id="__codelineno-26-8" name="__codelineno-26-8" href="#__codelineno-26-8"></a><span class="w">  </span><span class="nt">"lazy"</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">,</span>
+<a id="__codelineno-26-9" name="__codelineno-26-9" href="#__codelineno-26-9"></a><span class="w">  </span><span class="nt">"preview"</span><span class="p">:</span><span class="w"> </span><span class="s2">"float64 array (1024 × 4)"</span><span class="p">,</span>
+<a id="__codelineno-26-10" name="__codelineno-26-10" href="#__codelineno-26-10"></a><span class="w">  </span><span class="nt">"python_type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"numpy.ndarray"</span><span class="p">,</span>
+<a id="__codelineno-26-11" name="__codelineno-26-11" href="#__codelineno-26-11"></a><span class="w">  </span><span class="nt">"has_handler"</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span>
 <a id="__codelineno-26-12" name="__codelineno-26-12" href="#__codelineno-26-12"></a><span class="p">}</span>
 </code></pre></div>
 <p>Additional fields present at top level for specific types:
@@ -6650,11 +6650,11 @@ source with <code>Meta.parseall</code>, never executing it — same rule as the 
 <a id="__codelineno-27-8" name="__codelineno-27-8" href="#__codelineno-27-8"></a>
 <a id="__codelineno-27-9" name="__codelineno-27-9" href="#__codelineno-27-9"></a>```json
 <a id="__codelineno-27-10" name="__codelineno-27-10" href="#__codelineno-27-10"></a>{
-<a id="__codelineno-27-11" name="__codelineno-27-11" href="#__codelineno-27-11"></a>  &quot;type&quot;: &quot;pdv.tree.changed&quot;,
-<a id="__codelineno-27-12" name="__codelineno-27-12" href="#__codelineno-27-12"></a>  &quot;status&quot;: &quot;ok&quot;,
-<a id="__codelineno-27-13" name="__codelineno-27-13" href="#__codelineno-27-13"></a>  &quot;payload&quot;: {
-<a id="__codelineno-27-14" name="__codelineno-27-14" href="#__codelineno-27-14"></a>    &quot;changed_paths&quot;: [&quot;data.waveforms.ch1&quot;],
-<a id="__codelineno-27-15" name="__codelineno-27-15" href="#__codelineno-27-15"></a>    &quot;change_type&quot;: &quot;added&quot; | &quot;removed&quot; | &quot;updated&quot; | &quot;batch&quot; | &quot;unknown&quot;
+<a id="__codelineno-27-11" name="__codelineno-27-11" href="#__codelineno-27-11"></a>  "type": "pdv.tree.changed",
+<a id="__codelineno-27-12" name="__codelineno-27-12" href="#__codelineno-27-12"></a>  "status": "ok",
+<a id="__codelineno-27-13" name="__codelineno-27-13" href="#__codelineno-27-13"></a>  "payload": {
+<a id="__codelineno-27-14" name="__codelineno-27-14" href="#__codelineno-27-14"></a>    "changed_paths": ["data.waveforms.ch1"],
+<a id="__codelineno-27-15" name="__codelineno-27-15" href="#__codelineno-27-15"></a>    "change_type": "added" | "removed" | "updated" | "batch" | "unknown"
 <a id="__codelineno-27-16" name="__codelineno-27-16" href="#__codelineno-27-16"></a>  }
 <a id="__codelineno-27-17" name="__codelineno-27-17" href="#__codelineno-27-17"></a>}
 </code></pre></div></td>
@@ -6687,7 +6687,7 @@ source with <code>Meta.parseall</code>, never executing it — same rule as the 
 <a id="__codelineno-28-4" name="__codelineno-28-4" href="#__codelineno-28-4"></a>    │       (user enters project name + picks parent location)
 <a id="__codelineno-28-5" name="__codelineno-28-5" href="#__codelineno-28-5"></a>    │
 <a id="__codelineno-28-6" name="__codelineno-28-6" href="#__codelineno-28-6"></a>    ├─► App sends pdv.project.save comm:
-<a id="__codelineno-28-7" name="__codelineno-28-7" href="#__codelineno-28-7"></a>    │       payload: { save_dir: &quot;/path/to/project&quot; }
+<a id="__codelineno-28-7" name="__codelineno-28-7" href="#__codelineno-28-7"></a>    │       payload: { save_dir: "/path/to/project" }
 <a id="__codelineno-28-8" name="__codelineno-28-8" href="#__codelineno-28-8"></a>    │
 <a id="__codelineno-28-9" name="__codelineno-28-9" href="#__codelineno-28-9"></a>    ├─► Kernel:
 <a id="__codelineno-28-10" name="__codelineno-28-10" href="#__codelineno-28-10"></a>    │       1. Serializes all tree nodes to the save directory
@@ -6711,7 +6711,7 @@ source with <code>Meta.parseall</code>, never executing it — same rule as the 
 <a id="__codelineno-28-28" name="__codelineno-28-28" href="#__codelineno-28-28"></a>    │       into &lt;saveDir&gt;/modules/&lt;id&gt;/&lt;source_rel_path&gt; (§5.13),
 <a id="__codelineno-28-29" name="__codelineno-28-29" href="#__codelineno-28-29"></a>    │       each copy staged at `&lt;dest&gt;.tmp` and renamed (atomic).
 <a id="__codelineno-28-30" name="__codelineno-28-30" href="#__codelineno-28-30"></a>    │       Missing source files are swallowed (ENOENT logged, not
-<a id="__codelineno-28-31" name="__codelineno-28-31" href="#__codelineno-28-31"></a>    │       thrown) so a mid-save deletion doesn&#39;t abort the save.
+<a id="__codelineno-28-31" name="__codelineno-28-31" href="#__codelineno-28-31"></a>    │       thrown) so a mid-save deletion doesn't abort the save.
 <a id="__codelineno-28-32" name="__codelineno-28-32" href="#__codelineno-28-32"></a>    │
 <a id="__codelineno-28-33" name="__codelineno-28-33" href="#__codelineno-28-33"></a>    ├─► App stamps pdv-module.json + module-index.json into each
 <a id="__codelineno-28-34" name="__codelineno-28-34" href="#__codelineno-28-34"></a>    │       &lt;saveDir&gt;/modules/&lt;id&gt;/ from module_manifests (§7), each
@@ -6724,10 +6724,10 @@ source with <code>Meta.parseall</code>, never executing it — same rule as the 
 <a id="__codelineno-28-41" name="__codelineno-28-41" href="#__codelineno-28-41"></a>    │       completes, the prior project.json is byte-for-byte intact
 <a id="__codelineno-28-42" name="__codelineno-28-42" href="#__codelineno-28-42"></a>    │       and the loader sees the prior project state. After the
 <a id="__codelineno-28-43" name="__codelineno-28-43" href="#__codelineno-28-43"></a>    │       rename returns, every preceding write is already on disk;
-<a id="__codelineno-28-44" name="__codelineno-28-44" href="#__codelineno-28-44"></a>    │       &quot;project.json exists and parses&quot; is therefore sufficient
+<a id="__codelineno-28-44" name="__codelineno-28-44" href="#__codelineno-28-44"></a>    │       "project.json exists and parses" is therefore sufficient
 <a id="__codelineno-28-45" name="__codelineno-28-45" href="#__codelineno-28-45"></a>    │       to know the save is complete.
 <a id="__codelineno-28-46" name="__codelineno-28-46" href="#__codelineno-28-46"></a>    │
-<a id="__codelineno-28-47" name="__codelineno-28-47" href="#__codelineno-28-47"></a>    └─► App updates title bar: &quot;My Experiment&quot;
+<a id="__codelineno-28-47" name="__codelineno-28-47" href="#__codelineno-28-47"></a>    └─► App updates title bar: "My Experiment"
 </code></pre></div>
 <p>All on-disk writes in the save pipeline (<code>tree-index.json</code>, <code>code-cells.json</code>, per-module <code>pdv-module.json</code> / <code>module-index.json</code>, module-owned file copies, data-node files written by <code>serialize_node</code> (<code>.npy</code>, pickle, <code>.txt</code>, <code>.bin</code>, custom-serializer output), and <code>project.json</code>) are atomic: each is written to a sibling <code>.tmp</code> file and <code>rename</code>d onto its final path, so a process crash mid-save leaves the destination either fully-old or fully-new but never torn. <code>tree-index.json</code> is the kernel-side commit point for the tree (in <code>pdv-python/pdv/handlers/project.py</code>); <code>project.json</code>, written last by the app, is the overall commit gate that promises every other artifact is durable. See <code>docs/developer/save-pipeline.md</code> for the full atomicity audit.</p>
 <p>To prevent a concurrent module-settings IPC handler from silently overwriting the manifest snapshot taken inside <code>ProjectManager.save</code>, the entire save body runs inside <code>runSerializedProjectManifestMutation</code> (the same lock that <code>ipc-register-modules.ts</code> uses around its read-modify-write mutations of <code>project.json</code>). Lock order: save-lock (outer) → manifest-write-lock (inner). No deadlock: nothing acquires the save-lock while holding the manifest-write-lock.</p>
@@ -6912,10 +6912,10 @@ source with <code>Meta.parseall</code>, never executing it — same rule as the 
 <h4 id="1055-manifest-additions">10.5.5 Manifest Additions<a class="headerlink" href="#1055-manifest-additions" title="Permanent link">&para;</a></h4>
 <p><code>project.json</code> gains an <code>environment</code> object; the schema version bumps to <code>"1.2"</code>:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-29-1" name="__codelineno-29-1" href="#__codelineno-29-1"></a><span class="p">{</span>
-<a id="__codelineno-29-2" name="__codelineno-29-2" href="#__codelineno-29-2"></a><span class="w">  </span><span class="nt">&quot;schema_version&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;1.2&quot;</span><span class="p">,</span>
-<a id="__codelineno-29-3" name="__codelineno-29-3" href="#__codelineno-29-3"></a><span class="w">  </span><span class="nt">&quot;environment&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
-<a id="__codelineno-29-4" name="__codelineno-29-4" href="#__codelineno-29-4"></a><span class="w">    </span><span class="nt">&quot;mode&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;uv&quot;</span><span class="p">,</span>
-<a id="__codelineno-29-5" name="__codelineno-29-5" href="#__codelineno-29-5"></a><span class="w">    </span><span class="nt">&quot;python_version&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;3.12&quot;</span>
+<a id="__codelineno-29-2" name="__codelineno-29-2" href="#__codelineno-29-2"></a><span class="w">  </span><span class="nt">"schema_version"</span><span class="p">:</span><span class="w"> </span><span class="s2">"1.2"</span><span class="p">,</span>
+<a id="__codelineno-29-3" name="__codelineno-29-3" href="#__codelineno-29-3"></a><span class="w">  </span><span class="nt">"environment"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-29-4" name="__codelineno-29-4" href="#__codelineno-29-4"></a><span class="w">    </span><span class="nt">"mode"</span><span class="p">:</span><span class="w"> </span><span class="s2">"uv"</span><span class="p">,</span>
+<a id="__codelineno-29-5" name="__codelineno-29-5" href="#__codelineno-29-5"></a><span class="w">    </span><span class="nt">"python_version"</span><span class="p">:</span><span class="w"> </span><span class="s2">"3.12"</span>
 <a id="__codelineno-29-6" name="__codelineno-29-6" href="#__codelineno-29-6"></a><span class="w">  </span><span class="p">}</span>
 <a id="__codelineno-29-7" name="__codelineno-29-7" href="#__codelineno-29-7"></a><span class="p">}</span>
 </code></pre></div>
@@ -7073,11 +7073,11 @@ source with <code>Meta.parseall</code>, never executing it — same rule as the 
 <h4 id="1064-manifest-additions">10.6.4 Manifest Additions<a class="headerlink" href="#1064-manifest-additions" title="Permanent link">&para;</a></h4>
 <p><code>environment.mode</code> gains a third accepted value, <code>"pkg"</code>; the schema version stays <code>"1.2"</code> (the block's shape is unchanged — an older 1.2 app reading <code>mode: "pkg"</code> degrades to a shared-mode open, which still boots thanks to stacking).</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-32-1" name="__codelineno-32-1" href="#__codelineno-32-1"></a><span class="p">{</span>
-<a id="__codelineno-32-2" name="__codelineno-32-2" href="#__codelineno-32-2"></a><span class="w">  </span><span class="nt">&quot;schema_version&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;1.2&quot;</span><span class="p">,</span>
-<a id="__codelineno-32-3" name="__codelineno-32-3" href="#__codelineno-32-3"></a><span class="w">  </span><span class="nt">&quot;language&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;julia&quot;</span><span class="p">,</span>
-<a id="__codelineno-32-4" name="__codelineno-32-4" href="#__codelineno-32-4"></a><span class="w">  </span><span class="nt">&quot;environment&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
-<a id="__codelineno-32-5" name="__codelineno-32-5" href="#__codelineno-32-5"></a><span class="w">    </span><span class="nt">&quot;mode&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;pkg&quot;</span><span class="p">,</span>
-<a id="__codelineno-32-6" name="__codelineno-32-6" href="#__codelineno-32-6"></a><span class="w">    </span><span class="nt">&quot;julia_version&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;1.11.6&quot;</span>
+<a id="__codelineno-32-2" name="__codelineno-32-2" href="#__codelineno-32-2"></a><span class="w">  </span><span class="nt">"schema_version"</span><span class="p">:</span><span class="w"> </span><span class="s2">"1.2"</span><span class="p">,</span>
+<a id="__codelineno-32-3" name="__codelineno-32-3" href="#__codelineno-32-3"></a><span class="w">  </span><span class="nt">"language"</span><span class="p">:</span><span class="w"> </span><span class="s2">"julia"</span><span class="p">,</span>
+<a id="__codelineno-32-4" name="__codelineno-32-4" href="#__codelineno-32-4"></a><span class="w">  </span><span class="nt">"environment"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-32-5" name="__codelineno-32-5" href="#__codelineno-32-5"></a><span class="w">    </span><span class="nt">"mode"</span><span class="p">:</span><span class="w"> </span><span class="s2">"pkg"</span><span class="p">,</span>
+<a id="__codelineno-32-6" name="__codelineno-32-6" href="#__codelineno-32-6"></a><span class="w">    </span><span class="nt">"julia_version"</span><span class="p">:</span><span class="w"> </span><span class="s2">"1.11.6"</span>
 <a id="__codelineno-32-7" name="__codelineno-32-7" href="#__codelineno-32-7"></a><span class="w">  </span><span class="p">}</span>
 <a id="__codelineno-32-8" name="__codelineno-32-8" href="#__codelineno-32-8"></a><span class="p">}</span>
 </code></pre></div>
@@ -7289,7 +7289,7 @@ guaranteed (it never was between independent emitters).</p>
 <a id="__codelineno-33-13" name="__codelineno-33-13" href="#__codelineno-33-13"></a><span class="w">  </span><span class="kd">const</span><span class="w"> </span><span class="nx">unsubTree</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">window</span><span class="p">.</span><span class="nx">pdv</span><span class="p">.</span><span class="nx">tree</span><span class="p">.</span><span class="nx">onChanged</span><span class="p">(</span><span class="nx">payload</span><span class="w"> </span><span class="p">=&gt;</span><span class="w"> </span><span class="p">{</span>
 <a id="__codelineno-33-14" name="__codelineno-33-14" href="#__codelineno-33-14"></a><span class="w">    </span><span class="c1">// Targeted React Query invalidation (queries/invalidation.ts):</span>
 <a id="__codelineno-33-15" name="__codelineno-33-15" href="#__codelineno-33-15"></a><span class="w">    </span><span class="c1">// removals patch the parent listing in place; adds/updates invalidate</span>
-<a id="__codelineno-33-16" name="__codelineno-33-16" href="#__codelineno-33-16"></a><span class="w">    </span><span class="c1">// only the changed parents; &quot;unknown&quot; invalidates every listing.</span>
+<a id="__codelineno-33-16" name="__codelineno-33-16" href="#__codelineno-33-16"></a><span class="w">    </span><span class="c1">// only the changed parents; "unknown" invalidates every listing.</span>
 <a id="__codelineno-33-17" name="__codelineno-33-17" href="#__codelineno-33-17"></a><span class="w">    </span><span class="nx">applyTreeChange</span><span class="p">(</span><span class="nx">currentKernelId</span><span class="p">,</span><span class="w"> </span><span class="nx">payload</span><span class="p">);</span>
 <a id="__codelineno-33-18" name="__codelineno-33-18" href="#__codelineno-33-18"></a><span class="w">  </span><span class="p">});</span>
 <a id="__codelineno-33-19" name="__codelineno-33-19" href="#__codelineno-33-19"></a>
@@ -7298,7 +7298,7 @@ guaranteed (it never was between independent emitters).</p>
 <a id="__codelineno-33-22" name="__codelineno-33-22" href="#__codelineno-33-22"></a><span class="w">  </span><span class="p">});</span>
 <a id="__codelineno-33-23" name="__codelineno-33-23" href="#__codelineno-33-23"></a>
 <a id="__codelineno-33-24" name="__codelineno-33-24" href="#__codelineno-33-24"></a><span class="w">  </span><span class="kd">const</span><span class="w"> </span><span class="nx">unsubKernelStatus</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">window</span><span class="p">.</span><span class="nx">pdv</span><span class="p">.</span><span class="nx">kernels</span><span class="p">.</span><span class="nx">onKernelStatus</span><span class="p">(</span><span class="nx">payload</span><span class="w"> </span><span class="p">=&gt;</span><span class="w"> </span><span class="p">{</span>
-<a id="__codelineno-33-25" name="__codelineno-33-25" href="#__codelineno-33-25"></a><span class="w">    </span><span class="c1">// detect kernel crash (status === &#39;dead&#39;)</span>
+<a id="__codelineno-33-25" name="__codelineno-33-25" href="#__codelineno-33-25"></a><span class="w">    </span><span class="c1">// detect kernel crash (status === 'dead')</span>
 <a id="__codelineno-33-26" name="__codelineno-33-26" href="#__codelineno-33-26"></a><span class="w">  </span><span class="p">});</span>
 <a id="__codelineno-33-27" name="__codelineno-33-27" href="#__codelineno-33-27"></a>
 <a id="__codelineno-33-28" name="__codelineno-33-28" href="#__codelineno-33-28"></a><span class="w">  </span><span class="kd">const</span><span class="w"> </span><span class="nx">unsubReloading</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">window</span><span class="p">.</span><span class="nx">pdv</span><span class="p">.</span><span class="nx">project</span><span class="p">.</span><span class="nx">onReloading</span><span class="p">(</span><span class="nx">payload</span><span class="w"> </span><span class="p">=&gt;</span><span class="w"> </span><span class="p">{</span>
@@ -7936,15 +7936,15 @@ unrecoverable, so real gaps are made legible rather than papered over.</p>
 <a id="__codelineno-39-6" name="__codelineno-39-6" href="#__codelineno-39-6"></a><span class="cm"> * replies with a matching in_reply_to value. Rejects after `timeoutMs`.</span>
 <a id="__codelineno-39-7" name="__codelineno-39-7" href="#__codelineno-39-7"></a><span class="cm"> *</span>
 <a id="__codelineno-39-8" name="__codelineno-39-8" href="#__codelineno-39-8"></a><span class="cm"> * @param kernelId - The ID of the target kernel (from KernelManager)</span>
-<a id="__codelineno-39-9" name="__codelineno-39-9" href="#__codelineno-39-9"></a><span class="cm"> * @param type - The PDV message type string (e.g., &#39;pdv.tree.list&#39;)</span>
+<a id="__codelineno-39-9" name="__codelineno-39-9" href="#__codelineno-39-9"></a><span class="cm"> * @param type - The PDV message type string (e.g., 'pdv.tree.list')</span>
 <a id="__codelineno-39-10" name="__codelineno-39-10" href="#__codelineno-39-10"></a><span class="cm"> * @param payload - The message payload object. Must be JSON-serializable.</span>
 <a id="__codelineno-39-11" name="__codelineno-39-11" href="#__codelineno-39-11"></a><span class="cm"> * @param timeoutMs - Maximum wait time in milliseconds. Default: 30000.</span>
-<a id="__codelineno-39-12" name="__codelineno-39-12" href="#__codelineno-39-12"></a><span class="cm"> * @returns The response payload if status is &#39;ok&#39;.</span>
-<a id="__codelineno-39-13" name="__codelineno-39-13" href="#__codelineno-39-13"></a><span class="cm"> * @throws {PDVCommError} If the kernel responds with status &#39;error&#39;.</span>
+<a id="__codelineno-39-12" name="__codelineno-39-12" href="#__codelineno-39-12"></a><span class="cm"> * @returns The response payload if status is 'ok'.</span>
+<a id="__codelineno-39-13" name="__codelineno-39-13" href="#__codelineno-39-13"></a><span class="cm"> * @throws {PDVCommError} If the kernel responds with status 'error'.</span>
 <a id="__codelineno-39-14" name="__codelineno-39-14" href="#__codelineno-39-14"></a><span class="cm"> * @throws {PDVCommTimeoutError} If no response is received within timeoutMs.</span>
 <a id="__codelineno-39-15" name="__codelineno-39-15" href="#__codelineno-39-15"></a><span class="cm"> *</span>
 <a id="__codelineno-39-16" name="__codelineno-39-16" href="#__codelineno-39-16"></a><span class="cm"> * @example</span>
-<a id="__codelineno-39-17" name="__codelineno-39-17" href="#__codelineno-39-17"></a><span class="cm"> * const nodes = await commRouter.request(kernelId, &#39;pdv.tree.list&#39;, { path: &#39;data&#39; });</span>
+<a id="__codelineno-39-17" name="__codelineno-39-17" href="#__codelineno-39-17"></a><span class="cm"> * const nodes = await commRouter.request(kernelId, 'pdv.tree.list', { path: 'data' });</span>
 <a id="__codelineno-39-18" name="__codelineno-39-18" href="#__codelineno-39-18"></a><span class="cm"> */</span>
 <a id="__codelineno-39-19" name="__codelineno-39-19" href="#__codelineno-39-19"></a><span class="k">export</span><span class="w"> </span><span class="k">async</span><span class="w"> </span><span class="kd">function</span><span class="w"> </span><span class="nx">request</span><span class="p">(</span>
 <a id="__codelineno-39-20" name="__codelineno-39-20" href="#__codelineno-39-20"></a><span class="w">  </span><span class="nx">kernelId</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">,</span>
@@ -7960,7 +7960,7 @@ unrecoverable, so real gaps are made legible rather than papered over.</p>
 <a id="__codelineno-40-3" name="__codelineno-40-3" href="#__codelineno-40-3"></a><span class="cm"> * Every message sent over the pdv.kernel comm channel must conform to this shape.</span>
 <a id="__codelineno-40-4" name="__codelineno-40-4" href="#__codelineno-40-4"></a><span class="cm"> */</span>
 <a id="__codelineno-40-5" name="__codelineno-40-5" href="#__codelineno-40-5"></a><span class="k">export</span><span class="w"> </span><span class="kd">interface</span><span class="w"> </span><span class="nx">PDVMessage</span><span class="w"> </span><span class="p">{</span>
-<a id="__codelineno-40-6" name="__codelineno-40-6" href="#__codelineno-40-6"></a><span class="w">  </span><span class="cm">/** Protocol version. Must be &#39;1.0&#39; for this release. */</span>
+<a id="__codelineno-40-6" name="__codelineno-40-6" href="#__codelineno-40-6"></a><span class="w">  </span><span class="cm">/** Protocol version. Must be '1.0' for this release. */</span>
 <a id="__codelineno-40-7" name="__codelineno-40-7" href="#__codelineno-40-7"></a><span class="w">  </span><span class="nx">pdv_version</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">;</span>
 <a id="__codelineno-40-8" name="__codelineno-40-8" href="#__codelineno-40-8"></a><span class="w">  </span><span class="cm">/** UUID v4 uniquely identifying this message. */</span>
 <a id="__codelineno-40-9" name="__codelineno-40-9" href="#__codelineno-40-9"></a><span class="w">  </span><span class="nx">msg_id</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">;</span>
@@ -7968,8 +7968,8 @@ unrecoverable, so real gaps are made legible rather than papered over.</p>
 <a id="__codelineno-40-11" name="__codelineno-40-11" href="#__codelineno-40-11"></a><span class="w">  </span><span class="nx">in_reply_to</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="kc">null</span><span class="p">;</span>
 <a id="__codelineno-40-12" name="__codelineno-40-12" href="#__codelineno-40-12"></a><span class="w">  </span><span class="cm">/** Dot-namespaced message type string. See ARCHITECTURE.md Section 3.4. */</span>
 <a id="__codelineno-40-13" name="__codelineno-40-13" href="#__codelineno-40-13"></a><span class="w">  </span><span class="kr">type</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">;</span>
-<a id="__codelineno-40-14" name="__codelineno-40-14" href="#__codelineno-40-14"></a><span class="w">  </span><span class="cm">/** Present on responses only. &#39;ok&#39; or &#39;error&#39;. */</span>
-<a id="__codelineno-40-15" name="__codelineno-40-15" href="#__codelineno-40-15"></a><span class="w">  </span><span class="nx">status</span><span class="o">?:</span><span class="w"> </span><span class="s1">&#39;ok&#39;</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="s1">&#39;error&#39;</span><span class="p">;</span>
+<a id="__codelineno-40-14" name="__codelineno-40-14" href="#__codelineno-40-14"></a><span class="w">  </span><span class="cm">/** Present on responses only. 'ok' or 'error'. */</span>
+<a id="__codelineno-40-15" name="__codelineno-40-15" href="#__codelineno-40-15"></a><span class="w">  </span><span class="nx">status</span><span class="o">?:</span><span class="w"> </span><span class="s1">'ok'</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="s1">'error'</span><span class="p">;</span>
 <a id="__codelineno-40-16" name="__codelineno-40-16" href="#__codelineno-40-16"></a><span class="w">  </span><span class="cm">/** Message-specific data. Shape depends on type. */</span>
 <a id="__codelineno-40-17" name="__codelineno-40-17" href="#__codelineno-40-17"></a><span class="w">  </span><span class="nx">payload</span><span class="o">:</span><span class="w"> </span><span class="kt">Record</span><span class="o">&lt;</span><span class="kt">string</span><span class="p">,</span><span class="w"> </span><span class="nx">unknown</span><span class="o">&gt;</span><span class="p">;</span>
 <a id="__codelineno-40-18" name="__codelineno-40-18" href="#__codelineno-40-18"></a><span class="p">}</span>
@@ -8403,10 +8403,10 @@ unrecoverable, so real gaps are made legible rather than papered over.</p>
     
       
       
-      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "navigation.footer", "search.suggest", "search.highlight", "content.code.copy", "content.code.annotate", "content.action.edit"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"default": "latest", "provider": "mike"}}</script>
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "navigation.footer", "search.suggest", "search.highlight", "content.code.copy", "content.code.annotate", "content.action.edit"], "search": "../../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"default": "latest", "provider": "mike"}}</script>
     
     
-      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      <script src="../../assets/javascripts/bundle.a5f9d56c.min.js"></script>
       
         <script src="https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"></script>
       

@@ -23,7 +23,7 @@
       
       
       <link rel="icon" href="../../assets/pdv-icon.svg">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.1">
     
     
       
@@ -31,10 +31,10 @@
       
     
     
-      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      <link rel="stylesheet" href="../../assets/stylesheets/main.57a0d79d.min.css">
       
         
-        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.fb2fffe2.min.css">
       
       
 
@@ -1690,7 +1690,7 @@
 <h3 id="the-working-directory">The working directory<a class="headerlink" href="#the-working-directory" title="Permanent link">&para;</a></h3>
 <p>PDV gives each project a <strong>working directory</strong> for on-disk scratch files. Access it from code as <code>pdv.working_dir</code>:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="n">data</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">loadtxt</span><span class="p">(</span><span class="n">pdv</span><span class="o">.</span><span class="n">working_dir</span> <span class="o">/</span> <span class="s2">&quot;data.csv&quot;</span><span class="p">)</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="n">data</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">loadtxt</span><span class="p">(</span><span class="n">pdv</span><span class="o">.</span><span class="n">working_dir</span> <span class="o">/</span> <span class="s2">"data.csv"</span><span class="p">)</span>
 </code></pre></div>
 <p><code>pdv.working_dir</code> is a <code>pathlib.Path</code>. It points at the project directory after the first save, or a temporary directory for unsaved projects.</p>
 <div class="admonition note">
@@ -1707,7 +1707,7 @@
 <p>If you want a file to be part of the project, attach it to the tree:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pdv.tree</span><span class="w"> </span><span class="kn">import</span> <span class="n">PDVFile</span>
 <a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="n">pdv_tree</span><span class="p">[</span><span class="s2">&quot;data.input_deck&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">PDVFile</span><span class="p">(</span><span class="s2">&quot;input.dat&quot;</span><span class="p">)</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="n">pdv_tree</span><span class="p">[</span><span class="s2">"data.input_deck"</span><span class="p">]</span> <span class="o">=</span> <span class="n">PDVFile</span><span class="p">(</span><span class="s2">"input.dat"</span><span class="p">)</span>
 </code></pre></div>
 <h3 id="version-pinning">Version pinning<a class="headerlink" href="#version-pinning" title="Permanent link">&para;</a></h3>
 <p>During the <code>0.x</code> releases, the <code>pdv-python</code> version must match the app version exactly. When you upgrade PDV, re-run the install step for your environment (see <a href="../../getting-started/installation/#troubleshooting">Installation § Troubleshooting</a>). Version <code>1.0</code> will introduce a more flexible compatibility policy with backwards-compatible kernel updates.</p>
@@ -1959,10 +1959,10 @@
     
       
       
-      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "navigation.footer", "search.suggest", "search.highlight", "content.code.copy", "content.code.annotate", "content.action.edit"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"default": "latest", "provider": "mike"}}</script>
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "navigation.footer", "search.suggest", "search.highlight", "content.code.copy", "content.code.annotate", "content.action.edit"], "search": "../../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"default": "latest", "provider": "mike"}}</script>
     
     
-      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      <script src="../../assets/javascripts/bundle.a5f9d56c.min.js"></script>
       
         <script src="https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"></script>
       

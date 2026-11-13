@@ -23,7 +23,7 @@
       
       
       <link rel="icon" href="../../assets/pdv-icon.svg">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.1">
     
     
       
@@ -31,10 +31,10 @@
       
     
     
-      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      <link rel="stylesheet" href="../../assets/stylesheets/main.57a0d79d.min.css">
       
         
-        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.fb2fffe2.min.css">
       
       
 
@@ -2370,7 +2370,7 @@ strings, arrays, <code>Dict</code>s, arbitrary serializable structs) or
 instances of the node types below, which carry file-backed or
 app-visible behavior.</p>
 <h3 id="pdvkernelpdvscript"><code>PDVKernel.PDVScript</code><a class="headerlink" href="#pdvkernelpdvscript" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>PDVScript(; uuid, filename, language=&quot;julia&quot;, doc=nothing, module_id=&quot;&quot;,
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>PDVScript(; uuid, filename, language="julia", doc=nothing, module_id="",
 <a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>          source_rel_path=nothing)
 </code></pre></div>
 <p>Script node. <code>script.run</code> is exposed via <code>script_run</code> / <code>run_tree_script</code>; every run loads the file fresh into an anonymous module so in-place edits always take effect. See ARCHITECTURE.md §5.7.</p>
@@ -2387,13 +2387,13 @@ app-visible behavior.</p>
 </code></pre></div>
 <p>GUI definition node backed by a <code>.gui.json</code> file.</p>
 <h3 id="pdvkernelpdvnamelist"><code>PDVKernel.PDVNamelist</code><a class="headerlink" href="#pdvkernelpdvnamelist" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>PDVNamelist(; uuid, filename, format=&quot;auto&quot;, module_id=nothing,
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>PDVNamelist(; uuid, filename, format="auto", module_id=nothing,
 <a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>            source_rel_path=nothing)
 </code></pre></div>
 <p>Namelist node (<code>"fortran"</code>, <code>"toml"</code>, or <code>"auto"</code>) backed by a namelist file.</p>
 <h3 id="pdvkernelpdvmodule"><code>PDVKernel.PDVModule</code><a class="headerlink" href="#pdvkernelpdvmodule" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>PDVModule(; module_id, name, version, gui=nothing, dependencies=[],
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>          description=&quot;&quot;, language=&quot;julia&quot;)
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>          description="", language="julia")
 </code></pre></div>
 <p>Module metadata node. A <code>PDVTree</code>-like container so it holds children naturally (ARCHITECTURE.md §5.9).</p>
 <h3 id="pdvkernelpdvlib"><code>PDVKernel.PDVLib</code><a class="headerlink" href="#pdvkernelpdvlib" title="Permanent link">&para;</a></h3>
@@ -2441,8 +2441,8 @@ called as <code>PDVKernel.&lt;name&gt;(...)</code> from any code cell.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a>add_file(source_path) -&gt; PDVFile
 </code></pre></div>
 <p>Import an arbitrary file into the tree as a <code>PDVFile</code>. Eagerly copies the source into the session working directory under a fresh UUID storage path; assign the returned node at the desired tree path:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a>mesh = PDVKernel.add_file(&quot;~/Downloads/mesh.h5&quot;)
-<a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a>pdv_tree[&quot;simulation.mesh&quot;] = mesh
+<div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a>mesh = PDVKernel.add_file("~/Downloads/mesh.h5")
+<a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a>pdv_tree["simulation.mesh"] = mesh
 </code></pre></div>
 <h3 id="pdvkernelnew_note"><code>PDVKernel.new_note</code><a class="headerlink" href="#pdvkernelnew_note" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a>new_note(path; title=nothing)
@@ -2492,7 +2492,7 @@ specificity.</p>
 </code></pre></div>
 <p>Register <code>func(obj, path, tree)</code> as the double-click handler for values of type <code>T</code> (and subtypes, via supertype walk). The explicit-registration analog of adding a <code>pdv_handle</code> method; registered handlers take precedence.</p>
 <h3 id="pdvkernelregister_serializer"><code>PDVKernel.register_serializer</code><a class="headerlink" href="#pdvkernelregister_serializer" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-28-1" name="__codelineno-28-1" href="#__codelineno-28-1"></a>register_serializer(T::Type; format, extension=&quot;.bin&quot;, save, load, preview=nothing)
+<div class="highlight"><pre><span></span><code><a id="__codelineno-28-1" name="__codelineno-28-1" href="#__codelineno-28-1"></a>register_serializer(T::Type; format, extension=".bin", save, load, preview=nothing)
 </code></pre></div>
 <p>Register a custom serializer for instances of <code>T</code>. PDV chooses the on-disk filename and passes an absolute path to <code>save(obj, abs_path)</code>; <code>load(abs_path)</code> must return a reconstructed instance at project-load time. Lookup walks the type hierarchy, so a serializer registered on an abstract type also covers subtypes.</p>
 <p>Throws <code>PDVSerializationError</code> when <code>format</code> is empty or collides with a builtin format name.</p>
@@ -2770,10 +2770,10 @@ cell.</p>
     
       
       
-      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "navigation.footer", "search.suggest", "search.highlight", "content.code.copy", "content.code.annotate", "content.action.edit"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"default": "latest", "provider": "mike"}}</script>
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "navigation.footer", "search.suggest", "search.highlight", "content.code.copy", "content.code.annotate", "content.action.edit"], "search": "../../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"default": "latest", "provider": "mike"}}</script>
     
     
-      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      <script src="../../assets/javascripts/bundle.a5f9d56c.min.js"></script>
       
         <script src="https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"></script>
       
